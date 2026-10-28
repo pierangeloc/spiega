@@ -468,4 +468,34 @@ await atest('the say and tag commands reach the board, and a bad tag fails loudl
   }
 });
 
+/* A stdio MCP server is told to go away by having its pipe closed — there is
+   no shutdown message. One that ignores that outlives every editor session
+   that ever started it, and each survivor holds the code it was launched with,
+   so a session that looks current answers from an old build. */
+await atest('the MCP server exits when its client closes the pipe', async () => {
+  const { spawn } = await import('node:child_process');
+  const child = spawn(process.execPath, [path.join(ROOT, 'src/mcp/server.js')], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const exited = new Promise(res => child.on('exit', code => res(code)));
+
+  // talk to it first, so we know we are killing a live server and not a corpse
+  child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
+  const reply = await new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error('no reply to tools/list')), 8000);
+    child.stdout.once('data', d => { clearTimeout(t); res(JSON.parse(String(d).split('\n')[0])); });
+  });
+  const names = reply.result.tools.map(t => t.name);
+  for (const want of ['board_say', 'board_tag', 'board_script', 'board_replay']) {
+    assert.ok(names.includes(want), `tools/list should offer ${want}`);
+  }
+
+  child.stdin.end();                                   // the client goes away
+  const code = await Promise.race([
+    exited,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('still running 5s after its pipe closed')), 5000)),
+  ]).catch(e => { child.kill('SIGKILL'); throw e; });
+  assert.equal(code, 0, 'it should exit cleanly');
+});
+
 console.log(`\n${n} passed`);
