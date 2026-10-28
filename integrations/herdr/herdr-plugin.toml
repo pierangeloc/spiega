@@ -1,0 +1,51 @@
+# Herdr plugin: reach this task's handwave board.
+#
+# With eight tasks in flight, each with its own board, the window you want is
+# behind seven others — and hunting for it is exactly the friction the board was
+# meant to remove. These actions go from the pane you are working in to the
+# board that belongs to it, without you having to know its name.
+#
+# The board is found by the pane's working directory, which is how handwave
+# names boards in the first place. Nothing here needs the agent's cooperation:
+# it reads the pane, not the conversation.
+
+id = "handwave.board"
+name = "handwave board"
+version = "0.1.0"
+min_herdr_version = "0.8.0"
+description = "Bring this task's handwave board to the front, or start one for it."
+platforms = ["macos", "linux"]
+
+# Raising a window is the common case, so it is the one worth a key binding.
+# Offered from the pane and tab menus because it means "the board for *this*",
+# and globally too, where it falls back to the focused pane.
+[[actions]]
+id = "focus"
+title = "handwave: show this task's board"
+description = "Bring the board belonging to this pane's task to the front."
+contexts = ["global", "workspace", "tab", "pane"]
+command = ["sh", "bin/focus.sh"]
+
+[[actions]]
+id = "open"
+title = "handwave: open a board for this task"
+description = "Start a board for this pane's task and give it a window."
+contexts = ["global", "workspace", "tab", "pane"]
+command = ["sh", "bin/open.sh"]
+
+# Reading the list is occasionally what you want: which tasks have boards, how
+# much is on each. A popup keeps the tiled layout untouched.
+[[panes]]
+id = "list"
+title = "handwave boards"
+placement = "popup"
+width = "80%"
+height = 16
+command = ["sh", "bin/list.sh"]
+
+[[actions]]
+id = "list"
+title = "handwave: list every board"
+description = "Show every running board, with the task each belongs to."
+contexts = ["global", "workspace", "tab", "pane"]
+command = ["sh", "bin/open-list.sh"]

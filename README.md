@@ -132,6 +132,12 @@ daemon inherits that daemon's environment, so the CLI — which runs in the pane
 A board is registered by the process serving it and pruned when that process is
 gone, so a name never resolves to a socket nobody is listening on.
 
+If you run your sessions in [herdr](https://herdr.dev), `handwave install herdr`
+links a plugin that goes from the pane you are working in to that task's board —
+bind a key to **handwave: show this task's board**. It reads the pane's working
+directory rather than the conversation, so it needs nothing from the agent.
+See [`integrations/herdr/`](integrations/herdr/).
+
 ## Compare how models use it
 
 ```bash

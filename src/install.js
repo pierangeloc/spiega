@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { upsertBlock } from './agents-block.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -220,6 +221,22 @@ export const TARGETS = {
     detect: () => fs.existsSync(claudeDesktopDir()),
     run: () => mcpJSON(path.join(claudeDesktopDir(), 'claude_desktop_config.json'), 'mcpServers',
       { command: 'node', args: [MCP_ENTRY] }),
+  },
+
+  /* herdr runs the panes these sessions live in, and it has a plugin system,
+     so the board can be reached from the pane without knowing its name. */
+  herdr: {
+    what: 'herdr — a plugin: reach this task\'s board from its pane',
+    detect: () => fs.existsSync(path.join(HOME, '.config', 'herdr')),
+    run: () => {
+      const dir = path.join(ROOT, 'integrations', 'herdr');
+      try {
+        execFileSync('herdr', ['plugin', 'link', dir], { encoding: 'utf8', timeout: 10000, stdio: 'pipe' });
+      } catch (e) {
+        throw new Error(`herdr plugin link failed (${String(e.stderr || e.message).split('\n')[0]})`);
+      }
+      return [dir, 'linked — bind a key to "handwave: show this task\'s board"'];
+    },
   },
 
   /* Anything else. AGENTS.md is the one instruction file the whole field has

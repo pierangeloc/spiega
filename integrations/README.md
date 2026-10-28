@@ -22,6 +22,7 @@ terminal can draw on it at the same time.
 | `zed` | `context_servers` in Zed's `settings.json` |
 | `vscode` | `servers` in VS Code's `mcp.json` |
 | `claude_desktop` | `mcpServers` in `claude_desktop_config.json` |
+| `herdr` | a plugin: reach this task's board from its pane — see [herdr/](herdr/) |
 | `project` | an `AGENTS.md` block in the current repo — opt in by name |
 
 No board name is pinned in the registration, deliberately: boards are per task,

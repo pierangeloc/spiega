@@ -454,6 +454,29 @@ test('a backup never lands inside a directory the harness scans', () => {
   assert.ok(/\.handwave['"],\s*['"]backups/.test(fn), 'backups belong somewhere nothing scans');
 });
 
+test('the herdr plugin declares the actions it ships, and its scripts are runnable', () => {
+  const dir = path.join(ROOT, 'integrations/herdr');
+  const toml = fs.readFileSync(path.join(dir, 'herdr-plugin.toml'), 'utf8');
+  assert.match(toml, /^id = "handwave\.board"/m);
+  assert.match(toml, /min_herdr_version/, 'herdr refuses a manifest without one');
+
+  // every command a manifest names must exist and be executable, or the action
+  // fails at the moment someone presses the key
+  const cmds = [...toml.matchAll(/command = \["sh", "([^"]+)"\]/g)].map(m => m[1]);
+  assert.ok(cmds.length >= 3, `expected the actions and the pane, found ${cmds.length}`);
+  for (const c of cmds) {
+    const f = path.join(dir, c);
+    assert.ok(fs.existsSync(f), `the manifest names ${c}, which is not there`);
+    assert.ok(fs.statSync(f).mode & 0o111, `${c} is not executable`);
+  }
+
+  // the actions must be reachable from the pane, which is the whole point
+  for (const id of ['focus', 'open', 'list']) {
+    assert.ok(toml.includes(`id = "${id}"`), `missing action ${id}`);
+  }
+  assert.match(toml, /contexts = \["global", "workspace", "tab", "pane"\]/);
+});
+
 test('the skill the installers link to exists, with the frontmatter a harness reads', () => {
   const f = path.join(ROOT, 'skills/handwave/SKILL.md');
   assert.ok(fs.existsSync(f), 'skills/handwave/SKILL.md is the one canonical copy');
