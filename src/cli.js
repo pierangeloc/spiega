@@ -139,6 +139,7 @@ const HELP = `handwave — a hand-drawn board an agent draws on while it explain
 
   serve [--port N] [--open]     start the board and keep it running
   open [--tab] [--size WxH]     open the board in its own browser window
+  doctor                        check that agents are reading the current version
   install [targets...]          wire it into your agents (--detect to see what it would do)
   mcp-config [--shape S]        print the MCP entry to paste into any other harness
   bench <prompt> --models a,b   draw the same explanation with several models
@@ -213,6 +214,17 @@ const main = async () => {
         const { openBoard } = await import('./board/open.js');
         openBoard(url, { app: !flag('tab'), size: flag('size'), browser: flag('browser') });
       }
+      return;
+    }
+
+    /* Is what is running the thing that is on disk? Four different kinds of
+       thing go stale in four different ways, and the one that bites is the
+       process that has been alive since before the change. */
+    case 'doctor': {
+      const { doctor, format } = await import('./doctor.js');
+      const rows = doctor();
+      console.log(format(rows));
+      if (rows.some(r => r.level === 'bad')) process.exitCode = 1;
       return;
     }
 

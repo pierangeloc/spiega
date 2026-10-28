@@ -474,6 +474,33 @@ test('a browser is detected by its own binary, not its name in any path', async 
   assert.deepEqual(runningBrowsers(undefined), []);
 });
 
+test('doctor reports what is stale, and every problem comes with a way out', async () => {
+  const { doctor, format } = await import('../src/doctor.js');
+  const rows = doctor();
+
+  assert.ok(rows.length >= 3, 'it should check several things');
+  for (const r of rows) {
+    assert.ok(['ok', 'warn', 'bad'].includes(r.level), `odd level ${r.level}`);
+    assert.equal(typeof r.what, 'string');
+    assert.equal(typeof r.detail, 'string');
+    // a problem with no way out is just bad news
+    if (r.level === 'bad') assert.ok(r.fix, `"${r.what}" is a problem with no fix offered`);
+  }
+  // it has to find itself: this checkout is a git repo with a CLI on PATH
+  assert.ok(rows.some(r => r.what === 'checkout'));
+
+  const text = format(rows);
+  assert.ok(text.includes(rows[0].what));
+  assert.ok(/[\u2713!\u2717]/.test(text), 'rows should be marked');
+
+  const clean = format([{ level: 'ok', what: 'skill', detail: 'linked' }]);
+  assert.ok(clean.includes('Everything an agent reads is current.'));
+  assert.ok(!clean.includes('To fix'));
+
+  const dirty = format([{ level: 'bad', what: 'skill', detail: 'stale', fix: 'handwave install' }]);
+  assert.ok(dirty.includes('To fix:') && dirty.includes('handwave install'));
+});
+
 test('the herdr plugin declares the actions it ships, and its scripts are runnable', () => {
   const dir = path.join(ROOT, 'integrations/herdr');
   const toml = fs.readFileSync(path.join(dir, 'herdr-plugin.toml'), 'utf8');

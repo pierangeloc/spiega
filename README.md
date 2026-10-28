@@ -94,15 +94,39 @@ keeps files current; it cannot do anything about processes already running.
 Then ask for something architectural — "walk me through how X talks to Y, on
 the board" — and watch the pane.
 
-### Updating
+### Updating, and checking that it took
 
 ```bash
 cd handwave && git pull && npm test
+handwave install          # only the copies need this: AGENTS.md blocks, the Cursor rule
+handwave doctor           # is what is running the thing that is on disk?
 ```
 
-Nothing to reinstall: the skill is a symlink and every MCP entry points at this
-checkout. Re-run `handwave install` only to pick up a target that did not exist
-before. Restart agent sessions, as above.
+handwave reaches an agent through four kinds of thing, and they go stale
+differently:
+
+| | goes stale when |
+|---|---|
+| the CLI, via `npm link` | never — it is this checkout |
+| a skill, symlinked | never — but the agent loaded it when its session started |
+| an `AGENTS.md` block, a Cursor rule | the wording changes — re-run `handwave install` |
+| **a running process** | **immediately — it holds the code it was launched with** |
+
+The last one is the trap, and it is the one that looks like a feature that was
+never built. `handwave doctor` finds it:
+
+```
+ ✓ handwave on PATH     ~/.nvm/.../handwave → this checkout
+ ✓ claude skill         linked — tracks the checkout
+ ✓ opencode AGENTS.md   block is current
+ ✗ agent MCP server     16 running, 16 started before the current commit
+
+To fix:
+  start a fresh agent session — a running one keeps the server it launched
+```
+
+It exits non-zero when something is wrong, so it can go in a shell prompt or a
+pre-flight check. It makes no network calls and changes nothing.
 
 ### If you use herdr
 
