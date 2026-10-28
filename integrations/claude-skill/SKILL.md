@@ -138,6 +138,22 @@ Three rules, and they are easy:
 Nothing is guessed. A board whose lines carry no tags simply does not
 highlight, so an untagged explanation is a worse explanation, not a broken one.
 
+### Fixing it afterwards
+
+You will sometimes finish an explanation and only then see which lines went
+with which step — or be asked why the script does not light up. Tag it then;
+the board keeps the lines, so nothing has to be drawn or said again.
+
+```bash
+handwave script                              # the lines, numbered, and what each is tied to
+handwave tag 4 --step 3                      # by number
+handwave tag --match "Flyway V25" --step 6   # by its words, which is what you actually have
+handwave tag 1 --step off                    # an opening remark belongs to no step
+```
+
+`handwave script` is also the honest check on your own work: if it says most
+lines are tied to nothing, the person is reading an unlit rail.
+
 ## Playing it back
 
 A board keeps the order it was drawn in, so the explanation can be run again

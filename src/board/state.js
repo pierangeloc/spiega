@@ -65,6 +65,34 @@ export function applyOp(board, op) {
       break;
     }
 
+    /* Tie a line already on the board to a step — or untie it. Lines are said
+       as the explanation goes, and which step they turn out to be about is
+       often only clear afterwards; without this the only way to fix a tag is
+       to run the whole explanation again, which is exactly what the board
+       exists to avoid. `line` counts from 1, as the rail shows them; `match`
+       finds the line by its words, which is what an agent actually has. */
+    case 'tag': {
+      const t = board.transcript;
+      let i = -1;
+      if (op.match != null) {
+        const needle = String(op.match).toLowerCase();
+        i = t.findIndex(e => e.text.toLowerCase().includes(needle));
+        if (i < 0) return { ok: false, error: `tag: no line matching "${op.match}"`, fresh };
+      } else {
+        i = Number(op.line) - 1;
+        if (!Number.isInteger(i) || i < 0 || i >= t.length) {
+          return { ok: false, error: `tag: there is no line ${op.line} (the board has ${t.length})`, fresh };
+        }
+      }
+      const line = t[i];
+      // `step: null` or `off` clears, so a wrong tag can be taken back
+      const off = op.step === null || op.step === 'off' || op.step === false;
+      delete line.step; delete line.edge;
+      if (!off && op.step != null && Number.isFinite(Number(op.step))) line.step = Math.max(0, Number(op.step) - 1);
+      if (!off && op.edge) line.edge = String(op.edge);
+      break;
+    }
+
     case 'note':
     case 'node': {
       const n = { ...op };

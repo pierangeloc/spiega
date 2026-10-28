@@ -27,6 +27,8 @@ handwave say  "The gateway does **authn** and rate limiting, then hands off."
 handwave say  "Only after the commit does it publish." --step 4   # tag lines that explain one step:
                            # the script then lights in time with the drawing
 handwave step 1            # light up one hop of the flow; also: step next / step off
+handwave script            # the lines, numbered, with the step each is tied to
+handwave tag --match "Flyway V25" --step 6   # tie a line said earlier; --step off unties
 handwave replay            # play the whole session back; never re-draw to re-show
 handwave clear             # before a new, unrelated explanation
 handwave snapshot -o docs/flow.html

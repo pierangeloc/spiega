@@ -36,7 +36,8 @@ being asked. Set it to `true` if you want the board considered on every turn.
 }
 ```
 
-Tools: `board_say`, `board_draw`, `board_step`, `board_replay`, `board_clear`,
+Tools: `board_say`, `board_draw`, `board_step`, `board_tag`, `board_script`,
+`board_replay`, `board_clear`,
 `board_snapshot`, `board_url`. The descriptions carry the same guidance as the
 skill, so a client that only reads tool descriptions still behaves.
 

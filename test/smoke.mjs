@@ -293,6 +293,75 @@ test('a snapshot marks the lit step in the script, not just the drawing', () => 
   assert.ok(/<li class="on"><span class="tag">step 1<\/span>A calls B over gRPC/.test(html),
     'the tagged line should be marked lit');
   assert.ok(/<li>Nothing else to it\./.test(html), 'an untagged line stays plain');
+
+  // a still dims the same things the drawing does
+  applyOps(b, [{ op: 'step', edge: 'a>b', step: 'again' }, { op: 'say', text: 'About the second step.', step: 2 }]);
+  const two = snapshotHTML(b, { active: 0 });
+  assert.ok(/<li class="off"><span class="tag">step 2<\/span>About the second step/.test(two),
+    'a line belonging to another step should recede in the still too');
+});
+
+/* Tagging after the fact. A model that forgot, or a board drawn before the
+   feature existed, must be fixable without running the explanation again —
+   that is the whole point of the board holding its own log. */
+test('a line already said can be tied to a step, by number or by its words', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'say', text: 'Six hops, end to end.' },
+    { op: 'say', text: 'Flyway V25 adds the confirmation.' },
+    { op: 'say', text: 'The gateway checks the token.' },
+    { op: 'step', edge: 'a>b', step: 'one' },
+    { op: 'step', edge: 'b>c', step: 'two' },
+  ]);
+  assert.deepEqual(scriptSteps(b), [null, null, null]);
+
+  const { errors } = applyOps(b, [
+    { op: 'tag', line: 3, step: 1 },                      // counting from 1, as the rail shows
+    { op: 'tag', match: 'Flyway', edge: 'b>c' },          // by its words, which is what an agent has
+  ]);
+  assert.deepEqual(errors, []);
+  assert.deepEqual(scriptSteps(b), [null, 1, 0]);
+});
+
+test('a wrong tag can be taken back, and a bad one is reported not thrown', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'say', text: 'An opening remark.' },
+    { op: 'step', edge: 'a>b', step: 'one' },
+    { op: 'tag', line: 1, step: 1 },
+  ]);
+  assert.deepEqual(scriptSteps(b), [0]);
+
+  applyOps(b, [{ op: 'tag', line: 1, step: null }]);      // openings belong to no step
+  assert.deepEqual(scriptSteps(b), [null]);
+
+  const { errors } = applyOps(b, [
+    { op: 'tag', line: 9, step: 1 },
+    { op: 'tag', match: 'nothing says this', step: 1 },
+  ]);
+  assert.equal(errors.length, 2, 'both misses are reported');
+  assert.ok(errors[0].includes('no line 9'), errors[0]);
+});
+
+test('tagging a board drawn before the feature existed makes it light up', () => {
+  // the shape of the real case: every line said up front, steps declared after
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'say', text: 'Before: every upsert re-ran CoC matching.' },
+    { op: 'say', text: 'The CT manager picks the BP and PUTs the link.' },
+    { op: 'say', text: 'Flyway V25 adds a mandatory confirmation.' },
+    { op: 'step', edge: 'ctm>ctrl', step: 'CT manager picks the BP' },
+    { op: 'step', edge: 'ctm>wf', step: 'CT manager confirms' },
+  ]);
+  assert.deepEqual(scriptSteps(b), [null, null, null], 'nothing is guessed');
+
+  applyOps(b, [
+    { op: 'tag', match: 'PUTs the link', step: 1 },
+    { op: 'tag', match: 'Flyway V25', step: 2 },
+  ]);
+  applyOps(b, [{ op: 'focus', step: 0 }]);
+  assert.deepEqual(lineStates(b).map(l => l.state), ['free', 'on', 'off'],
+    'the opening stays plain, the tagged line lights, the other recedes');
 });
 
 /* Every file an install target copies must actually be there. `install cursor`
@@ -361,7 +430,7 @@ await atest('a replay can be asked for remotely, and re-sends nothing', async ()
    test of the attribution touches — and that is exactly where it first broke:
    the flag was read with the wrong call and the "2" ended up in the sentence.
    So drive the real CLI against a real board. */
-await atest('the say command passes a step through, and keeps it out of the text', async () => {
+await atest('the say and tag commands reach the board, and a bad tag fails loudly', async () => {
   const { createServer } = await import('../src/board/server.js');
   // async, not execFileSync: a synchronous child blocks this process's event
   // loop, and the board it is talking to is served from this very loop.
@@ -385,6 +454,14 @@ await atest('the say command passes a step through, and keeps it out of the text
       'The second hop is async.', 'Named by the hop instead.', 'An aside about the whole board.',
     ], 'the flag value must not leak into what was said');
     assert.deepEqual(scriptSteps(board), [1, 0, null]);
+
+    // tagging after the fact, through the CLI, and a rejected op must fail loudly
+    await cli('tag', '--match', 'aside about', '--step', '1');
+    assert.deepEqual(scriptSteps(board), [1, 0, 0]);
+    await cli('tag', '--match', 'aside about', '--step', 'off');
+    assert.deepEqual(scriptSteps(board), [1, 0, null]);
+    await assert.rejects(() => cli('tag', '99', '--step', '1'),
+      e => e.code === 1, 'a tag that matches nothing should exit non-zero');
   } finally {
     server.close();
     server.closeAllConnections?.();

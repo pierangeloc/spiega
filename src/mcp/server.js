@@ -84,6 +84,7 @@ const TOOLS = [
       '  {"op":"boundary","label":"our VPC","members":["gw","orders"]}\n' +
       '  {"op":"step","edge":"gw>orders","step":"The gateway forwards the call"}\n' +
       '  {"op":"say","text":"The gateway checks the token first.","step":2}   step: the line explains that step\n' +
+      '  {"op":"tag","match":"Flyway V25","step":6}   ties a line said earlier; step:null unties it\n' +
       '  {"op":"title","text":"Placing an order"}\n' +
       'Columns are derived from the edges, so draw a node and then the edge into it and it lands in the right place. ' +
       'Draw a few things at a time as you explain them — not the whole diagram in one call.',
@@ -108,6 +109,42 @@ const TOOLS = [
       type: 'object',
       properties: { step: { type: 'integer', description: 'Step number, counting from 1.' } },
     },
+  },
+  {
+    name: 'board_tag',
+    description:
+      'Tie a line already on the transcript to a step of the flow, so walking that step lights those words. ' +
+      'Use it when you said something before the flow existed, when you tagged a line wrongly, or when someone ' +
+      'asks why the script does not light up. Name the line by `match` (a few of its words) or by `line` ' +
+      '(counting from 1). Pass several at once to tag a whole explanation after the fact. ' +
+      '`step: null` unties a line, which is right for an opening or closing remark \u2014 those are about the ' +
+      'whole board and should never dim.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tags: {
+          type: 'array',
+          description: 'One or more { match | line, step | edge } objects.',
+          items: {
+            type: 'object',
+            properties: {
+              match: { type: 'string', description: 'A distinctive phrase from the line.' },
+              line: { type: 'integer', description: 'The line number, counting from 1.' },
+              step: { type: ['integer', 'null'], description: 'The step number as shown on the board; null unties.' },
+              edge: { type: 'string', description: 'Or the hop itself, e.g. "gw>orders".' },
+            },
+          },
+        },
+      },
+      required: ['tags'],
+    },
+  },
+  {
+    name: 'board_script',
+    description:
+      'Read back the transcript as the board holds it: every line, numbered, with the step it is tied to. ' +
+      'Call it before tagging, to see what is there and what is still loose.',
+    inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'board_replay',
@@ -172,6 +209,25 @@ async function call(name, args = {}) {
 
     case 'board_step':
       return send([{ op: 'focus', step: args.step == null ? null : Number(args.step) - 1 }]);
+
+    case 'board_tag': {
+      const tags = Array.isArray(args.tags) ? args.tags : [args.tags];
+      return send(tags.map(t => ({ op: 'tag', ...t })));
+    }
+
+    case 'board_script': {
+      const u = await url();
+      const b = await (await fetch(u + '/state')).json();
+      const { scriptSteps } = await import('../board/script.js');
+      const at = scriptSteps(b);
+      if (!b.transcript.length) return 'nothing said yet';
+      const rows = b.transcript.map((t, i) =>
+        `${i + 1}. [${at[i] == null ? 'no step' : 'step ' + (at[i] + 1)}] ${t.text.replace(/\n/g, ' ')}`);
+      const loose = at.filter(x => x == null).length;
+      return `${rows.join('\n')}\n\n${b.transcript.length} lines, ${b.transcript.length - loose} tied to a step, ` +
+             `${b.flow.length} steps.` +
+             (loose && b.flow.length ? ' Lines with no step do not highlight; tag the ones that explain a single hop.' : '');
+    }
 
     case 'board_replay': {
       const u = await url();

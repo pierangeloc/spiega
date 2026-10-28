@@ -75,6 +75,9 @@ async function send(ops, { quiet = false } = {}) {
     if (body.errors?.length) console.error(body.errors.join('\n'));
     console.log(`${url}  ${body.nodes ?? 0} boxes, ${body.edges ?? 0} lines, ${body.steps ?? 0} steps`);
   }
+  // A rejected op must not leave a zero exit behind the summary line: scripts
+  // and agents read the status, and "it printed something" is not success.
+  if (body.errors?.length) process.exitCode = 1;
   return body;
 }
 
@@ -117,6 +120,8 @@ const HELP = `handwave — a hand-drawn board an agent draws on while it explain
   draw <json|file|->            add to the board (one op, or a list, or a whole spec)
   say  <text> [--step N]        put a line in the transcript beside the drawing
   step [N|next|prev|off]        light up one step of the flow
+  script                        list the lines, numbered, with the step each is tied to
+  tag <N> --step M              tie line N to step M (--match TEXT, --step off)
   replay                        play the board back from its own log, as a movie
   clear [--keep-title]          wipe the board
   render <spec.json> -o F.html  render a spec to a standalone file, no server
@@ -131,6 +136,7 @@ Ops are small JSON objects:
   {"op":"boundary","label":"our VPC","members":["gw","orders"]}
   {"op":"step","edge":"gw>orders","step":"Gateway forwards the call"}
   {"op":"say","text":"The gateway checks the token first.","step":2}
+  {"op":"tag","match":"Flyway V25","step":6}   (or {"line":7}; "step":null unties)
 
 A "say" with a step lights that line in the script while that step is walked;
 a line about the whole board carries no step and never dims.
@@ -226,6 +232,38 @@ const main = async () => {
       if (!r.ops) die('handwave replay: nothing has been drawn yet');
       if (!r.viewers) console.error('handwave: no window is watching — run `handwave open` to see it');
       return void console.log(`replaying ${r.ops} ops for ${r.viewers} viewer${r.viewers === 1 ? '' : 's'}`);
+    }
+
+    /* Tie a line that is already on the board to a step, or untie it. The
+       explanation does not have to be run again to fix a tag. */
+    case 'tag': {
+      const step = flag('step'), edge = flag('edge'), match = flag('match');
+      const line = positional()[0];
+      if (!line && !match) die('handwave tag: which line? `handwave script` lists them, or use --match');
+      if (!step && !edge) die('handwave tag: --step N, --edge a>b, or --step off to untie it');
+      const op = { op: 'tag' };
+      if (match) op.match = match; else op.line = Number(line);
+      if (edge) op.edge = edge;
+      if (step) op.step = step === 'off' || step === true ? null : Number(step);
+      return void (await send([op]));
+    }
+
+    /* The script as the board holds it, numbered, with what each line is tied
+       to. The numbers are what `handwave tag` takes. */
+    case 'script': {
+      const url = await boardURL({ autostart: false });
+      if (!url) die('handwave script: no board is running');
+      const b = await (await fetch(url + '/state')).json();
+      const { scriptSteps } = await import('./board/script.js');
+      const at = scriptSteps(b);
+      if (!b.transcript.length) return void console.log('nothing said yet');
+      b.transcript.forEach((t, i) => {
+        const tag = at[i] == null ? '  \u2014  ' : ` ${String(at[i] + 1).padStart(2)}  `;
+        console.log(`${String(i + 1).padStart(3)}${tag}${t.text.replace(/\n/g, ' ').slice(0, 92)}`);
+      });
+      const loose = at.filter(x => x == null).length;
+      console.log(`\n${b.transcript.length} lines, ${b.transcript.length - loose} tied to a step, ${b.flow.length} steps`);
+      return;
     }
 
     case 'step': {

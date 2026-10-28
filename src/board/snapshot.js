@@ -7,7 +7,7 @@
    ============================================================ */
 
 import { renderSVG } from '../render/render.js';
-import { scriptSteps } from './script.js';
+import { lineStates } from './script.js';
 import { PAPER, PANEL, INK, MUTED, RULE, SOFT, ACCENT, MONO, paperTexture } from '../render/theme.js';
 
 const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -27,11 +27,13 @@ export function snapshotHTML(board, { active = null, title = null } = {}) {
   const heading = title || board.title || 'Board';
   // A still has the same split as the live board, so a line that belongs to a
   // step says which, and the lit step's lines are marked here too.
-  const at = scriptSteps(board);
+  // The drawing dims what this step is not about, so the script does too —
+  // the two halves are one picture, and lineStates is what decides for both.
+  const states = lineStates({ ...board, active: Number.isFinite(step) ? step : null });
   const said = (board.transcript || []).map((t, i) => {
-    const sn = at[i];
-    const on = sn != null && sn === step;
-    return `<li${on ? ' class="on"' : ''}>${sn == null ? '' : `<span class="tag">step ${sn + 1}</span>`}${mdish(t.text)}</li>`;
+    const { step: sn, state } = states[i];
+    const cls = state === 'idle' || state === 'free' ? '' : ` class="${state}"`;
+    return `<li${cls}>${sn == null ? '' : `<span class="tag">step ${sn + 1}</span>`}${mdish(t.text)}</li>`;
   }).join('');
   const flow = (steps || []).map((s, i) =>
     `<li${i === step ? ' class="on"' : ''}><span class="n">${s._n ?? '·'}</span>${esc(s.step || s.edge || '')}</li>`).join('');
@@ -65,6 +67,7 @@ export function snapshotHTML(board, { active = null, title = null } = {}) {
     border-radius:50%;font-size:11px;font-weight:700;margin-right:9px}
   li .tag{display:block;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:${MUTED};font-weight:700;margin-bottom:2px}
   li.on .tag{color:${ACCENT}}
+  li.off{opacity:.45}
   code{background:${SOFT};padding:1px 4px;border-radius:4px}
   footer{margin-top:30px;color:${MUTED};font-size:11px;letter-spacing:.06em}
 </style></head>

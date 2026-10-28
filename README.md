@@ -126,6 +126,15 @@ no step and never dim; a line said while a step was lit is attributed for free.
 Nothing is inferred beyond that — an untagged script does not highlight rather
 than highlighting the wrong thing.
 
+Which lines went with which step is often clear only afterwards, so tags can be
+set on lines already said. The board keeps them; nothing is drawn again.
+
+```bash
+handwave script                              # the lines, numbered, and what each is tied to
+handwave tag --match "Flyway V25" --step 6
+handwave tag 1 --step off                    # an opening remark belongs to no step
+```
+
 Nothing is ever placed by hand. Columns are derived from the edges — a node
 sits one column right of whatever points at it — so the agent draws a box, then
 the arrow into it, and the layout follows.
