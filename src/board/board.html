@@ -119,6 +119,7 @@
 
 <script type="module">
 import { renderSVG } from '/src/render/render.js';
+import { animateIn, seedOf } from '/src/board/draw-on.js';
 
 const $ = id => document.getElementById(id);
 const pan = $('pan'), stage = $('stage');
@@ -130,41 +131,6 @@ let userMoved = false;
 let playing = null;
 
 /* ---------- drawing a new group on, stroke by stroke ---------- */
-
-function animateIn(group, delay = 0) {
-  const strokes = [...group.querySelectorAll('path.s')];
-  const fills = [...group.querySelectorAll('path.f')];
-  const texts = [...group.querySelectorAll('text')];
-  const was = el => el.getAttribute('opacity') || 1;
-
-  // Every animation here is additive: it starts from `fill: backwards` and ends
-  // on the element's natural state. Nothing is ever hidden by inline style, so
-  // if the animations are throttled or never run at all — a background tab, a
-  // headless capture, reduced motion — the board is still fully drawn.
-  const appear = (el, to, opts) =>
-    el.animate([{ opacity: 0 }, { opacity: to }], { fill: 'backwards', easing: 'ease-out', ...opts });
-
-  strokes.forEach((p, i) => {
-    const d = delay + i * 55;
-    if (p.getAttribute('stroke-dasharray')) {
-      // a dashed line cannot be drawn on without losing its dashes, so it fades
-      appear(p, was(p), { duration: 260, delay: d });
-      return;
-    }
-    let L = 0;
-    try { L = p.getTotalLength(); } catch { L = 0; }
-    if (!L) return;
-    p.style.strokeDasharray = L;            // with offset 0 this draws the whole line
-    p.animate([{ strokeDashoffset: L }, { strokeDashoffset: 0 }], {
-      duration: Math.min(620, 180 + L * 1.1), delay: d,
-      fill: 'backwards', easing: 'cubic-bezier(.4,.05,.3,1)',
-    }).finished.then(() => { p.style.strokeDasharray = ''; }, () => {});
-  });
-
-  const inkTime = delay + strokes.length * 55 + 120;
-  fills.forEach(p => appear(p, was(p), { duration: 300, delay: delay + 90 }));
-  texts.forEach(t => appear(t, was(t), { duration: 240, delay: inkTime }));
-}
 
 /* ---------- render ---------- */
 
@@ -185,14 +151,20 @@ function render(fresh = null) {
   const groups = [...pan.querySelectorAll('[data-node],[data-boundary],[data-edge]')]
     .map(g => ({ g, kind: g.dataset.node ? 'node' : g.dataset.boundary ? 'boundary' : 'edge' }))
     .sort((a, b) => rank[a.kind] - rank[b.kind]);
-  let n = 0;
-  for (const { g } of groups) {
+  // How fast the hand works depends on how much arrived. One box while someone
+  // is talking gets drawn deliberately; a whole spec landing at once is laid
+  // down briskly, because nobody wants to watch nine boxes drawn in sequence.
+  const fresh = groups.filter(({ g }) =>
+    !drawn.has(g.dataset.node || g.dataset.boundary || g.dataset.edge));
+  const pace = fresh.length > 6 ? 0.22 : fresh.length > 2 ? 0.38 : 0.6;
+  let clock = 0;
+  for (const { g } of fresh) {
     const key = g.dataset.node || g.dataset.boundary || g.dataset.edge;
-    if (drawn.has(key)) continue;
-    animateIn(g, n * 110);
-    n++;
+    const dur = animateIn(g, clock, seedOf(key));
+    clock += Math.min(dur * pace, 480);
     drawn.add(key);
   }
+  const n = fresh.length;
   if (!userMoved) fit(groups.length > 0 && n > 0);
   $('count').textContent = `${board.nodes.length} boxes · ${board.edges.length} lines`;
 }

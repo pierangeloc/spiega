@@ -120,8 +120,18 @@ the arrow into it, and the layout follows.
 | `src/render/layout.js` | columns from the flow, order-stable so nothing jumps |
 | `src/board/state.js` | the board as an op log |
 | `src/board/server.js` | HTTP + SSE; serves the renderer to the browser as plain ES modules |
-| `src/board/board.html` | the pane: transcript rail, draw-on animation, step strip |
+| `src/board/board.html` | the pane: transcript rail, step strip, pan and zoom |
+| `src/board/draw-on.js` | the hand: variable pen speed, uneven pauses, ink then colour |
 | `src/mcp/server.js` | the same board as MCP tools |
+
+Two separate things make it look hand-drawn, and both are needed. The geometry
+is off true — `waver()` in `ink.js` pushes every point around a seeded wobble,
+so a line bows rather than buzzing. And the *motion* is off true: a stroke is
+drawn with keyframes whose progress runs ahead of and behind the clock, so the
+pen hurries down a straight and slows coming round a corner, strokes start
+before the one before has finished, and the colour only goes on once the
+outline is closed. A constant-speed dashoffset tween reads as a machine tracing
+a path, which is exactly what it is.
 
 The wobble lives in the path data rather than in an SVG filter, so the board can
 animate without recomputing a filter every frame. Snapshots, which are rendered
