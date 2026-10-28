@@ -16,7 +16,31 @@ Three actions, offered from the global, workspace, tab and pane menus:
 | **handwave: open a board for this task** | a window for this pane's board, always |
 | **handwave: list every board** | a popup: every board and the task it belongs to |
 
-Bind the first one to a key — it is the one worth pressing.
+Bind the first one to a key — it is the one worth pressing. In
+`~/.config/herdr/config.toml`:
+
+```toml
+[[keys.command]]
+key = "prefix+alt+h"
+type = "plugin_action"
+command = "handwave.board.focus"
+```
+
+Then `herdr server reload-config`.
+
+## Losing a board, and getting it back
+
+Three things get called "I lost my board", and the one key handles all of them,
+because `handwave focus` does:
+
+| what happened | what you get |
+|---|---|
+| the window is behind seven others | it is raised |
+| you closed the window | a new one, on the same board — the drawing is untouched, a board is a server |
+| there was never a board here | one is started and opened |
+
+From a shell in the pane, `handwave focus` is the same thing. `handwave boards`
+lists what exists if you would rather look first.
 
 ## How it finds the right board
 

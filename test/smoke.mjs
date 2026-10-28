@@ -454,6 +454,26 @@ test('a backup never lands inside a directory the harness scans', () => {
   assert.ok(/\.handwave['"],\s*['"]backups/.test(fn), 'backups belong somewhere nothing scans');
 });
 
+test('a browser is detected by its own binary, not its name in any path', async () => {
+  const { runningBrowsers } = await import('../src/board/open.js');
+
+  // Microsoft Teams ships an Edge Framework, so a loose match reported Edge
+  // running on a machine that has never had it, and AppleScript was then asked
+  // to script an application that does not exist — in front of the person.
+  const teams = '/Applications/Microsoft Teams.app/Contents/Helpers/Microsoft Teams WebView.app/Contents/'
+    + 'Frameworks/Microsoft Edge Framework.framework/Versions/149/Helpers/msedgewebview2_crashpad_handler';
+  const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  const helper = '/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Framework.framework/'
+    + 'Versions/1/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper';
+
+  assert.deepEqual(runningBrowsers(teams), [], 'Teams must not look like Edge');
+  assert.deepEqual(runningBrowsers(chrome), ['Google Chrome']);
+  assert.deepEqual(runningBrowsers([teams, chrome].join('\n')), ['Google Chrome']);
+  assert.deepEqual(runningBrowsers(helper), [], 'a helper process is not the app');
+  assert.deepEqual(runningBrowsers(''), []);
+  assert.deepEqual(runningBrowsers(undefined), []);
+});
+
 test('the herdr plugin declares the actions it ships, and its scripts are runnable', () => {
   const dir = path.join(ROOT, 'integrations/herdr');
   const toml = fs.readFileSync(path.join(dir, 'herdr-plugin.toml'), 'utf8');

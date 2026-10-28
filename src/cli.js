@@ -152,7 +152,7 @@ const HELP = `handwave — a hand-drawn board an agent draws on while it explain
   render <spec.json> -o F.html  render a spec to a standalone file, no server
   snapshot [-o F.html]          save the live board as a standalone file
   boards                        every board running, and which one this shell uses
-  focus                         bring this session's board window to the front
+  focus                         bring this session's board to the front (opens one if needed)
   url                           print the running board's URL
   stop [--all]                  stop this shell's board, or every one of them
 
@@ -425,14 +425,27 @@ const main = async () => {
        window you want is behind seven others, and hunting for it is exactly
        the friction the board was meant to remove. */
     case 'focus': {
+      /* "I have lost my board" has three shapes and one intent, so this
+         handles all three: the window is buried (raise it), the window was
+         closed but the board is still serving (make a window — the drawing is
+         untouched, a board is a server), or there is no board yet (start one).
+         Being told `handwave open` by a command you ran to see your board is
+         a refusal dressed as help. */
       const { boardName } = await import('./board/server.js');
+      const { focusBoard, openBoard } = await import('./board/open.js');
       const name = boardName();
-      const url = await boardURL({ autostart: false });
-      if (!url) die(`handwave focus: no board for "${name}" \u2014 \`handwave open\` starts one`);
-      const { focusBoard } = await import('./board/open.js');
-      const r = focusBoard(name, url);
-      if (!r.ok) die(`handwave focus: ${r.how}`);
-      return void console.log(`${name}  ${url}`);
+
+      let url = await boardURL({ autostart: false });
+      const started = !url;
+      if (!url) url = await boardURL({ autostart: true });
+
+      if (!started) {
+        const r = focusBoard(name, url);
+        if (r.ok) return void console.log(`${name}  ${url}  (${r.how})`);
+      }
+      // no window to raise: give it one
+      const o = openBoard(url, { app: !flag('tab'), size: flag('size'), browser: flag('browser') });
+      return void console.log(`${name}  ${url}  (new ${o.how})`);
     }
 
     /* Which boards exist, and who is watching them. */

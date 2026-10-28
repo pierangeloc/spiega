@@ -86,6 +86,20 @@ export function openBoard(url, { app = true, size = null, pos = null, browser = 
    macOS only for now, through AppleScript. Linux would be wmctrl or xdotool
    and Windows a PowerShell call; rather than pretend, say so and print the URL
    so the person still gets there. */
+/* Which Chromium-family browsers are running, from a `ps` listing.
+
+   The app's own binary, not its name anywhere in a path: Microsoft Teams ships
+   an Edge Framework, so a loose match reported Edge running on a machine that
+   has never had it, and AppleScript was then asked to script an application
+   that does not exist — which it reports on stderr, in front of the person. */
+export const BROWSER_APPS = ['Google Chrome', 'Brave Browser', 'Chromium', 'Microsoft Edge'];
+
+export function runningBrowsers(psOutput) {
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return BROWSER_APPS.filter(app =>
+    new RegExp(`/${esc(app)}\\.app/Contents/MacOS/[^/]+$`, 'm').test(psOutput || ''));
+}
+
 export function focusBoard(name, url) {
   if (process.platform !== 'darwin') {
     return { ok: false, how: `no window raising on ${process.platform} yet \u2014 open ${url}` };
@@ -95,15 +109,12 @@ export function focusBoard(name, url) {
      AppleScript. Asking AppleScript whether an app it has never heard of is
      running makes it try to resolve the name, which blocks — a five-second
      timeout for a question `ps` answers instantly. */
-  const APPS = {
-    'Google Chrome': /Google Chrome/,
-    'Brave Browser': /Brave Browser/,
-    Chromium: /Chromium/,
-    'Microsoft Edge': /Microsoft Edge/,
-  };
   let procs = '';
-  try { procs = execFileSync('ps', ['-Ao', 'comm='], { encoding: 'utf8', timeout: 3000 }); } catch { /* none */ }
-  const live = Object.keys(APPS).filter(a => APPS[a].test(procs));
+  try {
+    procs = execFileSync('ps', ['-Ao', 'comm='],
+      { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch { /* none */ }
+  const live = runningBrowsers(procs);
   if (!live.length) return { ok: false, how: `no browser running \u2014 \`handwave open\`` };
 
   // the board name is in the window title; see board.html
@@ -122,7 +133,10 @@ export function focusBoard(name, url) {
     end tell
     return "none"`;
     try {
-      const out = execFileSync('osascript', ['-e', script], { encoding: 'utf8', timeout: 5000 }).trim();
+      // stderr is piped, not inherited: a browser that is half-installed makes
+      // osascript complain, and that complaint is not the person's business
+      const out = execFileSync('osascript', ['-e', script],
+        { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
       if (out === 'ok') return { ok: true, how: `raised in ${app}` };
     } catch { /* try the next browser */ }
   }
