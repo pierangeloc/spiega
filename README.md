@@ -111,15 +111,26 @@ which is worse than either having none — so boards have names.
 
 ```bash
 handwave boards                      # every board, and which one this shell uses
+handwave focus                       # bring this session's board window forward
 handwave --board api draw '...'      # or HANDWAVE_BOARD=api
 handwave stop --all
 ```
 
-`handwave install` gives each harness its own name through the MCP
-registration's environment, so an opencode session and a Claude Code session
-land on different boards without anyone arranging it. A board is registered by
-the process serving it and pruned from the registry when that process is gone,
-so a name never resolves to a socket nobody is listening on.
+A board names itself after the task: the working directory's own name, which
+for a worktree is the thing you called it — `domain-modeling-for-rights`, not a
+uuid. A session keeps the board it already has, matched on whichever identity
+its harness exposes (the conversation id, else the terminal pane, else the
+directory). Two conversations about one repo get `name` and `name-2`, and
+`handwave boards` prints each board's directory so they can be told apart.
+
+Not per harness, per task: four opencode sessions and four Claude Code sessions
+at once is the normal case, and a board per harness would put four
+explanations on one drawing. Note that an MCP server started by a long-lived
+daemon inherits that daemon's environment, so the CLI — which runs in the pane
+— resolves the session correctly where MCP may not.
+
+A board is registered by the process serving it and pruned when that process is
+gone, so a name never resolves to a socket nobody is listening on.
 
 ## Compare how models use it
 

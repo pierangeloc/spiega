@@ -644,4 +644,53 @@ await atest('boards are found by name, kept apart, and pruned when their server 
   fs.rmSync(home, { recursive: true, force: true });
 });
 
+/* Naming a board after the task. Someone runs four opencode tasks and four
+   Claude Code tasks at once; the names have to be recognisable in that list and
+   stable for as long as the work is. */
+await atest('a board is named after the task, and a session keeps the one it has', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-home-'));
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-work-'));
+  const task = path.join(work, 'domain-modeling-for-rights');
+  fs.mkdirSync(task);
+
+  const base = { ...process.env, HOME: home, USERPROFILE: home };
+  for (const k of ['HANDWAVE_URL', 'HANDWAVE_BOARD', 'HANDWAVE_SESSION',
+                   'CLAUDE_CODE_SESSION_ID', 'HERDR_PANE_ID', 'HERDR_TAB_ID']) delete base[k];
+
+  const ask = (env, cwd = task, extra = '') => promisify(execFile)(
+    process.execPath,
+    ['--input-type=module', '-e',
+     `const m = await import(${JSON.stringify(path.join(ROOT, 'src/board/server.js'))});${extra}console.log(m.boardName())`],
+    { env: { ...base, ...env }, cwd }).then(r => r.stdout.trim());
+
+  // the directory is the task, and a worktree's name is what someone called it
+  assert.equal(await ask({ HANDWAVE_SESSION: 's1' }), 'domain-modeling-for-rights');
+
+  // an explicit name always wins
+  assert.equal(await ask({ HANDWAVE_SESSION: 's1', HANDWAVE_BOARD: 'Review Notes' }), 'review-notes');
+
+  // register s1's board, then: s1 keeps it, s2 in the same directory does not take it
+  const reg = `m.registerBoard('domain-modeling-for-rights', 'http://127.0.0.1:1234', 's1');`;
+  assert.equal(await ask({ HANDWAVE_SESSION: 's1' }, task, reg), 'domain-modeling-for-rights');
+  assert.equal(await ask({ HANDWAVE_SESSION: 's2' }, task, reg), 'domain-modeling-for-rights-2',
+    'two conversations about one repo get names a person can still say out loud');
+
+  // a session is its conversation first, its pane second — one tab holds both
+  // a Claude session and an opencode session, so tabs are not tasks
+  const key = `console.log(m.sessionKey());//`;
+  const sk = (env) => promisify(execFile)(process.execPath,
+    ['--input-type=module', '-e',
+     `const m = await import(${JSON.stringify(path.join(ROOT, 'src/board/server.js'))});${key}`],
+    { env: { ...base, ...env }, cwd: task }).then(r => r.stdout.trim());
+  assert.equal(await sk({ CLAUDE_CODE_SESSION_ID: 'cc', HERDR_PANE_ID: 'wJ:p1', HERDR_TAB_ID: 'wJ:t1' }), 'cc');
+  assert.equal(await sk({ HERDR_PANE_ID: 'wJ:p1', HERDR_TAB_ID: 'wJ:t1' }), 'wJ:p1');
+  assert.equal(await sk({ HERDR_TAB_ID: 'wJ:t1' }), 'wJ:t1');
+  assert.equal(await sk({}), fs.realpathSync(task), 'the directory, resolved as the OS reports it');
+
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.rmSync(work, { recursive: true, force: true });
+});
+
 console.log(`\n${n} passed`);

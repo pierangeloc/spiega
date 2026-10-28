@@ -158,6 +158,9 @@ import { emptyBoard, applyOps } from '/src/board/state.js';
 import { lineStates } from '/src/board/script.js';
 
 const $ = id => document.getElementById(id);
+// which board this page is, as the server knows it — shown in the window title
+let boardTag = '';
+fetch('/whoami').then(r => r.json()).then(w => { boardTag = w.name || ''; }).catch(() => {});
 const pan = $('pan'), stage = $('stage');
 
 let board = null;      // the live board
@@ -472,7 +475,9 @@ function onState(b, fresh) {
   // underneath and is shown again when the replay ends.
   if (replaying) { $('count').textContent = 'replaying\u2026'; return; }
   $('title').textContent = b.title || 'handwave';
-  document.title = b.title ? `${b.title} · handwave` : 'handwave';
+  // The board name goes in the window title because that is the only handle an
+  // OS has on a browser app window: `handwave focus` finds the window by it.
+  document.title = (b.title ? `${b.title} · handwave` : 'handwave') + (boardTag ? ` [${boardTag}]` : '');
   setLink('live');
   clearTimeout(onState._t);
   onState._t = setTimeout(() => setLink(es && es.readyState === EventSource.OPEN ? 'idle' : 'down'), 2500);

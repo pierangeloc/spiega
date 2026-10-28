@@ -33,7 +33,7 @@ const readBody = req => new Promise((resolve, reject) => {
   req.on('error', reject);
 });
 
-export function createServer({ board = emptyBoard() } = {}) {
+export function createServer({ board = emptyBoard(), name = null } = {}) {
   const clients = new Set();
 
   const broadcast = (event, data) => {
@@ -59,6 +59,8 @@ export function createServer({ board = emptyBoard() } = {}) {
       return serveFile(res, path.join(ROOT, p.slice(1)));
     }
     if (p === '/state') return json(res, 200, board);
+    // who this board is, for the window title and for `handwave boards`
+    if (p === '/whoami') return json(res, 200, { name: app.name, pid: process.pid });
 
     if (p === '/events') {
       res.writeHead(200, {
@@ -112,7 +114,8 @@ export function createServer({ board = emptyBoard() } = {}) {
   });
 
   server.on('close', () => { for (const c of clients) { try { c.end(); } catch {} } });
-  return { server, board, broadcast, clients };
+  const app = { server, board, broadcast, clients, name };
+  return app;
 }
 
 function serveFile(res, file) {
@@ -162,9 +165,9 @@ export function listBoards({ prune = true } = {}) {
   return live;
 }
 
-export function registerBoard(name, url) {
+export function registerBoard(name, url, owner = sessionKey()) {
   const all = readBoards();
-  all[name] = { url, pid: process.pid, started: Date.now() };
+  all[name] = { url, pid: process.pid, started: Date.now(), owner, cwd: process.cwd() };
   writeBoards(all);
 }
 
@@ -176,8 +179,64 @@ export function unregisterBoard(name) {
   return true;
 }
 
-/* The name this process should use, when nothing says otherwise. */
-export const boardName = () => process.env.HANDWAVE_BOARD || DEFAULT_BOARD;
+/* What counts as "this session".
+
+   Not the harness. Someone runs four opencode tasks and four Claude Code tasks
+   at once, so a board per harness is barely better than a board for everyone.
+   It has to be a board per task.
+
+   Most precise first. A harness that names its own conversation wins, then the
+   terminal pane, which is exactly one task. The directory is last but it is the
+   one that always exists, and it carries further than the others: an opencode
+   MCP server is a child of one long-lived `opencode serve --service` daemon and
+   inherits the environment that daemon started with — sixteen of them on this
+   machine shared a single HERDR_PANE_ID — so env is reliable from the CLI in
+   the pane, and stale from MCP.
+
+   The tab is deliberately below the pane: one tab here holds a Claude session,
+   an opencode session, a board window and a shell. Tabs are not tasks.
+
+   Two sessions do sometimes share a directory — two Claude conversations about
+   the same repo — and then the names collide and the second is suffixed. If
+   that reads badly, `--board NAME` settles it, and `handwave boards` prints the
+   directory of each so they can be told apart. */
+export function sessionKey() {
+  return process.env.HANDWAVE_SESSION
+    || process.env.CLAUDE_CODE_SESSION_ID   // the conversation itself, where a harness says so
+    || process.env.HERDR_PANE_ID            // one pane is one task
+    || process.env.HERDR_TAB_ID
+    || process.cwd();
+}
+
+const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+
+/* A board name a person can recognise in a list of eight.
+
+   The working directory's own name — which for a worktree is the task someone
+   named themselves, like "domain-modeling-for-rights". Far better than a uuid,
+   and it is already the word they would use out loud.
+
+   A session that already has a board keeps it, matched on the session key, so
+   the name is stable for as long as the work is. Only a genuine collision —
+   two sessions, same directory name, different sessions — gets a suffix. */
+export function boardName() {
+  if (process.env.HANDWAVE_BOARD) return slug(process.env.HANDWAVE_BOARD);
+
+  const key = sessionKey();
+  const all = listBoards();
+
+  for (const [name, b] of Object.entries(all)) {
+    if (b.owner && b.owner === key) return name;       // this session's own board
+  }
+
+  const base = slug(path.basename(process.cwd())) || DEFAULT_BOARD;
+  if (!all[base] || all[base].owner === key) return base;
+  // Taken by another session in the same directory. Count: "croissant-calc-2"
+  // is a name someone can say out loud, which a hash of a session id is not,
+  // and the board is found by owner afterwards so the number never moves.
+  for (let i = 2; i < 100; i++) if (!all[`${base}-${i}`]) return `${base}-${i}`;
+  return `${base}-${Date.now().toString(36).slice(-4)}`;
+}
 
 /* Listen, trying the next port if one is taken, and register the board under
    its name so the CLI and the MCP server can find it again. */
@@ -194,6 +253,7 @@ export function listen(app, port = 4777, tries = 20, name = boardName()) {
       s.listen(port + n, '127.0.0.1', () => {
         s.removeListener('error', onErr);
         const url = `http://127.0.0.1:${port + n}`;
+        app.name = name;
         registerBoard(name, url);
         // session.json stays for the default board only, so anything older
         // than the registry keeps working

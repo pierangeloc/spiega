@@ -152,6 +152,7 @@ const HELP = `handwave — a hand-drawn board an agent draws on while it explain
   render <spec.json> -o F.html  render a spec to a standalone file, no server
   snapshot [-o F.html]          save the live board as a standalone file
   boards                        every board running, and which one this shell uses
+  focus                         bring this session's board window to the front
   url                           print the running board's URL
   stop [--all]                  stop this shell's board, or every one of them
 
@@ -420,6 +421,20 @@ const main = async () => {
       return;
     }
 
+    /* Bring this session's board to the front. With eight tasks in flight the
+       window you want is behind seven others, and hunting for it is exactly
+       the friction the board was meant to remove. */
+    case 'focus': {
+      const { boardName } = await import('./board/server.js');
+      const name = boardName();
+      const url = await boardURL({ autostart: false });
+      if (!url) die(`handwave focus: no board for "${name}" \u2014 \`handwave open\` starts one`);
+      const { focusBoard } = await import('./board/open.js');
+      const r = focusBoard(name, url);
+      if (!r.ok) die(`handwave focus: ${r.how}`);
+      return void console.log(`${name}  ${url}`);
+    }
+
     /* Which boards exist, and who is watching them. */
     case 'boards': {
       const { listBoards, boardName, DEFAULT_BOARD, SESSION_FILE } = await import('./board/server.js');
@@ -436,6 +451,7 @@ const main = async () => {
       const names = Object.keys(all);
       if (!names.length) return void console.log('no boards running');
       const here = boardName();
+      const w = Math.max(...names.map(n => n.length)) + 2;   // a name is a task name, so it can be long
       for (const name of names) {
         const { url } = all[name];
         let note = 'not answering';
@@ -443,8 +459,11 @@ const main = async () => {
           const st = await (await fetch(url + '/state', { signal: AbortSignal.timeout(900) })).json();
           note = `${st.nodes.length} boxes, ${st.edges.length} lines` + (st.title ? ` \u2014 ${st.title}` : '');
         } catch { /* left as not answering */ }
-        const tail = all[name].legacy ? '  (started before boards had names)' : '';
-        console.log(`${name === here ? '\u2192' : ' '} ${name.padEnd(14)}${url.padEnd(24)}${note}${tail}`);
+        // the directory tells two same-named boards apart, which happens when
+        // two conversations are about one repo
+        const where = all[name].cwd ? `  ${all[name].cwd.replace(process.env.HOME, '~')}` : '';
+        const tail = all[name].legacy ? '  (started before boards had names)' : where;
+        console.log(`${name === here ? '\u2192' : ' '} ${name.padEnd(w)}${url.padEnd(24)}${note}${tail}`);
       }
       if (names.length > 1 || here !== DEFAULT_BOARD) {
         console.log(`\n\u2192 is this shell's board (HANDWAVE_BOARD, or --board NAME).`);

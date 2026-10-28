@@ -11,7 +11,7 @@
    ============================================================ */
 
 import fs from 'node:fs';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 
 const MAC = {
   chrome:   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -74,4 +74,57 @@ export function openBoard(url, { app = true, size = null, pos = null, browser = 
     detached: true, stdio: 'ignore', shell: process.platform === 'win32',
   }).unref();
   return { how: 'default browser', app: false };
+}
+
+/* ---------- bringing a board to the front ----------
+
+   A board window belongs to a conversation, and with eight tasks in flight the
+   window you want is behind seven others. The only handle an operating system
+   has on a browser app window is its title, so the page puts the board name
+   there and we look for it.
+
+   macOS only for now, through AppleScript. Linux would be wmctrl or xdotool
+   and Windows a PowerShell call; rather than pretend, say so and print the URL
+   so the person still gets there. */
+export function focusBoard(name, url) {
+  if (process.platform !== 'darwin') {
+    return { ok: false, how: `no window raising on ${process.platform} yet \u2014 open ${url}` };
+  }
+
+  /* Which browsers are actually running, decided here rather than in
+     AppleScript. Asking AppleScript whether an app it has never heard of is
+     running makes it try to resolve the name, which blocks — a five-second
+     timeout for a question `ps` answers instantly. */
+  const APPS = {
+    'Google Chrome': /Google Chrome/,
+    'Brave Browser': /Brave Browser/,
+    Chromium: /Chromium/,
+    'Microsoft Edge': /Microsoft Edge/,
+  };
+  let procs = '';
+  try { procs = execFileSync('ps', ['-Ao', 'comm='], { encoding: 'utf8', timeout: 3000 }); } catch { /* none */ }
+  const live = Object.keys(APPS).filter(a => APPS[a].test(procs));
+  if (!live.length) return { ok: false, how: `no browser running \u2014 \`handwave open\`` };
+
+  // the board name is in the window title; see board.html
+  const tag = `[${name}]`;
+  for (const app of live) {
+    const script = `tell application ${JSON.stringify(app)}
+      repeat with w in windows
+        try
+          if title of w contains ${JSON.stringify(tag)} then
+            set index of w to 1
+            activate
+            return "ok"
+          end if
+        end try
+      end repeat
+    end tell
+    return "none"`;
+    try {
+      const out = execFileSync('osascript', ['-e', script], { encoding: 'utf8', timeout: 5000 }).trim();
+      if (out === 'ok') return { ok: true, how: `raised in ${app}` };
+    } catch { /* try the next browser */ }
+  }
+  return { ok: false, how: `no window showing "${name}" \u2014 \`handwave open\` makes one` };
 }
