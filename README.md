@@ -23,11 +23,104 @@ drawn, not generated, so it reads as somebody thinking rather than a document.
 
 ## Install
 
+Node 20 or newer. No dependencies and no build step, so there is nothing to
+compile and nothing to wait for.
+
+### 1. Get it on your PATH
+
 ```bash
-npm i -g handwave        # or: git clone … && cd handwave && npm link
+gh repo clone pierangeloc/handwave
+cd handwave
+npm link                  # puts `handwave` on your PATH, pointing at this checkout
 ```
 
-No dependencies, no build step. Node 20+.
+`npm link` rather than a copy on purpose: everything below — the CLI, the MCP
+server, the agent skill — resolves to this directory, so `git pull` updates all
+of it at once. (Not on npm yet, hence the clone.)
+
+Check it:
+
+```bash
+handwave help
+```
+
+### 2. Wire it into your agents
+
+```bash
+handwave install --detect     # what it would do, touching nothing
+handwave install              # do it
+```
+
+`install` with no arguments does only what it finds on this machine, because
+writing a config for a harness you do not use is how you end up with a file you
+never asked for. `--list` shows every target and what it writes.
+
+| target | what it gets |
+|---|---|
+| `claude` | the skill, linked into `~/.claude/skills/` |
+| `codex` | the skill, an `AGENTS.md` block, an `mcp_servers` table |
+| `gemini` | the skill, a `GEMINI.md` block, an `mcpServers` entry |
+| `opencode` | `mcp.handwave` in `opencode.json`, and an `AGENTS.md` block |
+| `copilot` `cursor` `windsurf` `zed` `vscode` `claude_desktop` | the MCP server, in each one's own config shape |
+| `herdr` | a plugin: reach this task's board from its pane |
+| `project` | an `AGENTS.md` block in the repo you are in — ask for it by name |
+
+Everything is idempotent and backs up what it rewrites. Skills are
+**symlinked**, so they track the checkout instead of going stale. Instruction
+files get a delimited `HANDWAVE_START`/`HANDWAVE_END` block that leaves your own
+text alone. For a harness nothing here knows about, `handwave mcp-config`
+prints the entry to paste.
+
+### 3. See that it works
+
+```bash
+handwave draw '[{"op":"title","text":"Hello"},
+                {"op":"node","id":"gw","kind":"gateway","label":"API Gateway"},
+                {"op":"node","id":"db","kind":"datastore","label":"Postgres"},
+                {"op":"edge","from":"gw","to":"db","label":"SQL"}]'
+handwave open             # a window of its own
+```
+
+Two boxes and a line, drawn on. If you see them, every layer is working: the
+board, the renderer and the CLI.
+
+### 4. Restart your agent
+
+A running agent session holds the MCP process it started, and that process has
+the code it was launched with. **Start a fresh session after installing**, or
+the agent will be reading an older handwave than the one on disk. The symlink
+keeps files current; it cannot do anything about processes already running.
+
+Then ask for something architectural — "walk me through how X talks to Y, on
+the board" — and watch the pane.
+
+### Updating
+
+```bash
+cd handwave && git pull && npm test
+```
+
+Nothing to reinstall: the skill is a symlink and every MCP entry points at this
+checkout. Re-run `handwave install` only to pick up a target that did not exist
+before. Restart agent sessions, as above.
+
+### If you use herdr
+
+```bash
+handwave install herdr
+```
+
+Then bind a key, in `~/.config/herdr/config.toml`:
+
+```toml
+[[keys.command]]
+key = "prefix+alt+h"
+type = "plugin_action"
+command = "handwave.board.focus"
+```
+
+`herdr server reload-config`, and that key brings the board for whatever pane
+you are in to the front — starting one if there is none.
 
 ## Use it yourself
 
@@ -77,31 +170,6 @@ a flow with the arrow keys — those repaint once per keypress. It is poor at
 continuous zoom and dragging, because every frame has to be encoded and pushed
 through the TTY however fast the page itself is. Both can watch the same board
 at once.
-
-## Wire it to an agent
-
-```bash
-handwave install              # whatever is on this machine
-handwave install --detect     # what that would be, without doing it
-handwave install --list       # every target and what it writes
-```
-
-Claude Code, Codex, Gemini CLI, opencode, Copilot, Cursor, Windsurf, Zed,
-VS Code and Claude Desktop, plus `project` for an `AGENTS.md` block in the repo
-you are in. `install` with no arguments does only what it finds, because
-writing a config for a harness you do not use is how you end up with a file you
-never asked for.
-
-Each target is idempotent and backs up any config it rewrites. Skills are
-**symlinked**, so they track the checkout rather than going stale; instruction
-files get a delimited block that leaves your own text alone. For a harness
-nothing here knows about, `handwave mcp-config` prints the entry to paste.
-
-A running agent session holds the MCP process it started, so restart the
-session after changing handwave — the link keeps the files current, not the
-processes already running.
-
-See [`integrations/`](integrations/) for what each target writes.
 
 ## One board per conversation
 
