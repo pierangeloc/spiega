@@ -68,6 +68,32 @@ at once.
 
 ## Wire it to an agent
 
+```bash
+handwave install              # all targets
+handwave install claude opencode
+handwave install list         # claude cursor opencode vscode claude_desktop
+```
+
+Each target is idempotent and backs up any config it rewrites. Claude Code and
+Cursor get the skill and the rule; opencode, VS Code/Copilot and Claude Desktop
+get the MCP server registered.
+
+## Compare how models use it
+
+```bash
+handwave bench --list                     # models you can reach right now
+handwave bench "how a write-through cache works" \
+  --models github-copilot/claude-opus-5.5,github-copilot/gpt-6-sol
+```
+
+Runs the same brief through each model via `opencode run`, parses the ops out of
+whatever it replied with, renders each board, and writes `bench/index.html`
+comparing them side by side — boxes, lines, steps, how many edges it bothered to
+label, how many kinds it reached for. Each model's raw reply is kept next to its
+board. Runs are isolated and never touch a live board.
+
+
+
 A Claude skill, a Cursor rule and an MCP server, all driving the same board —
 see [`integrations/`](integrations/). The agent needs no new vocabulary: it
 emits small JSON ops as it talks.

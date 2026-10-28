@@ -150,8 +150,29 @@ export function drawEdge(r, { step = null, state = 'idle' } = {}) {
   let out = `<g class="edge" data-edge="${r.key}" opacity="${opacity}">`;
   out += stroke(d, { w: lit ? 3 : 1.9, color, dash: async ? '9 6' : null });
   out += arrowHead(end, dir, { size: lit ? 13 : 11, w: lit ? 2.6 : 1.9, color, seed });
-  if ((e.label || step != null) && spot.len > 34) {
-    out += `<g class="tag">${edgeTag(spot.at, step, e.label, { lit, seed: seed + 5 })}</g>`;
+  if (e.label || step != null) {
+    // On a short hop between neighbouring boxes the tag is wider than the gap,
+    // so centring it on the line buries it under whatever is next door. Lift it
+    // clear of both boxes instead — nudging it a few pixels is not enough, since
+    // a box is far taller than the line is thick. A pair of edges running both
+    // ways between the same two boxes splits above and below, so the two tags
+    // do not then collide with each other.
+    const label = (step != null ? String(step) + '  ' : '') + (e.label || '');
+    const need = label.length * 6.5 + 20;
+    let at = spot.at;
+    if (need > spot.len * 0.95) {
+      const { a, b } = r;
+      if (!spot.vertical) {
+        at = b.x >= a.x
+          ? [spot.at[0], Math.min(a.y, b.y) - 13]
+          : [spot.at[0], Math.max(a.y + a.h, b.y + b.h) + 13];
+      } else {
+        at = b.y >= a.y
+          ? [Math.max(a.x + a.w, b.x + b.w) + need / 2 + 10, spot.at[1]]
+          : [Math.min(a.x, b.x) - need / 2 - 10, spot.at[1]];
+      }
+    }
+    out += `<g class="tag">${edgeTag(at, step, e.label, { lit, seed: seed + 5 })}</g>`;
   }
   return out + `</g>`;
 }

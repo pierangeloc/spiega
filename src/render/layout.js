@@ -21,6 +21,8 @@ const COL_GAP = 132;
 const ROW_GAP = 54;
 const PAD = 64;
 
+import { wrapText } from './ink.js';
+
 const SIZES = {
   service:   (n, tw) => ({ w: Math.max(156, tw + 52), h: 70 }),
   gateway:   (n, tw) => ({ w: Math.max(166, tw + 72), h: 70 }),
@@ -30,8 +32,11 @@ const SIZES = {
   queue:     (n, tw) => ({ w: Math.max(176, tw + 60), h: 48, labelBelow: 34 }),
   client:    (n, tw) => ({ w: Math.max(146, tw + 48), h: 92 }),
   external:  (n, tw) => ({ w: Math.max(182, tw + 96), h: 96 }),
-  note:      (n, tw) => ({ w: Math.max(150, Math.min(240, tw + 36)),
-                           h: 38 + 15 * Math.max(1, (n.lines || String(n.label || '').split('\n')).length) }),
+  note: n => {
+    const lines = n.lines || wrapText(n.label, 24);
+    const widest = Math.max(1, ...lines.map(l => l.length));
+    return { w: Math.max(132, widest * 7.9 + 30), h: 30 + 15 * lines.length };
+  },
 };
 
 const textWidth = (s, size = 13.5) => String(s || '').length * size * 0.66;
@@ -58,6 +63,11 @@ export function assign(spec, placed = {}) {
     guard.add(n.id);
 
     if (n.col != null) return (placed[n.id] = { col: n.col, row: n.row != null ? n.row : nextRow(n.col) });
+
+    // A note has no edges, so the flow has nothing to say about where it goes.
+    // Left to the default it lands in column 0 among the real nodes; instead it
+    // goes in a margin column of its own, to the left of everything.
+    if (n.kind === 'note') return (placed[n.id] = { col: -1, row: nextRow(-1) });
 
     if (typeof n.place === 'string') {
       const [rel, ref] = n.place.split(':');

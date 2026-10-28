@@ -171,4 +171,25 @@ export function arrowHead(tip, dirRad, { size = 11, w = 1.8, color = INK, seed =
     stroke(roughLine(wing(-spread), tip, { ...o, seed: seed + 1 }), { w, color });
 }
 
+/* Greedy word wrap. A note is somebody's handwriting in the margin, so it wraps
+   at a readable measure rather than stretching to fit whatever was typed; an
+   unwrapped sentence drawn centred will happily run clean across the board. */
+export function wrapText(s, max = 24, maxLines = 5) {
+  const out = [];
+  for (const para of String(s ?? '').split('\n')) {
+    let line = '';
+    for (const word of para.split(/\s+/).filter(Boolean)) {
+      if (!line) { line = word; continue; }
+      if ((line + ' ' + word).length <= max) line += ' ' + word;
+      else { out.push(line); line = word; }
+    }
+    out.push(line);
+  }
+  const lines = out.filter((l, i) => l || i === 0);
+  if (lines.length <= maxLines) return lines;
+  const kept = lines.slice(0, maxLines);
+  kept[maxLines - 1] = kept[maxLines - 1].slice(0, max - 1) + '\u2026';
+  return kept;
+}
+
 export { esc, f as round2 };

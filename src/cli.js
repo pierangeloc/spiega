@@ -112,6 +112,8 @@ const HELP = `handwave — a hand-drawn board an agent draws on while it explain
 
   serve [--port N] [--open]     start the board and keep it running
   open [--tab] [--size WxH]     open the board in its own browser window
+  install [targets...]          wire it into your agents (see the list below)
+  bench <prompt> --models a,b   draw the same explanation with several models
   draw <json|file|->            add to the board (one op, or a list, or a whole spec)
   say  <text>                   put a line in the transcript beside the drawing
   step [N|next|prev|off]        light up one step of the flow
@@ -129,6 +131,10 @@ Ops are small JSON objects:
   {"op":"step","edge":"gw>orders","step":"Gateway forwards the call"}
 
 kinds: client gateway service compute datastore cache queue external note
+
+install targets: claude  cursor  opencode  vscode  claude_desktop
+  handwave install                 all of them
+  handwave install claude opencode just those
 
 "open" gives the board a chromeless window of its own (Chrome/Brave/Edge app mode),
 which is the right place to pan and zoom. A terminal pane has to push every frame
@@ -148,6 +154,31 @@ const main = async () => {
         const { openBoard } = await import('./board/open.js');
         openBoard(url, { app: !flag('tab'), size: flag('size'), browser: flag('browser') });
       }
+      return;
+    }
+
+    case 'install': {
+      const { install, TARGET_NAMES } = await import('./install.js');
+      const want = positional().filter(a => a !== 'install');
+      if (want[0] === 'list') return void console.log(TARGET_NAMES.join('\n'));
+      for (const r of install(want)) {
+        if (r.ok) console.log(`  ok    ${r.what}\n        ${r.where}${r.note ? `  (${r.note})` : ''}`);
+        else console.error(`  FAIL  ${r.what || r.name}: ${r.note}`);
+      }
+      return;
+    }
+
+    case 'bench': {
+      const { bench, listModels } = await import('./bench.js');
+      if (flag('list')) return void console.log((await listModels()).join('\n'));
+      const prompt = argv.slice(1).find(a => !a.startsWith('-')
+        && argv[argv.indexOf(a) - 1] !== '--models' && argv[argv.indexOf(a) - 1] !== '--out');
+      if (!prompt) die('handwave bench: give me something to explain');
+      await bench(prompt, {
+        models: String(flag('models') || '').split(',').map(s => s.trim()).filter(Boolean),
+        out: flag('out') || 'bench',
+        timeout: Number(flag('timeout', 180)),
+      });
       return;
     }
 

@@ -9,7 +9,7 @@
 import { INK, MUTED, SHADOW, ACCENT, bodyOf, mix } from './theme.js';
 import {
   roughRect, roughLine, roughEllipse, roughArc, roughPoly, roundedPts,
-  stroke, fill, text, hashSeed,
+  stroke, fill, text, hashSeed, wrapText,
 } from './ink.js';
 
 const SH_DX = 5, SH_DY = 6;          // the cast shadow sits down and to the left-ish
@@ -211,7 +211,7 @@ function gNote(box, n, m, seed) {
   const tilt = ((hashSeed(n.id || n.label || 'note') % 200) / 100 - 1) * 1.6;
   const body = roughRect(0, 0, w, h, 3, { seed, amp: 1.2 });
   const fold = roughPoly([[w - 16, h], [w, h - 16], [w, h]], { seed: seed + 4, amp: 0.8 });
-  const lines = (n.lines || String(n.label || '').split('\n'));
+  const lines = n.lines || wrapText(n.label, 24);
   let txt = '';
   const lh = 15, y0 = h / 2 - (lines.length - 1) * lh / 2 + 4;
   lines.forEach((ln, i) => {
