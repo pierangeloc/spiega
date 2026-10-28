@@ -116,7 +116,15 @@ emits small JSON ops as it talks.
 {"op":"note","label":"idempotency key\nlives 24h"}
 {"op":"boundary","label":"our VPC","members":["gw","orders","db"]}
 {"op":"step","edge":"gw>orders","step":"Gateway authenticates and forwards"}
+{"op":"say","text":"The gateway checks the token first.","step":2}
 ```
+
+A board has two halves, and a `say` can name the step it explains. Walking the
+flow then lights the matching lines of the script while the others recede, so
+the words and the picture move together. Lines about the board as a whole carry
+no step and never dim; a line said while a step was lit is attributed for free.
+Nothing is inferred beyond that — an untagged script does not highlight rather
+than highlighting the wrong thing.
 
 Nothing is ever placed by hand. Columns are derived from the edges — a node
 sits one column right of whatever points at it — so the agent draws a box, then

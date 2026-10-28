@@ -8,6 +8,7 @@ import { emptyBoard, applyOps } from '../src/board/state.js';
 import { renderSVG } from '../src/render/render.js';
 import { snapshotHTML } from '../src/board/snapshot.js';
 import { KINDS } from '../src/render/glyphs.js';
+import { scriptSteps, linesFor, lineStates } from '../src/board/script.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let n = 0;
@@ -196,6 +197,104 @@ test('the play control runs the flow to the end and stops itself', () => {
   assert.equal(btn.textContent, 'play', 'and put the label back');
 });
 
+/* The script half of the board has to follow the step being walked, or the
+   reader matches sentence to picture by hand. */
+test('a line says which step it belongs to, by number or by hop', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'say', text: 'Three services, one store.' },            // no step: the whole board
+    { op: 'step', edge: 'gw>orders', step: 'Gateway forwards' },
+    { op: 'step', edge: 'orders>db', step: 'Write the row' },
+    { op: 'say', text: 'The gateway authenticates first.', step: 1 },
+    { op: 'say', text: 'Then the row is written.', edge: 'orders>db' },
+  ]);
+  assert.deepEqual(scriptSteps(b), [null, 0, 1]);
+  assert.deepEqual(linesFor(b, 0), [1]);
+  assert.deepEqual(linesFor(b, 1), [2]);
+  assert.deepEqual(linesFor(b, null), []);
+});
+
+test('a line said while a step was lit belongs to that step', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'step', edge: 'a>b', step: 'one' },
+    { op: 'step', edge: 'b>c', step: 'two' },
+    { op: 'focus', step: 0 },
+    { op: 'say', text: 'a talks to b' },
+    { op: 'focus', step: 1 },
+    { op: 'say', text: 'then b talks to c' },
+    { op: 'say', text: 'and that is the last hop' },
+    { op: 'focus', step: null },
+    { op: 'say', text: 'that is the whole path' },
+  ]);
+  assert.deepEqual(scriptSteps(b), [0, 1, 1, null]);
+  assert.deepEqual(linesFor(b, 1), [1, 2]);
+});
+
+test('an untagged batch attributes nothing rather than guessing', () => {
+  // All the steps are declared before any narration, so "the newest step at
+  // the time" would file every line under the last one. Nothing is better.
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'step', edge: 'a>b', step: 'one' },
+    { op: 'step', edge: 'b>c', step: 'two' },
+    { op: 'say', text: 'first a talks to b' },
+    { op: 'say', text: 'then b talks to c' },
+  ]);
+  assert.deepEqual(scriptSteps(b), [null, null]);
+});
+
+test('an out-of-range or stale step link is dropped, not rendered', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'step', edge: 'a>b', step: 'one' },
+    { op: 'say', text: 'about a step that does not exist', step: 9 },
+    { op: 'say', text: 'about a hop that does not exist', edge: 'x>y' },
+    { op: 'say', text: 'about the one that does', step: 1 },
+  ]);
+  assert.deepEqual(scriptSteps(b), [null, null, 0]);
+});
+
+test('walking a step lights its lines, recedes the others, and spares the asides', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'say', text: 'Six hops. I will walk them.' },           // an aside
+    { op: 'step', edge: 'a>b', step: 'one' },
+    { op: 'step', edge: 'b>c', step: 'two' },
+    { op: 'say', text: 'first hop', step: 1 },
+    { op: 'say', text: 'second hop', step: 2 },
+    { op: 'say', text: 'and that is the path.' },                 // another aside
+  ]);
+
+  // no step lit: the rail is plain, nothing dimmed
+  assert.deepEqual(lineStates(b).map(l => l.state), ['idle', 'idle', 'idle', 'idle']);
+
+  applyOps(b, [{ op: 'focus', step: 1 }]);                        // 2/2
+  assert.deepEqual(lineStates(b).map(l => l.state), ['free', 'off', 'on', 'free']);
+
+  applyOps(b, [{ op: 'focus', step: 0 }]);                        // 1/2
+  assert.deepEqual(lineStates(b).map(l => l.state), ['free', 'on', 'off', 'free']);
+
+  // a step nothing was said about must not dim the whole script to no purpose
+  applyOps(b, [{ op: 'step', edge: 'c>d', step: 'three' }, { op: 'focus', step: 2 }]);
+  assert.deepEqual(lineStates(b).map(l => l.state), ['idle', 'idle', 'idle', 'idle']);
+});
+
+test('a snapshot marks the lit step in the script, not just the drawing', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'node', id: 'a', label: 'A' }, { op: 'node', id: 'b', label: 'B' },
+    { op: 'edge', from: 'a', to: 'b' },
+    { op: 'step', edge: 'a>b', step: 'A calls B' },
+    { op: 'say', text: 'A calls B over gRPC.', step: 1 },
+    { op: 'say', text: 'Nothing else to it.' },
+  ]);
+  const html = snapshotHTML(b, { active: 0 });
+  assert.ok(/<li class="on"><span class="tag">step 1<\/span>A calls B over gRPC/.test(html),
+    'the tagged line should be marked lit');
+  assert.ok(/<li>Nothing else to it\./.test(html), 'an untagged line stays plain');
+});
+
 /* Every file an install target copies must actually be there. `install cursor`
    shipped broken for a while because a rename moved the rule file and the
    copy still named the old path — nothing reads these paths until a user
@@ -255,6 +354,40 @@ await atest('a replay can be asked for remotely, and re-sends nothing', async ()
   } finally {
     server.close();
     await new Promise(r => server.closeAllConnections ? (server.closeAllConnections(), r()) : r());
+  }
+});
+
+/* `handwave say "..." --step 2` goes through argument parsing, which no unit
+   test of the attribution touches — and that is exactly where it first broke:
+   the flag was read with the wrong call and the "2" ended up in the sentence.
+   So drive the real CLI against a real board. */
+await atest('the say command passes a step through, and keeps it out of the text', async () => {
+  const { createServer } = await import('../src/board/server.js');
+  // async, not execFileSync: a synchronous child blocks this process's event
+  // loop, and the board it is talking to is served from this very loop.
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = promisify(execFile);
+  const { server, board } = createServer();
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const env = { ...process.env, HANDWAVE_URL: `http://127.0.0.1:${server.address().port}` };
+  const cli = (...args) => run(process.execPath, [path.join(ROOT, 'src/cli.js'), ...args], { env });
+  try {
+    await cli('draw', JSON.stringify([
+      { op: 'step', edge: 'a>b', step: 'one' },
+      { op: 'step', edge: 'b>c', step: 'two' },
+    ]));
+    await cli('say', 'The second hop is async.', '--step', '2');
+    await cli('say', 'Named by the hop instead.', '--edge', 'a>b');
+    await cli('say', 'An aside about the whole board.');
+
+    assert.deepEqual(board.transcript.map(t => t.text), [
+      'The second hop is async.', 'Named by the hop instead.', 'An aside about the whole board.',
+    ], 'the flag value must not leak into what was said');
+    assert.deepEqual(scriptSteps(board), [1, 0, null]);
+  } finally {
+    server.close();
+    server.closeAllConnections?.();
   }
 });
 

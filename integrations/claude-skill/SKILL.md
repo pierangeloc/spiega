@@ -106,6 +106,38 @@ Each step's number appears on its line, so the board and your prose share one
 numbering. Walk a step as you explain it, not all at once — the person can also
 walk them with the arrow keys.
 
+### Tag the line with the step it explains
+
+**Whenever a line you say is about one step, say which step.** The board has two
+halves: the script on the left, the drawing on the right. Stepping the flow
+lights one hop of the drawing — and if your lines are tagged, the matching
+sentences light with it and the rest of the script recedes. Untagged, the
+reader is left matching sentence to picture by hand, which on a six-step flow
+is most of the work.
+
+```bash
+handwave say "The browser **POSTs** the order; nothing is trusted yet." --step 1
+handwave say "The gateway checks the token, then forwards over \`gRPC\`." --step 2
+handwave say "Only after the commit does it publish \`order.placed\`." --step 4
+```
+
+`--step N` is the number as it appears on the board. `--edge browser>gw` names
+the hop instead, which survives steps being added or reordered later.
+
+Three rules, and they are easy:
+
+- A line about one hop of the flow gets that step's number. Do this for every
+  such line, not some of them — a half-tagged script highlights unevenly.
+- An opening or closing remark — "six hops from the browser to the ledger",
+  "the whole path is idempotent" — gets **no** tag. It is about the board as a
+  whole and should never dim.
+- If you narrate *while* walking (`handwave step 2`, then say the line for it),
+  the link is recorded for you and the tag is optional. Tagging is still
+  better: it survives the person walking the steps themselves afterwards.
+
+Nothing is guessed. A board whose lines carry no tags simply does not
+highlight, so an untagged explanation is a worse explanation, not a broken one.
+
 ## Playing it back
 
 A board keeps the order it was drawn in, so the explanation can be run again

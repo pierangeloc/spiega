@@ -115,7 +115,7 @@ const HELP = `handwave — a hand-drawn board an agent draws on while it explain
   install [targets...]          wire it into your agents (see the list below)
   bench <prompt> --models a,b   draw the same explanation with several models
   draw <json|file|->            add to the board (one op, or a list, or a whole spec)
-  say  <text>                   put a line in the transcript beside the drawing
+  say  <text> [--step N]        put a line in the transcript beside the drawing
   step [N|next|prev|off]        light up one step of the flow
   replay                        play the board back from its own log, as a movie
   clear [--keep-title]          wipe the board
@@ -130,6 +130,10 @@ Ops are small JSON objects:
   {"op":"note","label":"idempotency key\\nlives 24h"}
   {"op":"boundary","label":"our VPC","members":["gw","orders"]}
   {"op":"step","edge":"gw>orders","step":"Gateway forwards the call"}
+  {"op":"say","text":"The gateway checks the token first.","step":2}
+
+A "say" with a step lights that line in the script while that step is walked;
+a line about the whole board carries no step and never dims.
 
 kinds: client gateway service compute datastore cache queue external note
 
@@ -197,9 +201,14 @@ const main = async () => {
       return void (await send(await readOps(argv[1])));
 
     case 'say': {
-      const text = argv.slice(1).filter(a => !a.startsWith('--')).join(' ');
+      const step = flag('step'), edge = flag('edge');
+      const text = positional().join(' ');      // positional() already drops `--flag value` pairs
       if (!text) die('handwave say: nothing to say');
-      return void (await send([{ op: 'say', text }]));
+      // tying the line to a step lets the rail light it when that step is lit
+      const op = { op: 'say', text };
+      if (step) op.step = Number(step);
+      if (edge) op.edge = edge;
+      return void (await send([op]));
     }
 
     /* The board already holds every op in order, so playing the explanation

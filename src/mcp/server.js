@@ -54,10 +54,24 @@ const TOOLS = [
     description:
       'Put a line of your explanation on the board\'s transcript, beside the drawing. ' +
       'Use it the way you would talk while drawing: one short sentence at a time, as you draw the thing it is about. ' +
-      'Supports **bold** and `code`.',
+      'Supports **bold** and `code`.\n' +
+      'If the line explains one step of the flow, pass `step` (the number as it appears on the board). ' +
+      'The transcript then lights that line when that step is lit, and the rest of the script recedes \u2014 ' +
+      'so walking 1/6 to 6/6 moves the reader through the words and the picture together. ' +
+      'Tag every line that is about a single step; leave opening and closing remarks untagged, since those are ' +
+      'about the whole board. Untagged scripts do not highlight at all, so this is the difference between a ' +
+      'board someone can follow and one they have to decode.',
     inputSchema: {
       type: 'object', required: ['text'],
-      properties: { text: { type: 'string', description: 'One sentence. Keep it short.' } },
+      properties: {
+        text: { type: 'string', description: 'One sentence. Keep it short.' },
+        step: { type: 'integer', description:
+          'The step this line explains, numbered as it appears on the board. Pass it whenever the line ' +
+          'is about one hop of the flow: the transcript then lights that line when that step is lit, ' +
+          'so the reader sees which words go with which part of the picture.' },
+        edge: { type: 'string', description:
+          'Instead of `step`, the hop itself, e.g. "gw>orders" — survives steps being added or reordered.' },
+      },
     },
   },
   {
@@ -69,6 +83,7 @@ const TOOLS = [
       '  {"op":"note","label":"retries are capped at 3"}\n' +
       '  {"op":"boundary","label":"our VPC","members":["gw","orders"]}\n' +
       '  {"op":"step","edge":"gw>orders","step":"The gateway forwards the call"}\n' +
+      '  {"op":"say","text":"The gateway checks the token first.","step":2}   step: the line explains that step\n' +
       '  {"op":"title","text":"Placing an order"}\n' +
       'Columns are derived from the edges, so draw a node and then the edge into it and it lands in the right place. ' +
       'Draw a few things at a time as you explain them — not the whole diagram in one call.',
@@ -86,7 +101,9 @@ const TOOLS = [
     name: 'board_step',
     description:
       'Light up one step of the flow on the board: its line turns orange, both ends get a halo, ' +
-      'everything else dims. Walk these in time with what you are saying. Omit `step` to clear the highlight.',
+      'everything else dims, and the lines of the script tagged with this step light with it. ' +
+      'Walk these in time with what you are saying, and pass `step` to board_say so the words follow. ' +
+      'Omit `step` to clear the highlight.',
     inputSchema: {
       type: 'object',
       properties: { step: { type: 'integer', description: 'Step number, counting from 1.' } },
@@ -141,8 +158,12 @@ const TOOLS = [
 
 async function call(name, args = {}) {
   switch (name) {
-    case 'board_say':
-      return send([{ op: 'say', text: String(args.text ?? '') }]);
+    case 'board_say': {
+      const op = { op: 'say', text: String(args.text ?? '') };
+      if (args.step != null) op.step = Number(args.step);
+      if (args.edge) op.edge = String(args.edge);
+      return send([op]);
+    }
 
     case 'board_draw': {
       const ops = Array.isArray(args.ops) ? args.ops : [args.ops];

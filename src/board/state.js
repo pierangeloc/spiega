@@ -53,9 +53,17 @@ export function applyOp(board, op) {
       board.title = op.text || '';
       break;
 
-    case 'say':
-      board.transcript.push({ text: String(op.text || ''), at: Date.now() });
+    /* A line may name the step it explains, so the rail can light the part of
+       the script the current step is about — `step` is the number as it shows
+       on the board (1-based), `edge` survives steps being reordered. Neither
+       is required: see board/script.js for what happens without them. */
+    case 'say': {
+      const line = { text: String(op.text || ''), at: Date.now() };
+      if (op.step != null && Number.isFinite(Number(op.step))) line.step = Math.max(0, Number(op.step) - 1);
+      if (op.edge) line.edge = String(op.edge);
+      board.transcript.push(line);
       break;
+    }
 
     case 'note':
     case 'node': {

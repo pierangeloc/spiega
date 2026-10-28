@@ -7,6 +7,7 @@
    ============================================================ */
 
 import { renderSVG } from '../render/render.js';
+import { scriptSteps } from './script.js';
 import { PAPER, PANEL, INK, MUTED, RULE, SOFT, ACCENT, MONO, paperTexture } from '../render/theme.js';
 
 const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -24,7 +25,14 @@ export function snapshotHTML(board, { active = null, title = null } = {}) {
     margin: 20, active: Number.isFinite(step) ? step : null, hand: false,
   });
   const heading = title || board.title || 'Board';
-  const said = (board.transcript || []).map(t => `<li>${mdish(t.text)}</li>`).join('');
+  // A still has the same split as the live board, so a line that belongs to a
+  // step says which, and the lit step's lines are marked here too.
+  const at = scriptSteps(board);
+  const said = (board.transcript || []).map((t, i) => {
+    const sn = at[i];
+    const on = sn != null && sn === step;
+    return `<li${on ? ' class="on"' : ''}>${sn == null ? '' : `<span class="tag">step ${sn + 1}</span>`}${mdish(t.text)}</li>`;
+  }).join('');
   const flow = (steps || []).map((s, i) =>
     `<li${i === step ? ' class="on"' : ''}><span class="n">${s._n ?? '·'}</span>${esc(s.step || s.edge || '')}</li>`).join('');
 
@@ -55,6 +63,8 @@ export function snapshotHTML(board, { active = null, title = null } = {}) {
   li.on{box-shadow:3px 3px 0 ${ACCENT}}
   li .n{display:inline-block;min-width:19px;height:19px;line-height:18px;text-align:center;border:1.4px solid ${INK};
     border-radius:50%;font-size:11px;font-weight:700;margin-right:9px}
+  li .tag{display:block;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:${MUTED};font-weight:700;margin-bottom:2px}
+  li.on .tag{color:${ACCENT}}
   code{background:${SOFT};padding:1px 4px;border-radius:4px}
   footer{margin-top:30px;color:${MUTED};font-size:11px;letter-spacing:.06em}
 </style></head>

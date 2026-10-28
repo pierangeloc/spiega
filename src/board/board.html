@@ -54,14 +54,27 @@
   .rail{grid-column:1;border-right:1px solid var(--rule);overflow-y:auto;padding:16px 14px 40px;display:flex;
     flex-direction:column;gap:9px;min-width:0}
   main.norail .rail{display:none}
+  /* `backwards`, not `forwards`: a fill-forwards animation keeps owning opacity
+     after it ends and would outrank .off below, so a dimmed line would stay
+     bright. The keyframe holds the pre-start state instead. */
   .said{background:var(--panel);border:1.5px solid var(--ink);border-radius:12px;padding:9px 12px;
-    font-size:12.5px;line-height:1.5;box-shadow:3px 3px 0 var(--soft);opacity:0;transform:translateY(5px);
-    animation:in .32s ease forwards}
+    font-size:12.5px;line-height:1.5;box-shadow:3px 3px 0 var(--soft);
+    animation:in .32s ease backwards}
   .said.latest{box-shadow:3px 3px 0 var(--accent)}
+  /* Stepping the flow lights the drawing; the script has to follow, or the
+     reader is left matching sentence to picture by hand. A line that belongs
+     to another step recedes rather than disappearing — the shape of the whole
+     explanation stays readable — and a line tied to no step never dims. */
+  .said.on{border-color:var(--accent);box-shadow:3px 3px 0 var(--accent);background:var(--paper)}
+  .said.on .tag{color:var(--accent)}
+  .said.off{opacity:.42;box-shadow:3px 3px 0 var(--soft);filter:saturate(.55)}
+  .said{transition:opacity .28s ease, border-color .28s ease, box-shadow .28s ease, filter .28s ease}
+  .said .tag{display:block;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--muted);font-weight:700;margin-bottom:3px}
   .said b{font-weight:700}
   .said code{background:var(--soft);padding:1px 4px;border-radius:4px;font-size:11.5px}
   .rail .empty{color:var(--muted);font-size:12px;padding:6px 2px}
-  @keyframes in{to{opacity:1;transform:none}}
+  @keyframes in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 
   /* ---- the board ---- */
   .stage{grid-column:2;position:relative;overflow:hidden;min-width:0;cursor:grab}
@@ -142,6 +155,7 @@
 import { renderSVG } from '/src/render/render.js';
 import { animateIn, seedOf } from '/src/board/draw-on.js';
 import { emptyBoard, applyOps } from '/src/board/state.js';
+import { lineStates } from '/src/board/script.js';
 
 const $ = id => document.getElementById(id);
 const pan = $('pan'), stage = $('stage');
@@ -223,11 +237,52 @@ const mdish = s => s
 
 function renderRail() {
   const rail = $('rail');
-  const t = view_of()?.transcript || [];
-  if (!t.length) { rail.innerHTML = '<div class="empty">Nothing said yet.</div>'; return; }
-  rail.innerHTML = t.map((e, i) =>
-    `<div class="said${i === t.length - 1 ? ' latest' : ''}">${mdish(e.text)}</div>`).join('');
-  rail.scrollTop = rail.scrollHeight;
+  const board = view_of();
+  const t = board?.transcript || [];
+  if (!t.length) {
+    if (!rail.querySelector('.empty')) rail.innerHTML = '<div class="empty">Nothing said yet.</div>';
+    return;
+  }
+
+  /* Append-only. A step change restyles the lines that are already there and
+     touches nothing else: rebuilding the rail's HTML would restart every
+     line's fade-in, so pressing through 1/6 … 6/6 would make the whole script
+     flicker each time. Lines only ever arrive at the end, except on a replay,
+     which starts from none. */
+  let nodes = [...rail.querySelectorAll('.said')];
+  if (nodes.length > t.length) { rail.innerHTML = ''; nodes = []; }
+  if (!nodes.length) rail.innerHTML = '';
+  for (let i = nodes.length; i < t.length; i++) {
+    const d = document.createElement('div');
+    d.dataset.line = i;
+    rail.appendChild(d);
+    nodes.push(d);
+  }
+
+  // which line goes with which step, and how it should look — board/script.js
+  const states = lineStates(board);
+
+  t.forEach((e, i) => {
+    const node = nodes[i], { step, state } = states[i];
+    const cls = ['said'];
+    if (i === t.length - 1) cls.push('latest');
+    if (state !== 'idle') cls.push(state);
+    node.className = cls.join(' ');
+    const tag = step == null ? '' : `<span class="tag">step ${step + 1}</span>`;
+    const html = tag + mdish(e.text);
+    if (node.dataset.html !== html) { node.innerHTML = html; node.dataset.html = html; }
+  });
+
+  /* Follow the step, not the tail: while a step is lit, its own lines are what
+     the reader needs on screen, and in a long session they are far above the
+     bottom. With no step, the newest line is the interesting one. */
+  const lit = rail.querySelector('.said.on');
+  if (lit) {
+    const top = lit.offsetTop - rail.clientHeight / 2 + lit.offsetHeight / 2;
+    rail.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  } else {
+    rail.scrollTop = rail.scrollHeight;
+  }
 }
 
 /* ---------- flow ---------- */
