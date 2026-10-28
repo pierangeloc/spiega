@@ -1,0 +1,63 @@
+---
+description: Draw a live hand-drawn board while explaining software architecture — services, queues, datastores, boundaries, and a numbered request flow. Use when explaining how a system works, tracing a request, comparing designs, or when asked to draw, sketch or diagram something.
+globs:
+alwaysApply: false
+---
+
+# handwave
+
+A board in a browser pane you draw on **while you are talking**. You keep
+answering in chat; the board carries the boxes, arrows and keywords.
+
+**Draw as you talk, not after.** A sentence, then the thing that sentence is
+about, then the next sentence. Never build the whole diagram in one call — that
+is a picture, and it loses the thread it was meant to carry.
+
+## Commands
+
+Run these in the terminal. The first one starts a board and prints its URL;
+give the person that URL once, early.
+
+```bash
+handwave draw '{"op":"title","text":"Placing an order"}'
+handwave open              # once, at the start: its own chromeless window
+handwave draw '{"op":"node","id":"gw","kind":"gateway","label":"API Gateway","sub":"authn"}'
+handwave draw '{"op":"edge","from":"gw","to":"orders","label":"gRPC"}'
+handwave say  "The gateway does **authn** and rate limiting, then hands off."
+handwave step 1            # light up one hop of the flow; also: step next / step off
+handwave clear             # before a new, unrelated explanation
+handwave snapshot -o docs/flow.html
+```
+
+## Ops
+
+```jsonc
+{"op":"node","id":"db","kind":"datastore","label":"Postgres","sub":"orders"}
+{"op":"edge","from":"orders","to":"bus","label":"publish","async":true}   // async = dashed
+{"op":"note","label":"idempotency key\nlives 24h"}                        // your own handwriting
+{"op":"boundary","label":"our VPC","members":["gw","orders","db"]}
+{"op":"step","edge":"gw>orders","step":"Gateway authenticates and forwards"}
+{"op":"remove","id":"gw"}
+```
+
+Pass an array to draw several at once, when they are genuinely one thought.
+
+`kind`: `client` `gateway` `service` `compute` `datastore` `cache` `queue`
+`external` `note`. Each has its own drawing, and colour follows kind, so only
+pass `body` when deliberately grouping across kinds.
+
+You never place anything: columns come from the edges. Draw the node, then the
+edge into it, and it lands where it belongs.
+
+## Judgement
+
+- A board earns its place or it does not get drawn. Don't redraw a list you
+  just wrote.
+- Eight or ten boxes is a board someone can hold in their head. Twenty is a map.
+  Draw the part under discussion, not the system.
+- Label every arrow (`gRPC`, `INSERT`, `publish`). An unlabelled arrow only says
+  two things are connected.
+- `sub` is for what changes the design (`3 replicas`, `idempotency`), not a
+  restatement of the label.
+- Redrawing an existing `id` updates it, so correcting the board out loud is
+  cheap and normal.

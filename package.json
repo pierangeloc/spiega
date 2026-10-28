@@ -1,0 +1,38 @@
+{
+  "name": "handwave",
+  "version": "0.1.0",
+  "description": "A hand-drawn board an AI agent draws on while it explains software architecture.",
+  "type": "module",
+  "bin": {
+    "handwave": "./src/cli.js"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src",
+    "integrations",
+    "examples",
+    "test"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "scripts": {
+    "test": "node test/smoke.mjs",
+    "serve": "node src/cli.js serve --open",
+    "mcp": "node src/mcp/server.js"
+  },
+  "keywords": [
+    "diagram",
+    "architecture",
+    "whiteboard",
+    "agent",
+    "mcp",
+    "claude",
+    "cursor",
+    "svg",
+    "hand-drawn"
+  ]
+}

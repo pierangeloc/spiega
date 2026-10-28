@@ -1,0 +1,34 @@
+{
+  "title": "Placing an order",
+  "nodes": [
+    { "id": "browser", "kind": "client",    "label": "Browser",     "sub": "SPA" },
+    { "id": "gw",      "kind": "gateway",   "label": "API Gateway", "sub": "authn + rate limit" },
+    { "id": "orders",  "kind": "service",   "label": "Orders",      "sub": "3 replicas", "body": "cobalt" },
+    { "id": "pay",     "kind": "external",  "label": "Stripe" },
+    { "id": "db",      "kind": "datastore", "label": "Postgres",    "sub": "orders" },
+    { "id": "cache",   "kind": "cache",     "label": "Redis",       "sub": "idempotency" },
+    { "id": "bus",     "kind": "queue",     "label": "order-events","sub": "Kafka topic" },
+    { "id": "ship",    "kind": "compute",   "label": "Shipping",    "replicas": 3 }
+  ],
+  "edges": [
+    { "from": "browser", "to": "gw",     "label": "POST /orders" },
+    { "from": "gw",      "to": "orders", "label": "gRPC" },
+    { "from": "orders",  "to": "cache",  "label": "SETNX" },
+    { "from": "orders",  "to": "pay",    "label": "charge" },
+    { "from": "orders",  "to": "db",     "label": "INSERT" },
+    { "from": "orders",  "to": "bus",    "label": "publish", "async": true },
+    { "from": "bus",     "to": "ship",   "label": "consume", "async": true }
+  ],
+  "boundaries": [
+    { "id": "vpc", "label": "our VPC", "members": ["gw", "orders", "db", "cache", "bus", "ship"] }
+  ],
+  "flow": [
+    { "edge": "browser>gw",     "step": "Browser posts the order" },
+    { "edge": "gw>orders",      "step": "Gateway authenticates, forwards" },
+    { "edge": "orders>cache",   "step": "Claim the idempotency key" },
+    { "edge": "orders>pay",     "step": "Charge the card" },
+    { "edge": "orders>db",      "step": "Write the order row" },
+    { "edge": "orders>bus",     "step": "Publish order.created" },
+    { "edge": "bus>ship",       "step": "Shipping picks it up later" }
+  ]
+}

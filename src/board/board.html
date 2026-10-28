@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>handwave</title>
+<style>
+  :root{
+    --paper:#f2efe7; --panel:#f8f6f0; --ink:#231e16; --muted:#857d6e;
+    --rule:#ddd6c8; --soft:#ebe6da; --accent:#ef6a4c; --shadow:#41538f;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --rail: 310px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font:13px/1.55 var(--mono);
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='p'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .42  0 0 0 0 .39  0 0 0 0 .33  .14 0 0 0 0'/></filter><rect width='100%' height='100%' filter='url(%23p)'/></svg>");
+    display:grid; grid-template-rows:auto 1fr; overflow:hidden;
+  }
+
+  /* ---- top bar ---- */
+  .bar{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--rule)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);flex:none}
+  .dot.idle{background:var(--rule)}
+  .bar h1{font-size:14px;font-weight:700;letter-spacing:.04em;margin:0;text-transform:uppercase;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bar .spacer{flex:1}
+  .btn{font:inherit;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+    border:1.5px solid var(--ink);border-radius:999px;padding:5px 13px;background:transparent;color:var(--ink);
+    cursor:pointer;white-space:nowrap}
+  .btn:hover{background:var(--soft)}
+  .btn:disabled{opacity:.3;cursor:default}
+  .btn.on{background:var(--ink);color:var(--paper);box-shadow:2px 2px 0 var(--accent)}
+  .count{font-size:11px;color:var(--muted);letter-spacing:.06em}
+
+  /* ---- the two panes ---- */
+  main{display:grid;grid-template-columns:var(--rail) 1fr;min-height:0;position:relative}
+  main.norail{grid-template-columns:0 1fr}
+  /* In a split pane the rail would eat the board, so below this width it
+     becomes a drawer over the drawing instead of a column beside it. */
+  @media (max-width:820px){
+    main{grid-template-columns:0 1fr}
+    .rail{position:absolute;inset:0 auto 0 0;width:min(300px,78vw);z-index:5;
+      background:var(--paper);box-shadow:6px 0 0 rgba(35,30,22,.06)}
+    main.norail .rail{display:none}
+    main:not(.norail) .rail{display:flex}
+  }
+
+  /* ---- transcript rail: what was said while it was drawn ---- */
+  .rail{grid-column:1;border-right:1px solid var(--rule);overflow-y:auto;padding:16px 14px 40px;display:flex;
+    flex-direction:column;gap:9px;min-width:0}
+  main.norail .rail{display:none}
+  .said{background:var(--panel);border:1.5px solid var(--ink);border-radius:12px;padding:9px 12px;
+    font-size:12.5px;line-height:1.5;box-shadow:3px 3px 0 var(--soft);opacity:0;transform:translateY(5px);
+    animation:in .32s ease forwards}
+  .said.latest{box-shadow:3px 3px 0 var(--accent)}
+  .said b{font-weight:700}
+  .said code{background:var(--soft);padding:1px 4px;border-radius:4px;font-size:11.5px}
+  .rail .empty{color:var(--muted);font-size:12px;padding:6px 2px}
+  @keyframes in{to{opacity:1;transform:none}}
+
+  /* ---- the board ---- */
+  .stage{grid-column:2;position:relative;overflow:hidden;min-width:0;cursor:grab}
+  .stage.drag{cursor:grabbing}
+  .pan{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform}
+  .pan svg{display:block}
+  .pan text{font-family:var(--mono)}
+  /* grain over the drawing, as an overlay rather than an SVG filter: the board
+     redraws while it animates, and a filter would be recomputed every frame */
+  .stage::after{content:"";position:absolute;inset:0;pointer-events:none;mix-blend-mode:multiply;opacity:.42;
+    background-size:180px 180px;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='.75' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .18  0 0 0 0 .15  0 0 0 0 .11  .5 0 0 0 0'/></filter><rect width='100%' height='100%' filter='url(%23g)' opacity='.55'/></svg>")}
+
+  .blank[hidden]{display:none}
+  .blank{position:absolute;inset:0;display:grid;place-content:center;text-align:center;gap:10px;color:var(--muted)}
+  .blank .k{font-size:12px;letter-spacing:.14em;text-transform:uppercase}
+  .blank code{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:3px 7px;font-size:11.5px}
+
+  /* ---- step strip ---- */
+  .steps{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:12px;
+    padding:11px 16px;background:color-mix(in srgb, var(--panel) 88%, transparent);
+    border-top:1px solid var(--rule);backdrop-filter:blur(3px)}
+  .steps[hidden]{display:none}
+  .steps .n{font-size:11px;color:var(--muted);letter-spacing:.08em;white-space:nowrap}
+  .steps .txt{flex:1;font-size:13px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .zoom{position:absolute;right:14px;top:12px;display:flex;gap:6px}
+</style>
+</head>
+<body>
+  <div class="bar">
+    <span class="dot idle" id="live" title="waiting for the agent"></span>
+    <h1 id="title">handwave</h1>
+    <span class="count" id="count"></span>
+    <span class="spacer"></span>
+    <button class="btn" id="rail-toggle" title="hide the transcript">transcript</button>
+    <button class="btn" id="fit">fit</button>
+    <button class="btn" id="snap" title="open a standalone copy of this board">snapshot</button>
+  </div>
+
+  <main id="main">
+    <aside class="rail" id="rail"><div class="empty">Nothing said yet.</div></aside>
+    <div class="stage" id="stage">
+      <div class="pan" id="pan"></div>
+      <div class="blank" id="blank">
+        <div class="k">the board is empty</div>
+        <div><code>handwave draw '{"op":"node","label":"API Gateway","kind":"gateway"}'</code></div>
+      </div>
+      <div class="steps" id="steps" hidden>
+        <button class="btn" id="prev">&larr;</button>
+        <span class="n" id="stepn"></span>
+        <span class="txt" id="steptxt"></span>
+        <button class="btn" id="play">play</button>
+        <button class="btn" id="next">&rarr;</button>
+      </div>
+    </div>
+  </main>
+
+<script type="module">
+import { renderSVG } from '/src/render/render.js';
+
+const $ = id => document.getElementById(id);
+const pan = $('pan'), stage = $('stage');
+
+let board = null;
+let drawn = new Set();          // keys already on the board, so they animate once
+let view = { x: 0, y: 0, k: 1 };
+let userMoved = false;
+let playing = null;
+
+/* ---------- drawing a new group on, stroke by stroke ---------- */
+
+function animateIn(group, delay = 0) {
+  const strokes = [...group.querySelectorAll('path.s')];
+  const fills = [...group.querySelectorAll('path.f')];
+  const texts = [...group.querySelectorAll('text')];
+  const was = el => el.getAttribute('opacity') || 1;
+
+  // Every animation here is additive: it starts from `fill: backwards` and ends
+  // on the element's natural state. Nothing is ever hidden by inline style, so
+  // if the animations are throttled or never run at all — a background tab, a
+  // headless capture, reduced motion — the board is still fully drawn.
+  const appear = (el, to, opts) =>
+    el.animate([{ opacity: 0 }, { opacity: to }], { fill: 'backwards', easing: 'ease-out', ...opts });
+
+  strokes.forEach((p, i) => {
+    const d = delay + i * 55;
+    if (p.getAttribute('stroke-dasharray')) {
+      // a dashed line cannot be drawn on without losing its dashes, so it fades
+      appear(p, was(p), { duration: 260, delay: d });
+      return;
+    }
+    let L = 0;
+    try { L = p.getTotalLength(); } catch { L = 0; }
+    if (!L) return;
+    p.style.strokeDasharray = L;            // with offset 0 this draws the whole line
+    p.animate([{ strokeDashoffset: L }, { strokeDashoffset: 0 }], {
+      duration: Math.min(620, 180 + L * 1.1), delay: d,
+      fill: 'backwards', easing: 'cubic-bezier(.4,.05,.3,1)',
+    }).finished.then(() => { p.style.strokeDasharray = ''; }, () => {});
+  });
+
+  const inkTime = delay + strokes.length * 55 + 120;
+  fills.forEach(p => appear(p, was(p), { duration: 300, delay: delay + 90 }));
+  texts.forEach(t => appear(t, was(t), { duration: 240, delay: inkTime }));
+}
+
+/* ---------- render ---------- */
+
+function render(fresh = null) {
+  if (!board) return;
+  const empty = !board.nodes.length;
+  $('blank').hidden = !empty;
+  if (empty) { pan.innerHTML = ''; drawn = new Set(); return; }
+
+  const r = renderSVG(board, { margin: 18, active: board.active, placed: board.placed, hand: false });
+  pan.innerHTML = r.svg;
+  pan.dataset.w = r.width; pan.dataset.h = r.height;
+
+  // Anything whose key is new gets drawn on; everything else is simply there.
+  // Stagger order is boxes, then enclosures, then the lines between them —
+  // the order a person draws in. Lines first would point at empty paper.
+  const rank = { node: 0, boundary: 1, edge: 2 };
+  const groups = [...pan.querySelectorAll('[data-node],[data-boundary],[data-edge]')]
+    .map(g => ({ g, kind: g.dataset.node ? 'node' : g.dataset.boundary ? 'boundary' : 'edge' }))
+    .sort((a, b) => rank[a.kind] - rank[b.kind]);
+  let n = 0;
+  for (const { g } of groups) {
+    const key = g.dataset.node || g.dataset.boundary || g.dataset.edge;
+    if (drawn.has(key)) continue;
+    animateIn(g, n * 110);
+    n++;
+    drawn.add(key);
+  }
+  if (!userMoved) fit(groups.length > 0 && n > 0);
+  $('count').textContent = `${board.nodes.length} boxes · ${board.edges.length} lines`;
+}
+
+function fit(smooth = false) {
+  const W = +pan.dataset.w || 1, H = +pan.dataset.h || 1;
+  const aw = stage.clientWidth - 32, ah = stage.clientHeight - (board?.flow?.length ? 86 : 32);
+  // The stage can report zero size mid-layout — in a split pane that is resizing,
+  // or before the first paint. Fitting to that yields a negative scale that
+  // sticks, so skip and let the ResizeObserver below try again.
+  if (aw < 40 || ah < 40) return;
+  const k = Math.max(0.05, Math.min(1.25, aw / W, ah / H));
+  view = { k, x: (stage.clientWidth - W * k) / 2, y: Math.max(12, (ah - H * k) / 2) };
+  pan.style.transition = smooth ? 'transform .45s cubic-bezier(.3,.7,.3,1)' : 'none';
+  applyView();
+}
+
+const applyView = () => { pan.style.transform = `translate(${view.x}px,${view.y}px) scale(${view.k})`; };
+
+/* ---------- transcript ---------- */
+
+const mdish = s => s
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/`([^`]+)`/g, '<code>$1</code>')
+  .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+
+function renderRail() {
+  const rail = $('rail');
+  const t = board?.transcript || [];
+  if (!t.length) { rail.innerHTML = '<div class="empty">Nothing said yet.</div>'; return; }
+  rail.innerHTML = t.map((e, i) =>
+    `<div class="said${i === t.length - 1 ? ' latest' : ''}">${mdish(e.text)}</div>`).join('');
+  rail.scrollTop = rail.scrollHeight;
+}
+
+/* ---------- flow ---------- */
+
+function renderSteps() {
+  const f = board?.flow || [];
+  $('steps').hidden = !f.length;
+  if (!f.length) return;
+  const i = board.active;
+  $('stepn').textContent = i == null ? `${f.length} steps` : `${i + 1}/${f.length}`;
+  $('steptxt').textContent = i == null ? 'press → to walk the flow' : (f[i].step || f[i].edge || '');
+  $('prev').disabled = i == null || i <= 0;
+  $('next').disabled = i != null && i >= f.length - 1;
+}
+
+const focus = step => post([{ op: 'focus', step }]);
+$('prev').onclick = () => focus(Math.max(0, (board.active ?? 0) - 1));
+$('next').onclick = () => focus(board.active == null ? 0 : Math.min(board.flow.length - 1, board.active + 1));
+$('play').onclick = () => {
+  if (playing) { clearInterval(playing); playing = null; $('play').classList.remove('on'); $('play').textContent = 'play'; return; }
+  $('play').classList.add('on'); $('play').textContent = 'stop';
+  let i = board.active == null ? -1 : board.active;
+  const tick = () => {
+    i++;
+    if (i >= board.flow.length) { $('play').click(); return; }
+    focus(i);
+  };
+  tick();
+  playing = setInterval(tick, 1600);
+};
+
+/* ---------- plumbing ---------- */
+
+async function post(ops) {
+  await fetch('/op', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ops }) });
+}
+
+function onState(b, fresh) {
+  const first = !board;
+  board = b;
+  $('title').textContent = b.title || 'handwave';
+  document.title = b.title ? `${b.title} · handwave` : 'handwave';
+  $('live').classList.remove('idle');
+  clearTimeout(onState._t);
+  onState._t = setTimeout(() => $('live').classList.add('idle'), 2500);
+  renderRail();
+  render(fresh);
+  renderSteps();
+  if (first) userMoved = false;
+}
+
+const es = new EventSource('/events');
+es.addEventListener('state', e => onState(JSON.parse(e.data)));
+es.addEventListener('patch', e => { const d = JSON.parse(e.data); onState(d.board, d.fresh); });
+
+/* ---------- pan, zoom, keys ---------- */
+
+stage.addEventListener('wheel', e => {
+  e.preventDefault();
+  userMoved = true;
+  pan.style.transition = 'none';
+  const r = stage.getBoundingClientRect();
+  const mx = e.clientX - r.left, my = e.clientY - r.top;
+  const k = Math.max(0.2, Math.min(3, view.k * (1 - e.deltaY * 0.0016)));
+  view.x = mx - (mx - view.x) * (k / view.k);
+  view.y = my - (my - view.y) * (k / view.k);
+  view.k = k;
+  applyView();
+}, { passive: false });
+
+let drag = null;
+stage.addEventListener('pointerdown', e => {
+  if (e.target.closest('.steps')) return;
+  drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
+  stage.classList.add('drag'); stage.setPointerCapture(e.pointerId);
+});
+stage.addEventListener('pointermove', e => {
+  if (!drag) return;
+  userMoved = true; pan.style.transition = 'none';
+  view.x = drag.vx + (e.clientX - drag.x);
+  view.y = drag.vy + (e.clientY - drag.y);
+  applyView();
+});
+const endDrag = () => { drag = null; stage.classList.remove('drag'); };
+stage.addEventListener('pointerup', endDrag);
+stage.addEventListener('pointercancel', endDrag);
+stage.addEventListener('dblclick', () => { userMoved = false; fit(true); });
+
+$('fit').onclick = () => { userMoved = false; fit(true); };
+$('snap').onclick = () => window.open('/snapshot', '_blank');
+$('rail-toggle').onclick = e => {
+  $('main').classList.toggle('norail');
+  e.target.classList.toggle('on', !$('main').classList.contains('norail'));
+  setTimeout(() => { if (!userMoved) fit(true); }, 60);
+};
+if (matchMedia('(max-width:820px)').matches) $('main').classList.add('norail');
+$('rail-toggle').classList.toggle('on', !$('main').classList.contains('norail'));
+
+/* Zoom in steps, about the centre of the stage. Continuous wheel zoom repaints
+   every frame, which is fine in a browser window and miserable in a terminal
+   pane, where each frame has to be encoded and pushed through the TTY. One
+   keypress, one repaint. */
+function zoomBy(factor) {
+  userMoved = true;
+  const cx = stage.clientWidth / 2, cy = stage.clientHeight / 2;
+  const k = Math.max(0.2, Math.min(3, view.k * factor));
+  view.x = cx - (cx - view.x) * (k / view.k);
+  view.y = cy - (cy - view.y) * (k / view.k);
+  view.k = k;
+  pan.style.transition = 'transform .18s ease-out';
+  applyView();
+}
+
+addEventListener('keydown', e => {
+  if (e.key === '+' || e.key === '=') return zoomBy(1.25);
+  if (e.key === '-' || e.key === '_') return zoomBy(1 / 1.25);
+  if (e.key === '0') { userMoved = false; return fit(true); }
+  if (e.key === 'ArrowRight') $('next').click();
+  else if (e.key === 'ArrowLeft') $('prev').click();
+  else if (e.key === ' ') { e.preventDefault(); $('play').click(); }
+  else if (e.key === 'f') $('fit').click();
+  else if (e.key === 'Escape') focus(null);
+});
+addEventListener('resize', () => { if (!userMoved) fit(); });
+// A board usually lives in a pane someone is dragging wider or narrower.
+new ResizeObserver(() => { if (!userMoved) fit(); }).observe(stage);
+</script>
+</body>
+</html>
