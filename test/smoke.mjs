@@ -104,4 +104,36 @@ test('the shipped example renders', () => {
   assert.ok(width > 400 && svg.length > 10000);
 });
 
+/* The board page is half the product and none of the tests above touch it: a
+   syntax error in its inline module silently stops the whole page — no event
+   stream, no drawing — while the server goes on happily collecting ops. That
+   failure is invisible to every test that only exercises the renderer. */
+import vm from 'node:vm';
+
+const parses = (src, what) => {
+  // strip module syntax so the rest can be parsed as a plain script, and the
+  // browser globals that run at module top level
+  const body = src
+    .replace(/^\s*import\s[^;]*;?$/gm, '')
+    .replace(/^\s*export\s+(?=(function|const|let|class))/gm, '')
+    .replace(/^\s*export\s*\{[^}]*\};?$/gm, '')
+    .replace(/matchMedia\([^)]*\)\.matches/g, 'false');
+  try { new vm.Script(body, { filename: what }); }
+  catch (e) { throw new Error(`${what} does not parse: ${e.message}`); }
+};
+
+test('the board page module parses', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
+  const m = html.match(/<script type="module">([\s\S]*?)<\/script>/);
+  assert.ok(m, 'board.html should have a module script');
+  parses(m[1], 'board.html <script type=module>');
+});
+
+test('the browser-side modules parse', () => {
+  for (const f of ['src/board/draw-on.js', 'src/render/render.js', 'src/render/ink.js',
+                   'src/render/glyphs.js', 'src/render/edges.js', 'src/render/layout.js']) {
+    parses(fs.readFileSync(path.join(ROOT, f), 'utf8'), f);
+  }
+});
+
 console.log(`\n${n} passed`);

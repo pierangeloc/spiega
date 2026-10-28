@@ -24,6 +24,8 @@
   .bar{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--rule)}
   .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);flex:none}
   .dot.idle{background:var(--rule)}
+  .dot.down{background:#b3402a;animation:pulse 1.4s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.25}}
   .bar h1{font-size:14px;font-weight:700;letter-spacing:.04em;margin:0;text-transform:uppercase;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .bar .spacer{flex:1}
@@ -85,6 +87,10 @@
   .steps[hidden]{display:none}
   .steps .n{font-size:11px;color:var(--muted);letter-spacing:.08em;white-space:nowrap}
   .steps .txt{flex:1;font-size:13px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .offline{position:absolute;left:0;right:0;top:0;z-index:6;display:flex;gap:10px;align-items:baseline;
+    justify-content:center;padding:7px 14px;background:#b3402a;color:var(--paper);font-size:11.5px}
+  .offline[hidden]{display:none}
+  .offline .k{text-transform:uppercase;letter-spacing:.12em;font-weight:700}
   .zoom{position:absolute;right:14px;top:12px;display:flex;gap:6px}
 </style>
 </head>
@@ -106,6 +112,10 @@
       <div class="blank" id="blank">
         <div class="k">the board is empty</div>
         <div><code>handwave draw '{"op":"node","label":"API Gateway","kind":"gateway"}'</code></div>
+      </div>
+      <div class="offline" id="offline" hidden>
+        <span class="k">not connected</span>
+        <span>this board may be out of date &mdash; reconnecting&hellip;</span>
       </div>
       <div class="steps" id="steps" hidden>
         <button class="btn" id="prev">&larr;</button>
@@ -154,17 +164,17 @@ function render(fresh = null) {
   // How fast the hand works depends on how much arrived. One box while someone
   // is talking gets drawn deliberately; a whole spec landing at once is laid
   // down briskly, because nobody wants to watch nine boxes drawn in sequence.
-  const fresh = groups.filter(({ g }) =>
+  const pending = groups.filter(({ g }) =>
     !drawn.has(g.dataset.node || g.dataset.boundary || g.dataset.edge));
-  const pace = fresh.length > 6 ? 0.22 : fresh.length > 2 ? 0.38 : 0.6;
+  const pace = pending.length > 6 ? 0.22 : pending.length > 2 ? 0.38 : 0.6;
   let clock = 0;
-  for (const { g } of fresh) {
+  for (const { g } of pending) {
     const key = g.dataset.node || g.dataset.boundary || g.dataset.edge;
     const dur = animateIn(g, clock, seedOf(key));
     clock += Math.min(dur * pace, 480);
     drawn.add(key);
   }
-  const n = fresh.length;
+  const n = pending.length;
   if (!userMoved) fit(groups.length > 0 && n > 0);
   $('count').textContent = `${board.nodes.length} boxes · ${board.edges.length} lines`;
 }
@@ -240,18 +250,62 @@ function onState(b, fresh) {
   board = b;
   $('title').textContent = b.title || 'handwave';
   document.title = b.title ? `${b.title} · handwave` : 'handwave';
-  $('live').classList.remove('idle');
+  setLink('live');
   clearTimeout(onState._t);
-  onState._t = setTimeout(() => $('live').classList.add('idle'), 2500);
+  onState._t = setTimeout(() => setLink(es && es.readyState === EventSource.OPEN ? 'idle' : 'down'), 2500);
   renderRail();
   render(fresh);
   renderSteps();
   if (first) userMoved = false;
 }
 
-const es = new EventSource('/events');
-es.addEventListener('state', e => onState(JSON.parse(e.data)));
-es.addEventListener('patch', e => { const d = JSON.parse(e.data); onState(d.board, d.fresh); });
+/* The stream is the only thing keeping this page true. If it dies — the server
+   restarted, the machine slept, the network blinked — a board that silently
+   keeps showing its last state is worse than no board, because it looks like an
+   answer. So: reconnect with backoff, say so in the bar while disconnected, and
+   re-sync whenever the window is looked at again. */
+let es = null, retry = 0, retryTimer = null;
+
+function setLink(state) {           // 'live' | 'idle' | 'down'
+  const dot = $('live');
+  dot.classList.toggle('idle', state === 'idle');
+  dot.classList.toggle('down', state === 'down');
+  dot.title = state === 'down' ? 'not connected to the board server'
+    : state === 'live' ? 'the agent just drew something' : 'connected, waiting';
+  $('offline').hidden = state !== 'down';
+}
+
+function connect() {
+  clearTimeout(retryTimer);
+  if (es) { try { es.close(); } catch {} }
+  es = new EventSource('/events');
+
+  es.addEventListener('open', () => { retry = 0; setLink('idle'); });
+  es.addEventListener('state', e => {
+    // A full state means we may be looking at a different board than before,
+    // so forget what we thought was already drawn.
+    drawn = new Set();
+    onState(JSON.parse(e.data));
+  });
+  es.addEventListener('patch', e => { const d = JSON.parse(e.data); onState(d.board, d.fresh); });
+  es.addEventListener('error', () => {
+    if (es.readyState === EventSource.CLOSED || es.readyState === EventSource.CONNECTING) {
+      setLink('down');
+      // EventSource retries on its own, but not after the server refuses the
+      // connection outright, which is the case that actually bites here.
+      retry = Math.min(retry + 1, 6);
+      retryTimer = setTimeout(connect, Math.min(800 * retry, 5000));
+    }
+  });
+}
+connect();
+
+/* Coming back to the window is the moment a stale board is most misleading. */
+addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (!es || es.readyState !== EventSource.OPEN) connect();
+  else fetch('/state').then(r => r.json()).then(b => { if (b.rev !== board?.rev) onState(b); }).catch(() => {});
+});
 
 /* ---------- pan, zoom, keys ---------- */
 
