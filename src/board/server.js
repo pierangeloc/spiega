@@ -123,9 +123,65 @@ function serveFile(res, file) {
   });
 }
 
-/* Listen, trying the next port if one is taken, and leave a session file so the
-   CLI and the MCP server can find a board that is already running. */
-export function listen(app, port = 4777, tries = 20) {
+/* ---------- the board registry ----------
+
+   One machine, several boards. A board belongs to a conversation, and people
+   hold more than one at a time: a Claude Code session on one problem, an
+   opencode session on another. Sharing a single board between them interleaves
+   two explanations into one drawing, which is worse than having no board.
+
+   So boards have names, and a name is all a client needs. The registry maps
+   name to url; a board whose server has gone is pruned on read, because a
+   stale entry sends ops into a socket nobody is listening on. */
+export const BOARDS_FILE = path.join(SESSION_DIR, 'boards.json');
+export const DEFAULT_BOARD = 'default';
+
+const readBoards = () => {
+  try { return JSON.parse(fs.readFileSync(BOARDS_FILE, 'utf8')); } catch { return {}; }
+};
+
+const writeBoards = all => {
+  fs.mkdirSync(SESSION_DIR, { recursive: true });
+  fs.writeFileSync(BOARDS_FILE, JSON.stringify(all, null, 2) + '\n');
+};
+
+const running = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+/* Every board we still believe in. `prune` drops the ones whose process is
+   gone — cheap, since it is a signal-0, not a request. */
+export function listBoards({ prune = true } = {}) {
+  const all = readBoards();
+  if (!prune) return all;
+  const live = {};
+  let changed = false;
+  for (const [name, b] of Object.entries(all)) {
+    if (b && b.pid && !running(b.pid)) { changed = true; continue; }
+    live[name] = b;
+  }
+  if (changed) writeBoards(live);
+  return live;
+}
+
+export function registerBoard(name, url) {
+  const all = readBoards();
+  all[name] = { url, pid: process.pid, started: Date.now() };
+  writeBoards(all);
+}
+
+export function unregisterBoard(name) {
+  const all = readBoards();
+  if (!(name in all)) return false;
+  delete all[name];
+  writeBoards(all);
+  return true;
+}
+
+/* The name this process should use, when nothing says otherwise. */
+export const boardName = () => process.env.HANDWAVE_BOARD || DEFAULT_BOARD;
+
+/* Listen, trying the next port if one is taken, and register the board under
+   its name so the CLI and the MCP server can find it again. */
+export function listen(app, port = 4777, tries = 20, name = boardName()) {
   return new Promise((resolve, reject) => {
     const attempt = n => {
       const s = app.server;
@@ -138,8 +194,13 @@ export function listen(app, port = 4777, tries = 20) {
       s.listen(port + n, '127.0.0.1', () => {
         s.removeListener('error', onErr);
         const url = `http://127.0.0.1:${port + n}`;
-        fs.mkdirSync(SESSION_DIR, { recursive: true });
-        fs.writeFileSync(SESSION_FILE, JSON.stringify({ url, pid: process.pid, started: Date.now() }, null, 2));
+        registerBoard(name, url);
+        // session.json stays for the default board only, so anything older
+        // than the registry keeps working
+        if (name === DEFAULT_BOARD) {
+          fs.mkdirSync(SESSION_DIR, { recursive: true });
+          fs.writeFileSync(SESSION_FILE, JSON.stringify({ url, pid: process.pid, started: Date.now(), name }, null, 2));
+        }
         resolve(url);
       });
     };
@@ -147,11 +208,19 @@ export function listen(app, port = 4777, tries = 20) {
   });
 }
 
-/* Where is the running board? Env wins, then the session file. */
-export function findBoard() {
+/* Where is the board this client should talk to?
+
+   HANDWAVE_URL is absolute and wins — it names a board directly, which is what
+   a test or a script wants. Otherwise the name decides: HANDWAVE_BOARD, which
+   each harness's MCP registration can set, so a Claude session and an opencode
+   session reach different boards without either knowing the other exists. */
+export function findBoard(name = boardName()) {
   if (process.env.HANDWAVE_URL) return process.env.HANDWAVE_URL;
-  try {
-    const s = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
-    return s.url;
-  } catch { return null; }
+  const all = listBoards();
+  if (all[name]) return all[name].url;
+  // a board from before the registry existed
+  if (name === DEFAULT_BOARD) {
+    try { return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')).url; } catch { /* none */ }
+  }
+  return null;
 }

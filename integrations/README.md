@@ -24,6 +24,12 @@ terminal can draw on it at the same time.
 | `claude_desktop` | `mcpServers` in `claude_desktop_config.json` |
 | `project` | an `AGENTS.md` block in the current repo — opt in by name |
 
+Each harness also gets its own **board name**, set as `HANDWAVE_BOARD` in the
+MCP registration (`environment` for opencode, `env` for everyone else). Two
+agents drawing on one board interleave two explanations into one picture; this
+keeps them apart without anyone arranging it. `handwave boards` shows who
+ended up where.
+
 Two decisions worth knowing:
 
 **Skills are symlinked, not copied.** A copy goes stale the moment the source

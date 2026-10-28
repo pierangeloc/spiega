@@ -103,6 +103,24 @@ processes already running.
 
 See [`integrations/`](integrations/) for what each target writes.
 
+## One board per conversation
+
+A board belongs to an explanation, and people hold more than one at a time. Two
+agents drawing on the same board interleave two explanations into one picture,
+which is worse than either having none — so boards have names.
+
+```bash
+handwave boards                      # every board, and which one this shell uses
+handwave --board api draw '...'      # or HANDWAVE_BOARD=api
+handwave stop --all
+```
+
+`handwave install` gives each harness its own name through the MCP
+registration's environment, so an opencode session and a Claude Code session
+land on different boards without anyone arranging it. A board is registered by
+the process serving it and pruned from the registry when that process is gone,
+so a name never resolves to a socket nobody is listening on.
+
 ## Compare how models use it
 
 ```bash

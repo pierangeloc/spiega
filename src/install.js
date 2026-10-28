@@ -64,10 +64,16 @@ const linkSkill = (dir, name = 'handwave') => {
 };
 
 const isLink = p => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
+/* Never beside the thing being replaced. A skills directory is scanned by the
+   harness, so `handwave.bak-…` sitting next to `handwave` is not a backup — it
+   is a second skill, loaded every session, with the same description and
+   older contents. Backups go somewhere nothing reads. */
 const backupDir = d => {
   if (isLink(d) || !fs.existsSync(d)) return null;
-  const b = `${d}.bak-handwave-${new Date().toISOString().slice(0, 10)}`;
-  if (!fs.existsSync(b)) fs.cpSync(d, b, { recursive: true });
+  const b = path.join(HOME, '.handwave', 'backups',
+    `${path.basename(d)}-${Date.now().toString(36)}`);
+  fs.mkdirSync(path.dirname(b), { recursive: true });
+  fs.cpSync(d, b, { recursive: true });
   return b;
 };
 
@@ -87,7 +93,19 @@ const mcpJSON = (file, key, value) => {
   return [file, b ? `backed up to ${path.basename(b)}` : 'created'];
 };
 
-const STDIO = { type: 'stdio', command: 'node', args: [MCP_ENTRY] };
+/* Each harness draws on its own board.
+
+   Two agents sharing one board interleave two explanations into one picture,
+   which is worse than either having none — and it happens by default, because
+   a board is found by name and everything defaults to the same name. So the
+   registration carries the name: the MCP server inherits HANDWAVE_BOARD and
+   every tool call resolves through it. Nobody has to think about it, and
+   `handwave boards` shows who ended up where.
+
+   The key differs per harness because the schemas do: opencode calls it
+   `environment`, everyone else `env`. */
+const boardEnv = name => ({ HANDWAVE_BOARD: name });
+const STDIO = name => ({ type: 'stdio', command: 'node', args: [MCP_ENTRY], env: boardEnv(name) });
 
 /* The instruction file a harness reads every turn. */
 const agentsFile = file => {
@@ -125,7 +143,7 @@ export const TARGETS = {
       if (!/^\s*\[mcp_servers\.handwave\]/m.test(raw)) {
         backup(file);
         fs.mkdirSync(path.dirname(file), { recursive: true });
-        const block = `\n[mcp_servers.handwave]\ncommand = "node"\nargs = ["${MCP_ENTRY}"]\n`;
+        const block = `\n[mcp_servers.handwave]\ncommand = "node"\nargs = ["${MCP_ENTRY}"]\nenv = { HANDWAVE_BOARD = "codex" }\n`;
         fs.writeFileSync(file, raw.replace(/\n*$/, '\n') + block);
         note += ', MCP server';
       } else note += ', MCP already registered';
@@ -138,7 +156,7 @@ export const TARGETS = {
     detect: () => fs.existsSync(path.join(HOME, '.gemini')),
     run: () => {
       const [where] = linkSkill(path.join(HOME, '.gemini', 'skills'));
-      mcpJSON(path.join(HOME, '.gemini', 'settings.json'), 'mcpServers', STDIO);
+      mcpJSON(path.join(HOME, '.gemini', 'settings.json'), 'mcpServers', STDIO('gemini'));
       agentsFile(path.join(HOME, '.gemini', 'GEMINI.md'));
       return [where, 'skill, MCP server, GEMINI.md'];
     },
@@ -151,7 +169,7 @@ export const TARGETS = {
       const file = path.join(HOME, '.config', 'opencode', 'opencode.json');
       const cfg = readJSON(file);
       cfg.mcp ||= {};
-      const want = { type: 'local', command: ['node', MCP_ENTRY], enabled: true };
+      const want = { type: 'local', command: ['node', MCP_ENTRY], enabled: true, environment: boardEnv('opencode') };
       let note;
       if (JSON.stringify(cfg.mcp.handwave) === JSON.stringify(want)) note = 'MCP already registered';
       else { const b = backup(file); cfg.mcp.handwave = want; writeJSON(file, cfg); note = b ? 'MCP registered, config backed up' : 'MCP registered'; }
@@ -164,7 +182,7 @@ export const TARGETS = {
   copilot: {
     what: 'GitHub Copilot CLI — MCP server',
     detect: () => fs.existsSync(path.join(HOME, '.copilot')),
-    run: () => mcpJSON(path.join(HOME, '.copilot', 'mcp-config.json'), 'mcpServers', { ...STDIO, tools: ['*'] }),
+    run: () => mcpJSON(path.join(HOME, '.copilot', 'mcp-config.json'), 'mcpServers', { ...STDIO('copilot'), tools: ['*'] }),
   },
 
   cursor: {
@@ -175,34 +193,34 @@ export const TARGETS = {
       fs.mkdirSync(dir, { recursive: true });
       const out = path.join(dir, 'handwave.mdc');
       fs.copyFileSync(path.join(ROOT, 'integrations/cursor/handwave.mdc'), out);
-      return mcpJSON(path.join(HOME, '.cursor', 'mcp.json'), 'mcpServers', STDIO);
+      return mcpJSON(path.join(HOME, '.cursor', 'mcp.json'), 'mcpServers', STDIO('cursor'));
     },
   },
 
   windsurf: {
     what: 'Windsurf — MCP server',
     detect: () => fs.existsSync(path.join(HOME, '.codeium', 'windsurf')),
-    run: () => mcpJSON(path.join(HOME, '.codeium', 'windsurf', 'mcp_config.json'), 'mcpServers', STDIO),
+    run: () => mcpJSON(path.join(HOME, '.codeium', 'windsurf', 'mcp_config.json'), 'mcpServers', STDIO('windsurf')),
   },
 
   zed: {
     what: 'Zed — context server',
     detect: () => fs.existsSync(path.join(HOME, '.config', 'zed')),
     run: () => mcpJSON(path.join(HOME, '.config', 'zed', 'settings.json'), 'context_servers',
-      { source: 'custom', command: 'node', args: [MCP_ENTRY] }),
+      { source: 'custom', command: 'node', args: [MCP_ENTRY], env: boardEnv('zed') }),
   },
 
   vscode: {
     what: 'VS Code — MCP server',
     detect: () => fs.existsSync(vscodeUserDir()),
-    run: () => mcpJSON(path.join(vscodeUserDir(), 'mcp.json'), 'servers', STDIO),
+    run: () => mcpJSON(path.join(vscodeUserDir(), 'mcp.json'), 'servers', STDIO('vscode')),
   },
 
   claude_desktop: {
     what: 'Claude Desktop — MCP server',
     detect: () => fs.existsSync(claudeDesktopDir()),
     run: () => mcpJSON(path.join(claudeDesktopDir(), 'claude_desktop_config.json'), 'mcpServers',
-      { command: 'node', args: [MCP_ENTRY] }),
+      { command: 'node', args: [MCP_ENTRY], env: boardEnv('claude_desktop') }),
   },
 
   /* Anything else. AGENTS.md is the one instruction file the whole field has

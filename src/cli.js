@@ -13,7 +13,21 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const argv = process.argv.slice(2);
+let argv = process.argv.slice(2);
+
+/* Flags may come before the command. `handwave --board api draw ...` and
+   `handwave draw --board api ...` are the same thing, and a person who types
+   the first and is told there is no such command "--board" has been failed by
+   the parser, not by themselves. The command is rotated to the front; flag()
+   and positional() see the array they expect. */
+{
+  let i = 0;
+  while (i < argv.length && argv[i].startsWith('-')) {
+    const takesValue = argv[i + 1] != null && !argv[i + 1].startsWith('-');
+    i += takesValue ? 2 : 1;
+  }
+  if (i > 0 && i < argv.length) argv = [argv[i], ...argv.slice(0, i), ...argv.slice(i + 1)];
+}
 const cmd = argv[0];
 
 /* Accepts both `--out x` and the short `-o x`, since the help advertises both. */
@@ -28,6 +42,14 @@ const positional = () => argv.slice(1).filter((a, i, all) =>
   !a.startsWith('--') && !(i > 0 && all[i - 1].startsWith('--') && !all[i - 1].includes('=')));
 
 const die = (msg, code = 1) => { console.error(msg); process.exit(code); };
+
+/* `--board NAME` picks which board this command talks to. It is set into the
+   environment rather than threaded through every call site, because that is
+   also how a harness selects one: the MCP registration sets HANDWAVE_BOARD,
+   and a Claude session and an opencode session then draw on different boards
+   without either knowing the other exists. */
+const boardFlag = flag('board');
+if (boardFlag && boardFlag !== true) process.env.HANDWAVE_BOARD = String(boardFlag);
 
 /* ---------- talking to a running board ---------- */
 
@@ -51,8 +73,10 @@ async function alive(url) {
    draws as its first action should not have to run a server command first. */
 async function startDetached() {
   const out = fs.openSync(path.join(process.env.TMPDIR || '/tmp', 'handwave.log'), 'a');
+  // the child inherits HANDWAVE_BOARD, so an autostarted board registers under
+  // the name the caller was already asking for
   const child = spawn(process.execPath, [path.join(HERE, 'cli.js'), 'serve', '--quiet'], {
-    detached: true, stdio: ['ignore', out, out],
+    detached: true, stdio: ['ignore', out, out], env: process.env,
   });
   child.unref();
   for (let i = 0; i < 60; i++) {
@@ -127,8 +151,15 @@ const HELP = `handwave — a hand-drawn board an agent draws on while it explain
   clear [--keep-title]          wipe the board
   render <spec.json> -o F.html  render a spec to a standalone file, no server
   snapshot [-o F.html]          save the live board as a standalone file
+  boards                        every board running, and which one this shell uses
   url                           print the running board's URL
-  stop                          stop the running board
+  stop [--all]                  stop this shell's board, or every one of them
+
+Every command takes --board NAME (or the HANDWAVE_BOARD environment variable)
+and talks to that board, starting it if it is not running. One board per
+conversation: a Claude session and an opencode session drawing on the same
+board interleave two explanations into one picture. "handwave install" gives
+each harness its own name, so this happens without anyone thinking about it.
 
 Ops are small JSON objects:
   {"op":"node","id":"gw","kind":"gateway","label":"API Gateway","sub":"authn"}
@@ -165,10 +196,18 @@ through the TTY, so it is good for glancing and for stepping a flow, not for roa
 const main = async () => {
   switch (cmd) {
     case 'serve': {
-      const { createServer, listen } = await import('./board/server.js');
+      const { createServer, listen, boardName, findBoard } = await import('./board/server.js');
+      const name = boardName();
+      // Refuse to start a second board under one name: the first would keep
+      // running, unreachable, and the ops would go to whichever won the race.
+      const existing = findBoard(name);
+      if (existing && await alive(existing)) {
+        if (!flag('quiet')) console.log(`handwave: "${name}" is already running on ${existing}`);
+        return;
+      }
       const app = createServer();
-      const url = await listen(app, Number(flag('port', 4777)));
-      if (!flag('quiet')) console.log(`handwave listening on ${url}`);
+      const url = await listen(app, Number(flag('port', 4777)), 20, name);
+      if (!flag('quiet')) console.log(`handwave listening on ${url}${name === 'default' ? '' : `  (board "${name}")`}`);
       if (flag('open')) {
         const { openBoard } = await import('./board/open.js');
         openBoard(url, { app: !flag('tab'), size: flag('size'), browser: flag('browser') });
@@ -246,7 +285,7 @@ const main = async () => {
     }
 
     case 'draw': case 'op':
-      return void (await send(await readOps(argv[1])));
+      return void (await send(await readOps(positional()[0])));
 
     case 'say': {
       const step = flag('step'), edge = flag('edge');
@@ -309,7 +348,7 @@ const main = async () => {
     }
 
     case 'step': {
-      const a = argv[1];
+      const a = positional()[0];
       const url = await boardURL({ autostart: true });
       const state = await (await fetch(url + '/state')).json();
       let step;
@@ -325,7 +364,7 @@ const main = async () => {
       return void (await send([{ op: 'clear', keepTitle: !!flag('keep-title') }]));
 
     case 'render': {
-      const file = argv[1];
+      const file = positional()[0];
       if (!file) die('handwave render: give me a spec file');
       const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
       const { emptyBoard, applyOps } = await import('./board/state.js');
@@ -357,13 +396,59 @@ const main = async () => {
     }
 
     case 'stop': {
-      const { SESSION_FILE } = await import('./board/server.js');
-      try {
-        const s = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
-        process.kill(s.pid);
-        fs.unlinkSync(SESSION_FILE);
-        console.log('stopped');
-      } catch { die('handwave: nothing to stop'); }
+      const { SESSION_FILE, listBoards, unregisterBoard, boardName, DEFAULT_BOARD } =
+        await import('./board/server.js');
+      const all = listBoards();
+      const names = flag('all') ? Object.keys(all) : [boardName()];
+      let n = 0;
+      for (const name of names) {
+        const b = all[name];
+        if (b?.pid) { try { process.kill(b.pid); } catch { /* already gone */ } }
+        if (unregisterBoard(name)) n++;
+        if (name === DEFAULT_BOARD) { try { fs.unlinkSync(SESSION_FILE); } catch { /* none */ } }
+        if (b) console.log(`stopped ${name === DEFAULT_BOARD ? 'the board' : `"${name}"`}`);
+      }
+      // a board from before the registry existed
+      if (!n && !flag('all')) {
+        try {
+          const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+          process.kill(sess.pid); fs.unlinkSync(SESSION_FILE);
+          return void console.log('stopped');
+        } catch { die('handwave: nothing to stop'); }
+      }
+      if (!n) die('handwave: nothing to stop');
+      return;
+    }
+
+    /* Which boards exist, and who is watching them. */
+    case 'boards': {
+      const { listBoards, boardName, DEFAULT_BOARD, SESSION_FILE } = await import('./board/server.js');
+      const all = listBoards();
+      /* A board started before the registry existed is in session.json and
+         nowhere else. Saying "no boards running" while one is plainly open on
+         screen is worse than saying nothing. */
+      if (!all[DEFAULT_BOARD]) {
+        try {
+          const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+          if (sess.url && await alive(sess.url)) all[DEFAULT_BOARD] = { url: sess.url, legacy: true };
+        } catch { /* none */ }
+      }
+      const names = Object.keys(all);
+      if (!names.length) return void console.log('no boards running');
+      const here = boardName();
+      for (const name of names) {
+        const { url } = all[name];
+        let note = 'not answering';
+        try {
+          const st = await (await fetch(url + '/state', { signal: AbortSignal.timeout(900) })).json();
+          note = `${st.nodes.length} boxes, ${st.edges.length} lines` + (st.title ? ` \u2014 ${st.title}` : '');
+        } catch { /* left as not answering */ }
+        const tail = all[name].legacy ? '  (started before boards had names)' : '';
+        console.log(`${name === here ? '\u2192' : ' '} ${name.padEnd(14)}${url.padEnd(24)}${note}${tail}`);
+      }
+      if (names.length > 1 || here !== DEFAULT_BOARD) {
+        console.log(`\n\u2192 is this shell's board (HANDWAVE_BOARD, or --board NAME).`);
+      }
       return;
     }
 

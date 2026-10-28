@@ -2,6 +2,7 @@
    Run with `node test/smoke.mjs`. No framework, no network. */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps } from '../src/board/state.js';
@@ -444,6 +445,15 @@ test('every install target names a real file or directory, and detection is hone
   for (const n of detect()) assert.ok(TARGET_NAMES.includes(n));
 });
 
+test('a backup never lands inside a directory the harness scans', () => {
+  // `handwave.bak-...` next to `handwave` in ~/.claude/skills is not a backup,
+  // it is a second skill with the same description and older contents.
+  const src = fs.readFileSync(path.join(ROOT, 'src/install.js'), 'utf8');
+  const fn = src.slice(src.indexOf('const backupDir'), src.indexOf('const mcpJSON'));
+  assert.ok(!/\$\{d\}\.bak/.test(fn), 'a sibling of the target is the one place it must not go');
+  assert.ok(/\.handwave['"],\s*['"]backups/.test(fn), 'backups belong somewhere nothing scans');
+});
+
 test('the skill the installers link to exists, with the frontmatter a harness reads', () => {
   const f = path.join(ROOT, 'skills/handwave/SKILL.md');
   assert.ok(fs.existsSync(f), 'skills/handwave/SKILL.md is the one canonical copy');
@@ -571,6 +581,67 @@ await atest('the MCP server exits when its client closes the pipe', async () => 
     new Promise((_, rej) => setTimeout(() => rej(new Error('still running 5s after its pipe closed')), 5000)),
   ]).catch(e => { child.kill('SIGKILL'); throw e; });
   assert.equal(code, 0, 'it should exit cleanly');
+});
+
+/* Named boards. One board per conversation, because two agents sharing one
+   interleave two explanations into one drawing. Run in a child with its own
+   HOME: the registry lives under ~/.handwave and a test must never go near
+   the real one. Everything happens in one process, because a board is pruned
+   when the process that registered it exits — which is the point of the
+   registry, and would otherwise prune these the moment they were written. */
+await atest('boards are found by name, kept apart, and pruned when their server dies', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-home-'));
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.HANDWAVE_URL;
+  delete env.HANDWAVE_BOARD;
+
+  const script = `
+    const m = await import(${JSON.stringify(path.join(ROOT, 'src/board/server.js'))});
+    const fs = await import('node:fs');
+    const out = {};
+
+    m.registerBoard('alpha', 'http://127.0.0.1:1111');
+    m.registerBoard('beta', 'http://127.0.0.1:2222');
+    out.alpha = m.findBoard('alpha');
+    out.beta = m.findBoard('beta');
+    out.unknown = m.findBoard('nope');
+
+    process.env.HANDWAVE_BOARD = 'beta';           // how a harness picks one
+    out.byEnv = m.findBoard();
+    process.env.HANDWAVE_URL = 'http://explicit';  // an explicit url still wins
+    out.byUrl = m.findBoard();
+    delete process.env.HANDWAVE_URL;
+
+    out.names = Object.keys(m.listBoards()).sort();
+    out.gone = m.unregisterBoard('alpha');
+    out.afterUnregister = Object.keys(m.listBoards());
+
+    // a board whose server died: pid 1 is init, so use one that cannot exist
+    const all = JSON.parse(fs.readFileSync(m.BOARDS_FILE, 'utf8'));
+    all.ghost = { url: 'http://127.0.0.1:9999', pid: 0x7ffffff0, started: Date.now() };
+    fs.writeFileSync(m.BOARDS_FILE, JSON.stringify(all));
+    out.withGhost = Object.keys(m.listBoards()).sort();
+    out.ghostLookup = String(m.findBoard('ghost'));
+
+    console.log(JSON.stringify(out));
+  `;
+  const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script], { env });
+  const r = JSON.parse(stdout.trim());
+
+  assert.equal(r.alpha, 'http://127.0.0.1:1111');
+  assert.equal(r.beta, 'http://127.0.0.1:2222', 'two boards, kept apart');
+  assert.equal(r.unknown, null, 'an unknown name is nothing, never someone else\'s board');
+  assert.equal(r.byEnv, 'http://127.0.0.1:2222', 'HANDWAVE_BOARD selects');
+  assert.equal(r.byUrl, 'http://explicit', 'an explicit url outranks the name');
+  assert.deepEqual(r.names, ['alpha', 'beta']);
+  assert.equal(r.gone, true);
+  assert.deepEqual(r.afterUnregister, ['beta']);
+  assert.deepEqual(r.withGhost, ['beta'], 'a board whose server is gone is pruned on read');
+  assert.equal(r.ghostLookup, 'null', 'and is never handed to a client');
+
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
 console.log(`\n${n} passed`);
