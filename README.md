@@ -81,14 +81,27 @@ at once.
 ## Wire it to an agent
 
 ```bash
-handwave install              # all targets
-handwave install claude opencode
-handwave install list         # claude cursor opencode vscode claude_desktop
+handwave install              # whatever is on this machine
+handwave install --detect     # what that would be, without doing it
+handwave install --list       # every target and what it writes
 ```
 
-Each target is idempotent and backs up any config it rewrites. Claude Code and
-Cursor get the skill and the rule; opencode, VS Code/Copilot and Claude Desktop
-get the MCP server registered.
+Claude Code, Codex, Gemini CLI, opencode, Copilot, Cursor, Windsurf, Zed,
+VS Code and Claude Desktop, plus `project` for an `AGENTS.md` block in the repo
+you are in. `install` with no arguments does only what it finds, because
+writing a config for a harness you do not use is how you end up with a file you
+never asked for.
+
+Each target is idempotent and backs up any config it rewrites. Skills are
+**symlinked**, so they track the checkout rather than going stale; instruction
+files get a delimited block that leaves your own text alone. For a harness
+nothing here knows about, `handwave mcp-config` prints the entry to paste.
+
+A running agent session holds the MCP process it started, so restart the
+session after changing handwave — the link keeps the files current, not the
+processes already running.
+
+See [`integrations/`](integrations/) for what each target writes.
 
 ## Compare how models use it
 

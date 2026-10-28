@@ -115,7 +115,8 @@ const HELP = `handwave — a hand-drawn board an agent draws on while it explain
 
   serve [--port N] [--open]     start the board and keep it running
   open [--tab] [--size WxH]     open the board in its own browser window
-  install [targets...]          wire it into your agents (see the list below)
+  install [targets...]          wire it into your agents (--detect to see what it would do)
+  mcp-config [--shape S]        print the MCP entry to paste into any other harness
   bench <prompt> --models a,b   draw the same explanation with several models
   draw <json|file|->            add to the board (one op, or a list, or a whole spec)
   say  <text> [--step N]        put a line in the transcript beside the drawing
@@ -143,9 +144,16 @@ a line about the whole board carries no step and never dims.
 
 kinds: client gateway service compute datastore cache queue external note
 
-install targets: claude  cursor  opencode  vscode  claude_desktop
-  handwave install                 all of them
-  handwave install claude opencode just those
+install targets: claude codex gemini opencode copilot cursor windsurf zed
+                 vscode claude_desktop project
+  handwave install                 whatever is on this machine
+  handwave install --detect        what that would be, without doing it
+  handwave install --list          every target and what it writes
+  handwave install project         an AGENTS.md block in the current repo
+  handwave install codex gemini    just those
+
+Skills are symlinked, not copied, so they track the repo. MCP entries point at
+this checkout, so a new agent session always starts on the current code.
 
 "open" gives the board a chromeless window of its own (Chrome/Brave/Edge app mode),
 which is the right place to pan and zoom. A terminal pane has to push every frame
@@ -169,13 +177,47 @@ const main = async () => {
     }
 
     case 'install': {
-      const { install, TARGET_NAMES } = await import('./install.js');
+      const { install, TARGET_NAMES, TARGETS, detect } = await import('./install.js');
       const want = positional().filter(a => a !== 'install');
-      if (want[0] === 'list') return void console.log(TARGET_NAMES.join('\n'));
+      if (want[0] === 'list') {
+        for (const n of TARGET_NAMES) console.log(`  ${n.padEnd(16)}${TARGETS[n].what}`);
+        return;
+      }
+      // what it would do, before it does anything
+      if (flag('detect')) {
+        const here = detect();
+        for (const n of TARGET_NAMES) {
+          const mark = n === 'project' ? '  ·' : here.includes(n) ? ' \u2713' : '  ·';
+          console.log(`${mark} ${n.padEnd(16)}${TARGETS[n].what}`);
+        }
+        console.log(`\n\u2713 = found on this machine; \`handwave install\` does those.`);
+        console.log('Name any target to install it anyway, e.g. `handwave install project`.');
+        return;
+      }
       for (const r of install(want)) {
         if (r.ok) console.log(`  ok    ${r.what}\n        ${r.where}${r.note ? `  (${r.note})` : ''}`);
         else console.error(`  FAIL  ${r.what || r.name}: ${r.note}`);
       }
+      return;
+    }
+
+    /* Every harness worth the name speaks MCP, but they keep their config in
+       different files and shapes. For the ones `install` knows, it writes them.
+       For anything else — a harness that did not exist last week — print the
+       entry so it can be pasted, rather than leaving the person to guess. */
+    case 'mcp-config': {
+      const entry = path.join(HERE, 'mcp', 'server.js');
+      const shape = String(flag('shape') || 'stdio');
+      const shapes = {
+        stdio: { mcpServers: { handwave: { type: 'stdio', command: 'node', args: [entry] } } },
+        servers: { servers: { handwave: { type: 'stdio', command: 'node', args: [entry] } } },
+        opencode: { mcp: { handwave: { type: 'local', command: ['node', entry], enabled: true } } },
+        zed: { context_servers: { handwave: { source: 'custom', command: 'node', args: [entry] } } },
+        toml: null,
+      };
+      if (shape === 'toml') return void console.log(`[mcp_servers.handwave]\ncommand = "node"\nargs = ["${entry}"]`);
+      if (!shapes[shape]) die(`handwave mcp-config: unknown shape "${shape}" (stdio, servers, opencode, zed, toml)`);
+      console.log(JSON.stringify(shapes[shape], null, 2));
       return;
     }
 

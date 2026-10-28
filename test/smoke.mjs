@@ -9,6 +9,7 @@ import { renderSVG } from '../src/render/render.js';
 import { snapshotHTML } from '../src/board/snapshot.js';
 import { KINDS } from '../src/render/glyphs.js';
 import { scriptSteps, linesFor, lineStates } from '../src/board/script.js';
+import { upsertBlock, removeBlock, START, END, BLOCK } from '../src/agents-block.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let n = 0;
@@ -376,6 +377,80 @@ test('every install target copies a file that exists', () => {
   for (const r of refs) {
     assert.ok(fs.existsSync(path.join(ROOT, ...r)), `install.js points at a missing file: ${r.join('/')}`);
   }
+});
+
+/* The AGENTS.md block goes into files people wrote themselves and have spent a
+   long time on. Every property below is about not damaging those files. */
+const fakeFS = store => ({
+  existsSync: f => f in store,
+  readFileSync: f => store[f],
+});
+
+test('the block is added once, updated in place, and never duplicated', () => {
+  const f = '/AGENTS.md';
+  const store = { [f]: '# My instructions\n\nAlways run the tests.\n' };
+
+  const first = upsertBlock(fakeFS(store), f);
+  assert.equal(first.how, 'added');
+  assert.ok(first.text.startsWith('# My instructions'), 'what was there stays at the top');
+  assert.ok(first.text.includes('Always run the tests.'), 'and is not lost');
+  store[f] = first.text;
+
+  const again = upsertBlock(fakeFS(store), f);
+  assert.equal(again.how, 'unchanged');
+  assert.equal(again.changed, false, 'a second install must not write anything');
+
+  // the guidance changes; the block is replaced where it stands
+  store[f] = store[f].replace(BLOCK, 'OLD TEXT');
+  const up = upsertBlock(fakeFS(store), f);
+  assert.equal(up.how, 'updated');
+  assert.equal((up.text.match(new RegExp(START, 'g')) || []).length, 1, 'exactly one block');
+  assert.ok(!up.text.includes('OLD TEXT'));
+  assert.ok(up.text.startsWith('# My instructions'), 'the file keeps its shape');
+});
+
+test('removing the block leaves the rest of the file untouched', () => {
+  const f = '/AGENTS.md';
+  const original = '# Mine\n\nRule one.\n\n## Another section\n\nRule two.\n';
+  const store = { [f]: original };
+  const added = upsertBlock(fakeFS(store), f).text;
+  const back = removeBlock(added);
+  assert.equal(back.changed, true);
+  assert.equal(back.text.trim(), original.trim(), 'byte-for-byte, minus the block');
+});
+
+test('a half-edited block is refused rather than guessed at', () => {
+  const f = '/AGENTS.md';
+  const store = { [f]: `# Mine\n\n${START}\nsomeone deleted the end marker\n` };
+  assert.throws(() => upsertBlock(fakeFS(store), f), /one handwave marker but not the other/,
+    'eating the rest of the file is not an acceptable failure');
+});
+
+test('an empty or missing file just gets the block', () => {
+  assert.equal(upsertBlock(fakeFS({}), '/new.md').how, 'created');
+  assert.equal(upsertBlock(fakeFS({ '/e.md': '   \n' }), '/e.md').how, 'created');
+});
+
+test('every install target names a real file or directory, and detection is honest', async () => {
+  const { TARGETS, TARGET_NAMES, detect } = await import('../src/install.js');
+  assert.ok(TARGET_NAMES.length >= 10, 'the point is breadth');
+  for (const n of TARGET_NAMES) {
+    assert.equal(typeof TARGETS[n].what, 'string', `${n} should say what it does`);
+    assert.equal(typeof TARGETS[n].detect, 'function', `${n} should be detectable`);
+    assert.equal(typeof TARGETS[n].run, 'function');
+  }
+  // detect() must never include `project`: it writes into the working directory
+  assert.ok(!detect().includes('project'), 'project is opt-in, never automatic');
+  for (const n of detect()) assert.ok(TARGET_NAMES.includes(n));
+});
+
+test('the skill the installers link to exists, with the frontmatter a harness reads', () => {
+  const f = path.join(ROOT, 'skills/handwave/SKILL.md');
+  assert.ok(fs.existsSync(f), 'skills/handwave/SKILL.md is the one canonical copy');
+  const head = fs.readFileSync(f, 'utf8').slice(0, 600);
+  assert.match(head, /^---\n/, 'it needs YAML frontmatter');
+  assert.match(head, /\nname: handwave\n/);
+  assert.match(head, /\ndescription: .{40,}/, 'the description is what makes a harness load it');
 });
 
 /* Replay on request: the board's own log is the source, so asking for the
