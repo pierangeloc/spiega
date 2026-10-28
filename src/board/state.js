@@ -16,8 +16,15 @@ export const emptyBoard = () => ({
   transcript: [],
   active: null,
   placed: {},        // sticky column/row assignments — see render/layout.js
+  // Every op, in the order it arrived. A board is a session, not a diagram, so
+  // the order the explanation went in is part of what it holds — without this
+  // the board can only ever show its final state, and the thinking that got
+  // there is lost the moment it is drawn.
+  log: [],
   rev: 0,
 });
+
+const LOG_CAP = 4000;
 
 const upsert = (list, item, key = 'id') => {
   const i = list.findIndex(x => x[key] === item[key]);
@@ -31,6 +38,11 @@ const edgeId = e => `${e.from}>${e.to}`;
    to animate on and what was already on the board. */
 export function applyOp(board, op) {
   const fresh = { nodes: [], edges: [], boundaries: [] };
+  // recorded before the switch, so a `clear` wipes the log with everything else
+  const record = () => {
+    board.log.push({ ...op, at: Date.now() });
+    if (board.log.length > LOG_CAP) board.log.splice(0, board.log.length - LOG_CAP);
+  };
   switch (op.op) {
     case 'clear': {
       const t = op.keepTitle ? board.title : '';
@@ -98,6 +110,7 @@ export function applyOp(board, op) {
     default:
       return { ok: false, error: `unknown op "${op.op}"`, fresh };
   }
+  if (op.op !== 'clear') record();
   board.rev++;
   return { ok: true, fresh };
 }

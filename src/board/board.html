@@ -87,6 +87,15 @@
   .steps[hidden]{display:none}
   .steps .n{font-size:11px;color:var(--muted);letter-spacing:.08em;white-space:nowrap}
   .steps .txt{flex:1;font-size:13px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* The line being said, over the drawing. The rail is collapsed in a narrow
+     pane and scrolled away in a wide one, so during a replay the words have to
+     come to the picture. */
+  .caption{position:absolute;left:50%;transform:translateX(-50%);bottom:26px;z-index:4;max-width:min(680px,88%);
+    background:var(--ink);color:var(--paper);border-radius:13px;padding:10px 16px;font-size:14px;line-height:1.5;
+    box-shadow:4px 4px 0 rgba(35,30,22,.18);text-align:center;opacity:0;transition:opacity .3s}
+  .caption[hidden]{display:none}
+  .caption.on{opacity:1}
+  .caption b{color:var(--accent)}
   .offline{position:absolute;left:0;right:0;top:0;z-index:6;display:flex;gap:10px;align-items:baseline;
     justify-content:center;padding:7px 14px;background:#b3402a;color:var(--paper);font-size:11.5px}
   .offline[hidden]{display:none}
@@ -101,6 +110,7 @@
     <span class="count" id="count"></span>
     <span class="spacer"></span>
     <button class="btn" id="rail-toggle" title="hide the transcript">transcript</button>
+    <button class="btn" id="replay" title="play the session back as it happened">replay</button>
     <button class="btn" id="fit">fit</button>
     <button class="btn" id="snap" title="open a standalone copy of this board">snapshot</button>
   </div>
@@ -117,6 +127,7 @@
         <span class="k">not connected</span>
         <span>this board may be out of date &mdash; reconnecting&hellip;</span>
       </div>
+      <div class="caption" id="caption" hidden></div>
       <div class="steps" id="steps" hidden>
         <button class="btn" id="prev">&larr;</button>
         <span class="n" id="stepn"></span>
@@ -130,11 +141,16 @@
 <script type="module">
 import { renderSVG } from '/src/render/render.js';
 import { animateIn, seedOf } from '/src/board/draw-on.js';
+import { emptyBoard, applyOps } from '/src/board/state.js';
 
 const $ = id => document.getElementById(id);
 const pan = $('pan'), stage = $('stage');
 
-let board = null;
+let board = null;      // the live board
+let shown = null;      // what is on screen — the live board, or a replay of it
+let lastBoxes = {};
+const MARGIN = 18;
+const view_of = () => shown || board;
 let drawn = new Set();          // keys already on the board, so they animate once
 let view = { x: 0, y: 0, k: 1 };
 let userMoved = false;
@@ -145,14 +161,17 @@ let playing = null;
 /* ---------- render ---------- */
 
 function render(fresh = null) {
+  const board = view_of();
   if (!board) return;
   const empty = !board.nodes.length;
-  $('blank').hidden = !empty;
+  // during a replay an empty board is the opening frame, not an invitation
+  $('blank').hidden = !empty || replaying;
   if (empty) { pan.innerHTML = ''; drawn = new Set(); return; }
 
-  const r = renderSVG(board, { margin: 18, active: board.active, placed: board.placed, hand: false });
+  const r = renderSVG(board, { margin: MARGIN, active: board.active, hand: false });
   pan.innerHTML = r.svg;
   pan.dataset.w = r.width; pan.dataset.h = r.height;
+  lastBoxes = r.boxes;
 
   // Anything whose key is new gets drawn on; everything else is simply there.
   // Stagger order is boxes, then enclosures, then the lines between them —
@@ -175,13 +194,14 @@ function render(fresh = null) {
     drawn.add(key);
   }
   const n = pending.length;
-  if (!userMoved) fit(groups.length > 0 && n > 0);
+  if (!userMoved && !replaying) fit(groups.length > 0 && n > 0);
   $('count').textContent = `${board.nodes.length} boxes · ${board.edges.length} lines`;
+  return clock;
 }
 
 function fit(smooth = false) {
   const W = +pan.dataset.w || 1, H = +pan.dataset.h || 1;
-  const aw = stage.clientWidth - 32, ah = stage.clientHeight - (board?.flow?.length ? 86 : 32);
+  const aw = stage.clientWidth - 32, ah = stage.clientHeight - (view_of()?.flow?.length ? 86 : 32);
   // The stage can report zero size mid-layout — in a split pane that is resizing,
   // or before the first paint. Fitting to that yields a negative scale that
   // sticks, so skip and let the ResizeObserver below try again.
@@ -203,7 +223,7 @@ const mdish = s => s
 
 function renderRail() {
   const rail = $('rail');
-  const t = board?.transcript || [];
+  const t = view_of()?.transcript || [];
   if (!t.length) { rail.innerHTML = '<div class="empty">Nothing said yet.</div>'; return; }
   rail.innerHTML = t.map((e, i) =>
     `<div class="said${i === t.length - 1 ? ' latest' : ''}">${mdish(e.text)}</div>`).join('');
@@ -213,6 +233,7 @@ function renderRail() {
 /* ---------- flow ---------- */
 
 function renderSteps() {
+  const board = view_of();
   const f = board?.flow || [];
   $('steps').hidden = !f.length;
   if (!f.length) return;
@@ -239,6 +260,124 @@ $('play').onclick = () => {
   playing = setInterval(tick, 1600);
 };
 
+/* ---------- replay: the session, as it happened ---------- */
+
+/* A finished board shows the answer but not the thinking, and on anything
+   complex the answer alone is a wall. Replay puts the session back: the line
+   that was said, then the thing it was about being drawn, in the order it
+   happened — and the camera goes where the work is, because a fifteen-box
+   board shrunk to fit is a diagram again, not a explanation.
+
+   Wall-clock gaps are thrown away. An agent may have thought for a minute
+   between two boxes; nobody wants to watch that. Pacing comes from how much
+   there is to read, not from how long it originally took. */
+
+let replaying = false;
+const beat = ms => new Promise(r => setTimeout(r, ms));
+
+/* Ease the camera onto whatever was just drawn — but only when there is a
+   reason to move. A board that already fits gets a held wide shot: a camera
+   that cuts around content you can see anyway is just motion sickness. And the
+   view never pans past the board's own edges, or the subject ends up framed
+   against empty paper. */
+function panTo(key) {
+  const W = +pan.dataset.w || 1, H = +pan.dataset.h || 1;
+  const aw = stage.clientWidth - 32, ah = stage.clientHeight - 96;
+  if (aw < 60 || ah < 60) return;
+
+  const fitK = Math.min(1.15, aw / W, ah / H);
+  if (fitK >= 0.72) { userMoved = false; fit(true); return; }   // it all fits: hold
+
+  const b = lastBoxes[key] || (() => {
+    const [from, to] = String(key).split('>');          // an edge: frame both ends
+    const p = lastBoxes[from], q = lastBoxes[to];
+    if (!p || !q) return null;
+    const x = Math.min(p.x, q.x), y = Math.min(p.y, q.y);
+    return { x, y, w: Math.max(p.x + p.w, q.x + q.w) - x, h: Math.max(p.y + p.h, q.y + q.h) - y };
+  })();
+  if (!b) return;
+
+  // close enough to read, with room around it: context is what makes a box
+  // read as part of a system rather than as a box
+  const k = Math.max(fitK, Math.min(0.95, aw / (b.w * 2.4), ah / (b.h * 3.2)));
+  const cx = (b.x + b.w / 2 + MARGIN) * k, cy = (b.y + b.h / 2 + MARGIN) * k;
+  const span = (total, avail, centre) => total * k <= avail
+    ? (avail - total * k) / 2 + 16                      // fits on this axis: centre it
+    : Math.min(16, Math.max(avail - total * k + 16, avail / 2 - centre));
+
+  view = { k, x: span(W, stage.clientWidth, cx), y: span(H, stage.clientHeight - 60, cy) };
+  pan.style.transition = 'transform .75s cubic-bezier(.33,.7,.3,1)';
+  applyView();
+}
+
+/* Put a line on screen, or clear it. */
+function say(text) {
+  const c = $('caption');
+  if (!text) { c.classList.remove('on'); setTimeout(() => { if (!c.classList.contains('on')) c.hidden = true; }, 320); return; }
+  c.innerHTML = mdish(text);
+  c.hidden = false;
+  requestAnimationFrame(() => c.classList.add('on'));
+}
+
+function stopReplay() {
+  replaying = false;
+  say(null);
+  shown = null;
+  drawn = new Set();
+  $('replay').classList.remove('on');
+  $('replay').textContent = 'replay';
+  render(); renderRail(); renderSteps();
+  userMoved = false; fit(true);
+}
+
+async function replay() {
+  if (replaying) return stopReplay();
+  const log = (board?.log || []).filter(e => e.op !== 'focus' && e.op !== 'clear');
+  if (!log.length) return;
+
+  replaying = true;
+  userMoved = false;
+  $('replay').classList.add('on');
+  $('replay').textContent = 'stop';
+
+  const rb = emptyBoard();
+  shown = rb;
+  drawn = new Set();
+  render(); renderRail(); renderSteps();
+  await beat(400);
+
+  for (const entry of log) {
+    if (!replaying) return;
+    const before = new Set(drawn);
+    applyOps(rb, [entry]);
+
+    if (entry.op === 'say') {
+      renderRail();
+      say(entry.text);
+      // time to read it, floored so a short line still lands
+      await beat(Math.min(4200, 850 + (entry.text || '').length * 26));
+      continue;
+    }
+    if (entry.op === 'title') { $('title').textContent = rb.title; continue; }
+
+    const drawMs = render() || 400;
+    renderSteps();
+    // frame whatever is new, once it has somewhere to be
+    const added = [...drawn].find(k => !before.has(k));
+    if (added) { await beat(90); panTo(added); }
+    await beat(Math.max(520, drawMs + 260));
+  }
+
+  if (!replaying) return;
+  // the closing wide shot
+  userMoved = false;
+  fit(true);
+  await beat(1100);
+  stopReplay();
+}
+
+$('replay').onclick = replay;
+
 /* ---------- plumbing ---------- */
 
 async function post(ops) {
@@ -248,6 +387,9 @@ async function post(ops) {
 function onState(b, fresh) {
   const first = !board;
   board = b;
+  // A replay owns the screen while it runs; the live board keeps updating
+  // underneath and is shown again when the replay ends.
+  if (replaying) { $('count').textContent = 'replaying\u2026'; return; }
   $('title').textContent = b.title || 'handwave';
   document.title = b.title ? `${b.title} · handwave` : 'handwave';
   setLink('live');
@@ -373,7 +515,8 @@ addEventListener('keydown', e => {
   else if (e.key === 'ArrowLeft') $('prev').click();
   else if (e.key === ' ') { e.preventDefault(); $('play').click(); }
   else if (e.key === 'f') $('fit').click();
-  else if (e.key === 'Escape') focus(null);
+  else if (e.key === 'r') $('replay').click();
+  else if (e.key === 'Escape') { if (replaying) stopReplay(); else focus(null); }
 });
 addEventListener('resize', () => { if (!userMoved) fit(); });
 // A board usually lives in a pane someone is dragging wider or narrower.

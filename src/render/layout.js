@@ -49,8 +49,14 @@ export function sizeOf(n) {
 }
 
 /* Assign a column and row to every node that does not have one yet.
-   `placed` is the running assignment and is mutated — that is what makes it
-   sticky across the incremental ops that build a board up. */
+
+   `placed` is MUTATED, and anything already in it is returned untouched. So
+   passing the same map across renders freezes the layout: a node drawn before
+   the edge that explains where it belongs stays in column 0 for good, because
+   the edge arrives after the node has been pinned. Callers that render a board
+   repeatedly pass nothing and let this recompute — it is cheap, and resolving
+   in insertion order is already stable. The parameter is for pinning a layout
+   deliberately, which is not what rendering wants. */
 export function assign(spec, placed = {}) {
   const byId = Object.fromEntries(spec.nodes.map(n => [n.id, n]));
   const incoming = {};

@@ -94,7 +94,7 @@ export function createServer({ board = emptyBoard() } = {}) {
     }
     if (p === '/snapshot.svg') {
       const { renderSVG } = await import('../render/render.js');
-      const { svg } = renderSVG(board, { margin: 16, active: board.active, placed: board.placed });
+      const { svg } = renderSVG(board, { margin: 16, active: board.active });
       res.writeHead(200, { 'content-type': 'image/svg+xml' });
       return res.end(svg);
     }

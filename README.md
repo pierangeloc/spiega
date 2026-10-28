@@ -55,8 +55,15 @@ handwave snapshot -o docs/board.html
 
 `handwave help` lists the rest.
 
-**Keys on the board:** `←` `→` walk the flow, `space` plays it, `+` `-` zoom a
-step at a time, `0` or `f` fits, `esc` clears the highlight.
+**Replay.** A board holds the order it was drawn in, not just its final state,
+so press **replay** (or `r`) and the session plays back as it happened: the
+line that was said, then the thing it was about being drawn, with the camera
+moving to wherever the work is and the words captioned over the picture. On
+anything complex the finished board is a wall; the replay is the explanation.
+It ends on a wide shot of the whole thing.
+
+**Keys on the board:** `←` `→` walk the flow, `space` plays it, `r` replays the
+session, `+` `-` zoom a step at a time, `0` or `f` fits, `esc` stops.
 
 **Where to put the board.** `handwave open` gives it a real window and is the
 right answer for anything interactive. A terminal pane (`terminal-browser

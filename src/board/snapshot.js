@@ -16,10 +16,12 @@ const mdish = s => esc(s)
 
 export function snapshotHTML(board, { active = null, title = null } = {}) {
   const step = active == null || active === '' ? board.active : Number(active);
-  // The texture is worth the cost here: a snapshot is rendered once and never
-  // animates, so it gets the full ink-on-paper filter the live board skips.
+  // The same filter-free render the live board uses, with the grain as a CSS
+  // overlay: the SVG hand filter multiplies noise over every fill and visibly
+  // washes the body colours out, which a still image has no motion to excuse.
+  // `placed` is deliberately not passed — see render/layout.js.
   const { svg, steps } = renderSVG(board, {
-    margin: 20, active: Number.isFinite(step) ? step : null, placed: board.placed, hand: true,
+    margin: 20, active: Number.isFinite(step) ? step : null, hand: false,
   });
   const heading = title || board.title || 'Board';
   const said = (board.transcript || []).map(t => `<li>${mdish(t.text)}</li>`).join('');

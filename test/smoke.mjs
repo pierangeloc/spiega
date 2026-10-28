@@ -64,6 +64,18 @@ test('a node added later does not move the ones already placed', () => {
   assert.equal(before.b.col, after.b.col);
 });
 
+test('a node drawn before its edge is relayered when the edge arrives', () => {
+  // This is how an agent actually draws: the box, then the arrow into it. If
+  // layout is frozen after the first render the node is stuck in column 0.
+  const b = emptyBoard();
+  applyOps(b, [{ op: 'node', id: 'a', label: 'A' }, { op: 'node', id: 'b', label: 'B' }]);
+  renderSVG(b);                                  // render once with b floating
+  applyOps(b, [{ op: 'edge', from: 'a', to: 'b' }]);
+  const { boxes } = renderSVG(b);
+  assert.equal(boxes.b.col, 1, 'the edge should have moved b into the next column');
+  assert.ok(boxes.b.x > boxes.a.x);
+});
+
 test('every kind renders, and the same board draws the same strokes', () => {
   const b = emptyBoard();
   applyOps(b, KINDS.map((k, i) => ({ op: 'node', id: 'k' + i, kind: k, label: k, sub: 'x' })));
