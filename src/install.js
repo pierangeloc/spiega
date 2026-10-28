@@ -50,17 +50,17 @@ const linkSkill = (dir, name = 'handwave') => {
   fs.mkdirSync(dir, { recursive: true });
   const already = fs.existsSync(dest) || isLink(dest);
   if (already) {
-    if (isLink(dest) && fs.readlinkSync(dest) === src) return [dest, 'already linked'];
+    if (isLink(dest) && fs.readlinkSync(dest) === src) return [dest, 'already linked', 'unchanged'];
     backupDir(dest);
     fs.rmSync(dest, { recursive: true, force: true });
   }
   try {
     fs.symlinkSync(src, dest, 'dir');
-    return [dest, already ? 'relinked — it tracks the repo now' : 'linked — it tracks the repo'];
+    return [dest, already ? 'relinked — it tracks the repo now' : 'linked — it tracks the repo', 'written'];
   } catch (e) {
     fs.mkdirSync(dest, { recursive: true });
     fs.copyFileSync(path.join(src, 'SKILL.md'), path.join(dest, 'SKILL.md'));
-    return [dest, `copied (symlink refused: ${e.code}) — re-run install after changes`];
+    return [dest, `copied (symlink refused: ${e.code}) — re-run install after changes`, 'written'];
   }
 };
 
@@ -88,10 +88,10 @@ const mcpJSON = (file, key, value) => {
   for (const k of parts) node = (node[k] ||= {});
   const before = JSON.stringify(node.handwave);
   node.handwave = value;
-  if (before === JSON.stringify(value)) return [file, 'already registered'];
+  if (before === JSON.stringify(value)) return [file, 'already registered', 'unchanged'];
   const b = backup(file);
   writeJSON(file, cfg);
-  return [file, b ? `backed up to ${path.basename(b)}` : 'created'];
+  return [file, b ? `backed up to ${path.basename(b)}` : 'created', 'written'];
 };
 
 /* No board name is pinned here, deliberately.
@@ -107,14 +107,18 @@ const mcpJSON = (file, key, value) => {
    every session would have read the same value. */
 const STDIO = () => ({ type: 'stdio', command: 'node', args: [MCP_ENTRY] });
 
+/* A target that does three things changed if any one of them did. Saying
+   "installed" when nothing moved trains people to ignore the output. */
+const combine = parts => (parts.some(p => p[2] === 'written') ? 'written' : 'unchanged');
+
 /* The instruction file a harness reads every turn. */
 const agentsFile = file => {
   const r = upsertBlock(fs, file);
-  if (!r.changed) return [file, 'already there'];
+  if (!r.changed) return [file, 'already there', 'unchanged'];
   const b = backup(file);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, r.text);
-  return [file, b ? `${r.how}, backed up to ${path.basename(b)}` : r.how];
+  return [file, b ? `${r.how}, backed up to ${path.basename(b)}` : r.how, 'written'];
 };
 
 /* ---------- targets ---------- */
@@ -122,6 +126,8 @@ const agentsFile = file => {
 export const TARGETS = {
   claude: {
     what: 'Claude Code — skill',
+    app: 'Claude Code',
+    gets: 'skill',
     detect: () => fs.existsSync(path.join(HOME, '.claude')),
     run: () => {
       const [where, note] = linkSkill(path.join(HOME, '.claude', 'skills'));
@@ -131,80 +137,103 @@ export const TARGETS = {
 
   codex: {
     what: 'Codex — skill, MCP server and AGENTS.md',
+    app: 'Codex',
+    gets: 'skill, MCP, AGENTS.md',
     detect: () => fs.existsSync(path.join(HOME, '.codex')),
     run: () => {
-      const [where] = linkSkill(path.join(HOME, '.codex', 'skills'));
-      agentsFile(path.join(HOME, '.codex', 'AGENTS.md'));
+      const skill = linkSkill(path.join(HOME, '.codex', 'skills'));
+      const block = agentsFile(path.join(HOME, '.codex', 'AGENTS.md'));
+      const where = skill[0];
       // Codex keeps its MCP servers in TOML; add the table only if absent,
       // since rewriting someone's TOML by hand is how comments get eaten.
       const file = path.join(HOME, '.codex', 'config.toml');
       const raw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
       let note = 'skill, AGENTS.md';
+      let wroteMcp = false;
       if (!/^\s*\[mcp_servers\.handwave\]/m.test(raw)) {
         backup(file);
         fs.mkdirSync(path.dirname(file), { recursive: true });
         const block = `\n[mcp_servers.handwave]\ncommand = "node"\nargs = ["${MCP_ENTRY}"]\n`;
         fs.writeFileSync(file, raw.replace(/\n*$/, '\n') + block);
         note += ', MCP server';
+        wroteMcp = true;
       } else note += ', MCP already registered';
-      return [where, note];
+      return [where, note, combine([skill, block, [null, null, wroteMcp ? 'written' : 'unchanged']])];
     },
   },
 
   gemini: {
     what: 'Gemini CLI — skill, MCP server and GEMINI.md',
+    app: 'Gemini CLI',
+    gets: 'skill, MCP, GEMINI.md',
     detect: () => fs.existsSync(path.join(HOME, '.gemini')),
     run: () => {
-      const [where] = linkSkill(path.join(HOME, '.gemini', 'skills'));
-      mcpJSON(path.join(HOME, '.gemini', 'settings.json'), 'mcpServers', STDIO());
-      agentsFile(path.join(HOME, '.gemini', 'GEMINI.md'));
-      return [where, 'skill, MCP server, GEMINI.md'];
+      const parts = [
+        linkSkill(path.join(HOME, '.gemini', 'skills')),
+        mcpJSON(path.join(HOME, '.gemini', 'settings.json'), 'mcpServers', STDIO()),
+        agentsFile(path.join(HOME, '.gemini', 'GEMINI.md')),
+      ];
+      return [parts[0][0], 'skill, MCP server, GEMINI.md', combine(parts)];
     },
   },
 
   opencode: {
     what: 'opencode — MCP server and AGENTS.md',
+    app: 'opencode',
+    gets: 'MCP, AGENTS.md',
     detect: () => fs.existsSync(path.join(HOME, '.config', 'opencode')),
     run: () => {
       const file = path.join(HOME, '.config', 'opencode', 'opencode.json');
       const cfg = readJSON(file);
       cfg.mcp ||= {};
       const want = { type: 'local', command: ['node', MCP_ENTRY], enabled: true };
-      let note;
+      let note, wrote = false;
       if (JSON.stringify(cfg.mcp.handwave) === JSON.stringify(want)) note = 'MCP already registered';
-      else { const b = backup(file); cfg.mcp.handwave = want; writeJSON(file, cfg); note = b ? 'MCP registered, config backed up' : 'MCP registered'; }
+      else { const b = backup(file); cfg.mcp.handwave = want; writeJSON(file, cfg); note = b ? 'MCP registered, config backed up' : 'MCP registered'; wrote = true; }
       // opencode reads no skill file, so the judgement has to ride in AGENTS.md
-      const [, how] = agentsFile(path.join(HOME, '.config', 'opencode', 'AGENTS.md'));
-      return [file, `${note}; AGENTS.md ${how}`];
+      const block = agentsFile(path.join(HOME, '.config', 'opencode', 'AGENTS.md'));
+      return [file, `${note}; AGENTS.md ${block[1]}`,
+        combine([block, [null, null, wrote ? 'written' : 'unchanged']])];
     },
   },
 
   copilot: {
     what: 'GitHub Copilot CLI — MCP server',
+    app: 'Copilot CLI',
+    gets: 'MCP',
     detect: () => fs.existsSync(path.join(HOME, '.copilot')),
     run: () => mcpJSON(path.join(HOME, '.copilot', 'mcp-config.json'), 'mcpServers', { ...STDIO(), tools: ['*'] }),
   },
 
   cursor: {
     what: 'Cursor — MCP server and a rule',
+    app: 'Cursor',
+    gets: 'MCP, rule',
     detect: () => fs.existsSync(path.join(HOME, '.cursor')),
     run: () => {
       const dir = path.join(HOME, '.cursor', 'rules');
       fs.mkdirSync(dir, { recursive: true });
       const out = path.join(dir, 'handwave.mdc');
-      fs.copyFileSync(path.join(ROOT, 'integrations/cursor/handwave.mdc'), out);
-      return mcpJSON(path.join(HOME, '.cursor', 'mcp.json'), 'mcpServers', STDIO());
+      const before = fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : null;
+      const src = fs.readFileSync(path.join(ROOT, 'integrations/cursor/handwave.mdc'), 'utf8');
+      if (before !== src) fs.writeFileSync(out, src);
+      const mcp = mcpJSON(path.join(HOME, '.cursor', 'mcp.json'), 'mcpServers', STDIO());
+      return [mcp[0], mcp[1], combine([mcp, [null, null, before === src ? 'unchanged' : 'written']])];
     },
   },
 
   windsurf: {
     what: 'Windsurf — MCP server',
+    app: 'Windsurf',
+    gets: 'MCP',
     detect: () => fs.existsSync(path.join(HOME, '.codeium', 'windsurf')),
     run: () => mcpJSON(path.join(HOME, '.codeium', 'windsurf', 'mcp_config.json'), 'mcpServers', STDIO()),
   },
 
   zed: {
     what: 'Zed — context server',
+    app: 'Zed',
+    gets: 'context server',
     detect: () => fs.existsSync(path.join(HOME, '.config', 'zed')),
     run: () => mcpJSON(path.join(HOME, '.config', 'zed', 'settings.json'), 'context_servers',
       { source: 'custom', command: 'node', args: [MCP_ENTRY] }),
@@ -212,12 +241,16 @@ export const TARGETS = {
 
   vscode: {
     what: 'VS Code — MCP server',
+    app: 'VS Code',
+    gets: 'MCP',
     detect: () => fs.existsSync(vscodeUserDir()),
     run: () => mcpJSON(path.join(vscodeUserDir(), 'mcp.json'), 'servers', STDIO()),
   },
 
   claude_desktop: {
     what: 'Claude Desktop — MCP server',
+    app: 'Claude Desktop',
+    gets: 'MCP',
     detect: () => fs.existsSync(claudeDesktopDir()),
     run: () => mcpJSON(path.join(claudeDesktopDir(), 'claude_desktop_config.json'), 'mcpServers',
       { command: 'node', args: [MCP_ENTRY] }),
@@ -227,15 +260,27 @@ export const TARGETS = {
      so the board can be reached from the pane without knowing its name. */
   herdr: {
     what: 'herdr — a plugin: reach this task\'s board from its pane',
+    app: 'herdr',
+    gets: 'plugin',
     detect: () => fs.existsSync(path.join(HOME, '.config', 'herdr')),
     run: () => {
       const dir = path.join(ROOT, 'integrations', 'herdr');
+      // linking twice is harmless but reporting it as work is not: ask first
+      let listed = '';
       try {
-        execFileSync('herdr', ['plugin', 'link', dir], { encoding: 'utf8', timeout: 10000, stdio: 'pipe' });
+        listed = execFileSync('herdr', ['plugin', 'list'],
+          { encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] });
+      } catch { /* herdr may not be running; link anyway */ }
+      if (listed.includes('handwave.board') && listed.includes(dir)) {
+        return [dir, 'already linked', 'unchanged'];
+      }
+      try {
+        execFileSync('herdr', ['plugin', 'link', dir],
+          { encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] });
       } catch (e) {
         throw new Error(`herdr plugin link failed (${String(e.stderr || e.message).split('\n')[0]})`);
       }
-      return [dir, 'linked — bind a key to "handwave: show this task\'s board"'];
+      return [dir, 'linked — bind a key to "handwave: show this task\'s board"', 'written'];
     },
   },
 
@@ -244,6 +289,8 @@ export const TARGETS = {
      guidance if it reads the repo it is working in. */
   project: {
     what: 'this repo — AGENTS.md, for any agent working here',
+    app: 'this repo',
+    gets: 'AGENTS.md',
     detect: () => true,
     run: () => agentsFile(path.resolve('AGENTS.md')),
   },
@@ -284,10 +331,15 @@ export function install(names) {
     const t = TARGETS[n];
     if (!t) { out.push({ name: n, ok: false, note: 'no such target' }); continue; }
     try {
-      const [where, note] = t.run();
-      out.push({ name: n, ok: true, what: t.what, where, note });
+      const [where, note, declared] = t.run();
+      // "already there" and "written" look different in a list and should
+      // read differently; the targets say so in their note, so classify once
+      // here rather than making every caller parse English
+      // the target says so when it knows; the wording is only a fallback
+      const state = declared || (/\balready\b/i.test(note || '') ? 'unchanged' : 'written');
+      out.push({ name: n, ok: true, what: t.what, app: t.app, gets: t.gets, where, note, state });
     } catch (e) {
-      out.push({ name: n, ok: false, what: t.what, note: e.message });
+      out.push({ name: n, ok: false, what: t.what, app: t.app, gets: t.gets, note: e.message, state: 'failed' });
     }
   }
   return out;

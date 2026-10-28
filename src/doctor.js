@@ -25,6 +25,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { START, END, BLOCK } from './agents-block.js';
+import { c, sym, pad, heading } from './term.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -234,16 +235,21 @@ export function doctor() {
 }
 
 export function format(rows) {
-  const mark = { ok: ' ✓', warn: ' !', bad: ' ✗' };
+  const g = sym();
+  const mark = { ok: c.good(g.ok), warn: c.warn(g.warn), bad: c.accent(g.bad) };
+  const tint = { ok: c.dim, warn: c.plain, bad: c.plain };
   const w = Math.max(...rows.map(r => r.what.length)) + 2;
-  const out = rows.map(r => `${mark[r.level]} ${r.what.padEnd(w)}${r.detail}`);
+
+  const out = [heading('handwave doctor')];
+  for (const r of rows) out.push(`  ${mark[r.level]} ${c.bold(pad(r.what, w))}${tint[r.level](r.detail)}`);
 
   const fixes = [...new Set(rows.filter(r => r.fix).map(r => r.fix))];
   if (fixes.length) {
-    out.push('', 'To fix:');
-    for (const f of fixes) out.push(`  ${f}`);
+    out.push('', `  ${c.bold('To fix')}`);
+    for (const f of fixes) out.push(`    ${c.dim(g.arrow)} ${f}`);
   } else {
-    out.push('', 'Everything an agent reads is current.');
+    out.push('', `  ${c.good(g.ok)} ${c.dim('Everything an agent reads is current.')}`);
   }
+  out.push('');
   return out.join('\n');
 }

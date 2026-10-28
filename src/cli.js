@@ -230,26 +230,62 @@ const main = async () => {
 
     case 'install': {
       const { install, TARGET_NAMES, TARGETS, detect } = await import('./install.js');
+      const { c, sym, pad, shortPath, heading } = await import('./term.js');
+      const g = sym();
       const want = positional().filter(a => a !== 'install');
-      if (want[0] === 'list') {
-        for (const n of TARGET_NAMES) console.log(`  ${n.padEnd(16)}${TARGETS[n].what}`);
+
+      const nameW = Math.max(...TARGET_NAMES.map(n => n.length)) + 2;
+      const getsW = Math.max(...Object.values(TARGETS).map(t => t.gets.length)) + 2;
+
+      if (want[0] === 'list' || flag('list')) {
+        console.log(heading('handwave install \u2014 targets'));
+        for (const n of TARGET_NAMES) {
+          const t = TARGETS[n];
+          console.log(`  ${c.bold(pad(n, nameW))}${pad(c.muted(t.gets), getsW + 10)}${c.dim(t.app)}`);
+        }
+        console.log(`\n  ${c.dim('handwave install')} with no arguments does whatever is on this machine.\n`);
         return;
       }
-      // what it would do, before it does anything
+
       if (flag('detect')) {
         const here = detect();
+        console.log(heading('handwave install \u2014 what would happen'));
         for (const n of TARGET_NAMES) {
-          const mark = n === 'project' ? '  ·' : here.includes(n) ? ' \u2713' : '  ·';
-          console.log(`${mark} ${n.padEnd(16)}${TARGETS[n].what}`);
+          const t = TARGETS[n], found = here.includes(n);
+          const mark = found ? c.good(g.ok) : c.dim(g.idle);
+          const row = `  ${mark} ${c.bold(pad(n, nameW))}${pad(c.muted(t.gets), getsW + 10)}`;
+          // `project` is not missing, it is opt-in: it writes into the
+          // directory you happen to be standing in, so it is never automatic
+          const why = n === 'project' ? 'ask for it by name' : 'not on this machine';
+          console.log(row + c.dim(found ? t.app : `${t.app} \u2014 ${why}`));
         }
-        console.log(`\n\u2713 = found on this machine; \`handwave install\` does those.`);
-        console.log('Name any target to install it anyway, e.g. `handwave install project`.');
+        console.log(`\n  ${c.good(g.ok)} ${c.dim('would be installed')}   ${c.dim(g.idle)} ${c.dim('skipped \u2014 name it to install anyway')}\n`);
         return;
       }
-      for (const r of install(want)) {
-        if (r.ok) console.log(`  ok    ${r.what}\n        ${r.where}${r.note ? `  (${r.note})` : ''}`);
-        else console.error(`  FAIL  ${r.what || r.name}: ${r.note}`);
+
+      console.log(heading('handwave install'));
+      const results = install(want);
+      for (const r of results) {
+        const mark = !r.ok ? c.accent(g.bad) : r.state === 'unchanged' ? c.dim(g.idle) : c.good(g.ok);
+        const gets = r.gets ? pad(c.muted(r.gets), getsW + 10) : pad('', getsW + 10);
+        const tail = r.ok
+          ? c.dim(r.state === 'unchanged' ? 'already there' : shortPath(r.where, 46))
+          : c.accent(r.note);
+        console.log(`  ${mark} ${c.bold(pad(r.name, nameW))}${gets}${tail}`);
       }
+
+      const wrote = results.filter(r => r.ok && r.state === 'written').length;
+      const same = results.filter(r => r.ok && r.state === 'unchanged').length;
+      const failed = results.filter(r => !r.ok);
+      const parts = [];
+      if (wrote) parts.push(`${wrote} installed`);
+      if (same) parts.push(`${same} already current`);
+      if (failed.length) parts.push(c.accent(`${failed.length} failed`));
+      console.log(`\n  ${parts.join(c.dim(` ${g.dot} `)) || 'nothing to do'}`);
+      // the step people skip, and then conclude the feature was never built
+      if (wrote) console.log(`  ${c.dim('Start a fresh agent session \u2014 a running one keeps the server it launched.')}`);
+      console.log(`  ${c.dim(`Check it any time with ${c.plain('handwave doctor')}.`)}\n`);
+      if (failed.length) process.exitCode = 1;
       return;
     }
 
@@ -398,6 +434,108 @@ const main = async () => {
       const out = flag('o') || flag('out') || 'board.html';
       fs.writeFileSync(out, html);
       console.log(path.resolve(out));
+      return;
+    }
+
+    case 'url': {
+      const url = await boardURL();
+      if (!url) die('handwave: no board is running', 2);
+      console.log(url);
+      return;
+    }
+
+    case 'stop': {
+      const { SESSION_FILE, listBoards, unregisterBoard, boardName, DEFAULT_BOARD } =
+        await import('./board/server.js');
+      const all = listBoards();
+      const names = flag('all') ? Object.keys(all) : [boardName()];
+      let n = 0;
+      for (const name of names) {
+        const b = all[name];
+        if (b?.pid) { try { process.kill(b.pid); } catch { /* already gone */ } }
+        if (unregisterBoard(name)) n++;
+        if (name === DEFAULT_BOARD) { try { fs.unlinkSync(SESSION_FILE); } catch { /* none */ } }
+        if (b) console.log(`stopped ${name === DEFAULT_BOARD ? 'the board' : `"${name}"`}`);
+      }
+      // a board from before the registry existed
+      if (!n && !flag('all')) {
+        try {
+          const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+          process.kill(sess.pid); fs.unlinkSync(SESSION_FILE);
+          return void console.log('stopped');
+        } catch { die('handwave: nothing to stop'); }
+      }
+      if (!n) die('handwave: nothing to stop');
+      return;
+    }
+
+    /* Bring this session's board to the front. With eight tasks in flight the
+       window you want is behind seven others, and hunting for it is exactly
+       the friction the board was meant to remove. */
+    case 'focus': {
+      /* "I have lost my board" has three shapes and one intent, so this
+         handles all three: the window is buried (raise it), the window was
+         closed but the board is still serving (make a window — the drawing is
+         untouched, a board is a server), or there is no board yet (start one).
+         Being told `handwave open` by a command you ran to see your board is
+         a refusal dressed as help. */
+      const { boardName } = await import('./board/server.js');
+      const { focusBoard, openBoard } = await import('./board/open.js');
+      const name = boardName();
+
+      let url = await boardURL({ autostart: false });
+      const started = !url;
+      if (!url) url = await boardURL({ autostart: true });
+
+      if (!started) {
+        const r = focusBoard(name, url);
+        if (r.ok) return void console.log(`${name}  ${url}  (${r.how})`);
+      }
+      // no window to raise: give it one
+      const o = openBoard(url, { app: !flag('tab'), size: flag('size'), browser: flag('browser') });
+      return void console.log(`${name}  ${url}  (new ${o.how})`);
+    }
+
+    /* Which boards exist, and who is watching them. */
+    case 'boards': {
+      const { listBoards, boardName, DEFAULT_BOARD, SESSION_FILE } = await import('./board/server.js');
+      const { c, sym, pad, shortPath, heading } = await import('./term.js');
+      const g = sym();
+      const all = listBoards();
+      /* A board started before the registry existed is in session.json and
+         nowhere else. Saying "no boards running" while one is plainly open on
+         screen is worse than saying nothing. */
+      if (!all[DEFAULT_BOARD]) {
+        try {
+          const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+          if (sess.url && await alive(sess.url)) all[DEFAULT_BOARD] = { url: sess.url, legacy: true };
+        } catch { /* none */ }
+      }
+      const names = Object.keys(all);
+      if (!names.length) {
+        return void console.log(`\n  ${c.dim('No boards running.')} ${c.dim(`${g.arrow} handwave open`)}\n`);
+      }
+
+      const here = boardName();
+      const w = Math.max(...names.map(n => n.length)) + 2;   // a name is a task name, so it can be long
+      console.log(heading('handwave boards'));
+      for (const name of names) {
+        const { url } = all[name];
+        let note = c.accent('not answering'), size = '';
+        try {
+          const st = await (await fetch(url + '/state', { signal: AbortSignal.timeout(900) })).json();
+          size = `${st.nodes.length} ${g.dot} ${st.edges.length}`;
+          note = st.title ? c.plain(st.title) : c.dim('untitled');
+        } catch { /* left as not answering */ }
+        const mine = name === here;
+        const tail = all[name].legacy
+          ? c.dim('  (started before boards had names)')
+          : c.dim(`  ${shortPath(all[name].cwd || '', 34)}`);
+        console.log(`  ${mine ? c.accent(g.arrow) : ' '} ${c.bold(pad(name, w))}` +
+          `${c.dim(pad(url.replace('http://127.0.0.1:', ':'), 8))}${pad(c.dim(size), 10)}${note}${tail}`);
+      }
+      console.log(`\n  ${c.accent(g.arrow)} ${c.dim("this shell's board")}   ` +
+        `${c.dim(`boxes ${g.dot} lines   \u2014 switch with --board NAME`)}\n`);
       return;
     }
 

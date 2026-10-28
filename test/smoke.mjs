@@ -494,11 +494,43 @@ test('doctor reports what is stale, and every problem comes with a way out', asy
   assert.ok(/[\u2713!\u2717]/.test(text), 'rows should be marked');
 
   const clean = format([{ level: 'ok', what: 'skill', detail: 'linked' }]);
-  assert.ok(clean.includes('Everything an agent reads is current.'));
-  assert.ok(!clean.includes('To fix'));
+  assert.ok(clean.includes('Everything an agent reads is current.'), 'a clean run should say so');
+  assert.ok(!clean.includes('To fix'), 'and should not offer a fix list');
 
   const dirty = format([{ level: 'bad', what: 'skill', detail: 'stale', fix: 'handwave install' }]);
-  assert.ok(dirty.includes('To fix:') && dirty.includes('handwave install'));
+  assert.ok(dirty.includes('To fix'), 'a problem should bring a fix list');
+  assert.ok(dirty.includes('handwave install'), 'with the command in it');
+});
+
+/* Terminal dressing is for terminals. Piped into a file, a pager, or an agent
+   reading the output, escape codes are noise at best and corrupt data at
+   worst — and the test process is itself not a TTY, which is the case that
+   matters. */
+test('colour and glyphs stay out of piped output', async () => {
+  const term = await import('../src/term.js');
+  const ESC = /\u001b\[/;
+
+  assert.equal(term.colourful(), false, 'not a TTY here, so no colour');
+  assert.ok(!ESC.test(term.c.bold('x') + term.c.dim('y') + term.c.accent('z')),
+    'no escape codes when nothing can render them');
+
+  // width is measured on what the terminal shows, not on the bytes
+  const painted = '\u001b[1mabc\u001b[0m';
+  assert.equal(term.visible(painted), 3);
+  assert.equal(term.visible(term.pad(painted, 10)), 10, 'padding aligns by visible width');
+
+  // NO_COLOR wins, FORCE_COLOR overrides the other way
+  const old = { ...process.env };
+  process.env.FORCE_COLOR = '1';
+  assert.equal(term.colourful(), true);
+  process.env.NO_COLOR = '1';
+  assert.equal(term.colourful(), false, 'NO_COLOR outranks FORCE_COLOR');
+  process.env = old;
+
+  // a long path keeps its tail, which is the part that identifies it
+  const short = term.shortPath('/a/very/deeply/nested/set/of/directories/handwave/skills/handwave', 30);
+  assert.ok(short.length <= 31, `too long: ${short}`);
+  assert.ok(short.endsWith('handwave'), 'the end is what names it');
 });
 
 test('the herdr plugin declares the actions it ships, and its scripts are runnable', () => {

@@ -116,13 +116,15 @@ The last one is the trap, and it is the one that looks like a feature that was
 never built. `handwave doctor` finds it:
 
 ```
- ✓ handwave on PATH     ~/.nvm/.../handwave → this checkout
- ✓ claude skill         linked — tracks the checkout
- ✓ opencode AGENTS.md   block is current
- ✗ agent MCP server     16 running, 16 started before the current commit
+ handwave doctor ──────────────────────────────────────────
 
-To fix:
-  start a fresh agent session — a running one keeps the server it launched
+  ✓ handwave on PATH     ~/.nvm/…/handwave → this checkout
+  ✓ claude skill         linked — tracks the checkout
+  ✓ opencode AGENTS.md   block is current
+  ✗ agent MCP server     16 running, 16 started before the current commit
+
+  To fix
+    → start a fresh agent session — a running one keeps the server it launched
 ```
 
 It exits non-zero when something is wrong, so it can go in a shell prompt or a
