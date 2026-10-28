@@ -714,6 +714,16 @@ await atest('a board is named after the task, and a session keeps the one it has
   // an explicit name always wins
   assert.equal(await ask({ HANDWAVE_SESSION: 's1', HANDWAVE_BOARD: 'Review Notes' }), 'review-notes');
 
+  // A board asked for by name belongs to the asking, not to the session that
+  // did the asking: otherwise one `--board notes` call rebinds that session's
+  // default board to "notes" for good, since the owner match comes first.
+  const named = `m.registerBoard(m.boardName(), 'http://127.0.0.1:9001');`;
+  assert.equal(await ask({ HANDWAVE_SESSION: 's1', HANDWAVE_BOARD: 'notes' }, task,
+    named + `if (Object.values(m.listBoards())[0].owner) throw new Error('an explicit board claimed the session');`),
+    'notes');
+  assert.equal(await ask({ HANDWAVE_SESSION: 's1' }), 'domain-modeling-for-rights',
+    'and the session still gets the board named after its task');
+
   // register s1's board, then: s1 keeps it, s2 in the same directory does not take it
   const reg = `m.registerBoard('domain-modeling-for-rights', 'http://127.0.0.1:1234', 's1');`;
   assert.equal(await ask({ HANDWAVE_SESSION: 's1' }, task, reg), 'domain-modeling-for-rights');

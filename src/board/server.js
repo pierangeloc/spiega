@@ -165,7 +165,18 @@ export function listBoards({ prune = true } = {}) {
   return live;
 }
 
-export function registerBoard(name, url, owner = sessionKey()) {
+/* Who a board belongs to — or nobody.
+
+   A board asked for by name belongs to the asking, not to the session that did
+   the asking. Recording the session as its owner means one `--board notes` call
+   silently rebinds that session's default board to "notes" for good, because
+   the owner match comes first when resolving a name. Measured: three
+   `--board` calls from one shell left all three boards claiming it. */
+export function ownerOfThisProcess() {
+  return process.env.HANDWAVE_BOARD ? null : sessionKey();
+}
+
+export function registerBoard(name, url, owner = ownerOfThisProcess()) {
   const all = readBoards();
   all[name] = { url, pid: process.pid, started: Date.now(), owner, cwd: process.cwd() };
   writeBoards(all);
@@ -228,6 +239,7 @@ export function boardName() {
   for (const [name, b] of Object.entries(all)) {
     if (b.owner && b.owner === key) return name;       // this session's own board
   }
+  // nothing claimed: fall through to naming one after the task
 
   const base = slug(path.basename(process.cwd())) || DEFAULT_BOARD;
   if (!all[base] || all[base].owner === key) return base;
