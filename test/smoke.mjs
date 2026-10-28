@@ -148,4 +148,114 @@ test('the browser-side modules parse', () => {
   }
 });
 
+/* The play button toggles a timer, and a toggle that stops itself by clicking
+   its own button is re-entrant: it once recursed to a stack overflow when
+   pressed on the last step, leaving the control stuck on "stop" and dead to
+   every later press. So run the real handler out of the page against stubs. */
+function playControl(flow, active) {
+  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
+  const src = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
+  const m = src.match(/function stopPlay\(\)[\s\S]*?\$\('play'\)\.onclick = [^\n]*\n/);
+  assert.ok(m, 'board.html should define stopPlay/startPlay and wire the button');
+
+  const btn = { textContent: 'play', classList: { add() {}, remove() {} } };
+  const timers = new Map();
+  let next = 1, playing = null, clicks = 0;
+  const env = {
+    $: () => btn,
+    get board() { return { flow, active }; },
+    focus: i => { active = i; },
+    setInterval: fn => { const id = next++; timers.set(id, fn); return id; },
+    clearInterval: id => timers.delete(id),
+  };
+  const run = new vm.Script(
+    `${m[0]}\n({ click: () => (clicks++, $('play').onclick()), tick: () => [...timers.values()][0]?.() })`
+  ).runInNewContext({ ...env, playing, timers, clicks,
+    // `playing` and `clicks` must live in the context, not be copied in
+  }, { displayErrors: true });
+  return { btn, timers, run };
+}
+
+test('the play control stops when told to, from any step', () => {
+  for (const active of [null, 0, 2]) {       // including parked on the last step
+    const { btn, timers, run } = playControl([{ step: 'a' }, { step: 'b' }, { step: 'c' }], active);
+    run.click();                              // play
+    assert.equal(btn.textContent, 'stop', `active=${active}: play should arm the timer`);
+    assert.equal(timers.size, 1, `active=${active}: exactly one timer`);
+    run.click();                              // stop
+    assert.equal(btn.textContent, 'play', `active=${active}: stop should disarm it`);
+    assert.equal(timers.size, 0, `active=${active}: no timer left running`);
+  }
+});
+
+test('the play control runs the flow to the end and stops itself', () => {
+  const { btn, timers, run } = playControl([{ step: 'a' }, { step: 'b' }], null);
+  run.click();
+  for (let i = 0; i < 6 && timers.size; i++) run.tick();
+  assert.equal(timers.size, 0, 'it should clear its own timer at the end');
+  assert.equal(btn.textContent, 'play', 'and put the label back');
+});
+
+/* Every file an install target copies must actually be there. `install cursor`
+   shipped broken for a while because a rename moved the rule file and the
+   copy still named the old path — nothing reads these paths until a user
+   installs, which is the worst time to find out. */
+test('every install target copies a file that exists', () => {
+  const src = fs.readFileSync(path.join(ROOT, 'src/install.js'), 'utf8');
+  const refs = [...src.matchAll(/path\.join\(ROOT,\s*((?:'[^']+'(?:,\s*)?)+)\)/g)]
+    .map(m => m[1].split(',').map(x => x.trim().slice(1, -1)));
+  assert.ok(refs.length >= 3, `install.js should name the files it installs, found ${refs.length}`);
+  for (const r of refs) {
+    assert.ok(fs.existsSync(path.join(ROOT, ...r)), `install.js points at a missing file: ${r.join('/')}`);
+  }
+});
+
+/* Replay on request: the board's own log is the source, so asking for the
+   movie again must not put a single op back on the wire. Real server, real
+   SSE stream — the route and the event are the whole feature. */
+const atest = async (name, fn) => { await fn(); n++; console.log('  ok  ' + name); };
+
+await atest('a replay can be asked for remotely, and re-sends nothing', async () => {
+  const { createServer } = await import('../src/board/server.js');
+  const { server } = createServer();
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const U = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const frames = [];
+    const res = await fetch(U + '/events');
+    const reader = res.body.getReader();
+    const pump = (async () => {
+      for (;;) { const { value, done } = await reader.read(); if (done) break;
+        frames.push(new TextDecoder().decode(value)); }
+    })().catch(() => {});
+    const settle = () => new Promise(r => setTimeout(r, 80));
+    await settle();
+
+    // nothing drawn: nothing to replay, and no event fired at the viewer
+    assert.deepEqual(await (await fetch(U + '/replay')).json(), { ok: false, ops: 0, viewers: 1 });
+    await settle();
+    assert.equal(/event: replay/.test(frames.join('')), false);
+
+    await fetch(U + '/op', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ops: [{ op: 'say', text: 'two services' },
+        { op: 'node', id: 'a', label: 'A' }, { op: 'node', id: 'b', label: 'B' },
+        { op: 'edge', from: 'a', to: 'b' }] }) });
+    await settle();
+
+    const r = await (await fetch(U + '/replay')).json();
+    assert.equal(r.ops, 4, 'the log is what gets replayed');
+    assert.equal(r.viewers, 1);
+    await settle();
+    const all = frames.join('');
+    assert.ok(/event: replay/.test(all), 'the viewer should be told to replay');
+    assert.equal((all.match(/event: patch/g) || []).length, 1,
+      'asking for a replay must not push the ops again');
+    await reader.cancel().catch(() => {});
+    await pump;
+  } finally {
+    server.close();
+    await new Promise(r => server.closeAllConnections ? (server.closeAllConnections(), r()) : r());
+  }
+});
+
 console.log(`\n${n} passed`);

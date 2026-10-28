@@ -62,6 +62,11 @@ moving to wherever the work is and the words captioned over the picture. On
 anything complex the finished board is a wall; the replay is the explanation.
 It ends on a wide shot of the whole thing.
 
+The log lives on the board, so a replay can also be asked for from outside —
+`handwave replay`, or `board_replay` over MCP. An agent that has just finished
+an explanation can offer to play it back without thinking the drawing out a
+second time, and nothing is re-sent: it is the same session, run again.
+
 **Keys on the board:** `←` `→` walk the flow, `space` plays it, `r` replays the
 session, `+` `-` zoom a step at a time, `0` or `f` fits, `esc` stops.
 

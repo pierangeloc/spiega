@@ -247,18 +247,34 @@ function renderSteps() {
 const focus = step => post([{ op: 'focus', step }]);
 $('prev').onclick = () => focus(Math.max(0, (board.active ?? 0) - 1));
 $('next').onclick = () => focus(board.active == null ? 0 : Math.min(board.flow.length - 1, board.active + 1));
-$('play').onclick = () => {
-  if (playing) { clearInterval(playing); playing = null; $('play').classList.remove('on'); $('play').textContent = 'play'; return; }
-  $('play').classList.add('on'); $('play').textContent = 'stop';
-  let i = board.active == null ? -1 : board.active;
+/* Play walks the flow on a timer. Starting and stopping are two named
+   functions, not one toggle that re-enters itself: the earlier version ended
+   the run by clicking its own button, which fired before `playing` had been
+   assigned, so a play pressed on the last step recursed until the stack gave
+   out — and left the button stuck reading "stop", refusing every later press. */
+function stopPlay() {
+  if (playing) clearInterval(playing);
+  playing = null;
+  $('play').classList.remove('on');
+  $('play').textContent = 'play';
+}
+
+function startPlay() {
+  const f = board?.flow || [];
+  if (!f.length) return;
+  // pressing play while parked on the last step means start again, not stop
+  let i = board.active == null || board.active >= f.length - 1 ? -1 : board.active;
+  $('play').classList.add('on');
+  $('play').textContent = 'stop';
   const tick = () => {
-    i++;
-    if (i >= board.flow.length) { $('play').click(); return; }
+    if (++i >= (board?.flow?.length || 0)) return stopPlay();
     focus(i);
   };
+  playing = setInterval(tick, 1600);   // assigned before the first tick, so stop can always find it
   tick();
-  playing = setInterval(tick, 1600);
-};
+}
+
+$('play').onclick = () => (playing ? stopPlay() : startPlay());
 
 /* ---------- replay: the session, as it happened ---------- */
 
@@ -273,6 +289,11 @@ $('play').onclick = () => {
    there is to read, not from how long it originally took. */
 
 let replaying = false;
+let gen = 0;            // bumped on every start and stop, so a loop suspended in
+                        // an await can tell that the run it belongs to is over —
+                        // the flag alone is not enough: stop, then start again,
+                        // and the old loop wakes to find `replaying` true and
+                        // carries on alongside the new one.
 const beat = ms => new Promise(r => setTimeout(r, ms));
 
 /* Ease the camera onto whatever was just drawn — but only when there is a
@@ -321,6 +342,7 @@ function say(text) {
 
 function stopReplay() {
   replaying = false;
+  gen++;
   say(null);
   shown = null;
   drawn = new Set();
@@ -335,6 +357,8 @@ async function replay() {
   const log = (board?.log || []).filter(e => e.op !== 'focus' && e.op !== 'clear');
   if (!log.length) return;
 
+  const mine = ++gen;
+  const live = () => replaying && gen === mine;
   replaying = true;
   userMoved = false;
   $('replay').classList.add('on');
@@ -346,8 +370,9 @@ async function replay() {
   render(); renderRail(); renderSteps();
   await beat(400);
 
+  if (!live()) return;
   for (const entry of log) {
-    if (!replaying) return;
+    if (!live()) return;
     const before = new Set(drawn);
     applyOps(rb, [entry]);
 
@@ -356,7 +381,7 @@ async function replay() {
       say(entry.text);
       // time to read it, floored so a short line still lands
       await beat(Math.min(4200, 850 + (entry.text || '').length * 26));
-      continue;
+      continue;   // the loop head re-checks live()
     }
     if (entry.op === 'title') { $('title').textContent = rb.title; continue; }
 
@@ -364,15 +389,16 @@ async function replay() {
     renderSteps();
     // frame whatever is new, once it has somewhere to be
     const added = [...drawn].find(k => !before.has(k));
-    if (added) { await beat(90); panTo(added); }
+    if (added) { await beat(90); if (!live()) return; panTo(added); }
     await beat(Math.max(520, drawMs + 260));
   }
 
-  if (!replaying) return;
+  if (!live()) return;
   // the closing wide shot
   userMoved = false;
   fit(true);
   await beat(1100);
+  if (!live()) return;
   stopReplay();
 }
 
@@ -430,6 +456,9 @@ function connect() {
     onState(JSON.parse(e.data));
   });
   es.addEventListener('patch', e => { const d = JSON.parse(e.data); onState(d.board, d.fresh); });
+  // `handwave replay` — or the agent's own tool — asking for the movie again.
+  // Always a start, never a toggle: a remote caller cannot see the button.
+  es.addEventListener('replay', () => { if (replaying) stopReplay(); replay(); });
   es.addEventListener('error', () => {
     if (es.readyState === EventSource.CLOSED || es.readyState === EventSource.CONNECTING) {
       setLink('down');

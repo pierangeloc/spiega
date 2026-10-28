@@ -25,6 +25,7 @@ handwave draw '{"op":"node","id":"gw","kind":"gateway","label":"API Gateway","su
 handwave draw '{"op":"edge","from":"gw","to":"orders","label":"gRPC"}'
 handwave say  "The gateway does **authn** and rate limiting, then hands off."
 handwave step 1            # light up one hop of the flow; also: step next / step off
+handwave replay            # play the whole session back; never re-draw to re-show
 handwave clear             # before a new, unrelated explanation
 handwave snapshot -o docs/flow.html
 ```

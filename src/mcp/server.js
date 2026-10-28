@@ -93,6 +93,15 @@ const TOOLS = [
     },
   },
   {
+    name: 'board_replay',
+    description:
+      'Play the board back as a movie: every line and box in the order it arrived, with the camera ' +
+      'following the work and each spoken line captioned over the drawing. The board keeps its own log, ' +
+      'so this costs nothing and needs no ops \u2014 never re-draw an explanation to show it again. ' +
+      'Offer it when a long explanation is finished, or whenever someone asks to see it once more.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'board_clear',
     description: 'Wipe the board and start a new explanation.',
     inputSchema: {
@@ -142,6 +151,15 @@ async function call(name, args = {}) {
 
     case 'board_step':
       return send([{ op: 'focus', step: args.step == null ? null : Number(args.step) - 1 }]);
+
+    case 'board_replay': {
+      const u = await url();
+      const r = await (await fetch(u + '/replay')).json();
+      if (!r.ops) return 'nothing has been drawn yet, so there is nothing to replay';
+      return r.viewers
+        ? `replaying ${r.ops} ops for ${r.viewers} viewer${r.viewers === 1 ? '' : 's'}`
+        : `${r.ops} ops ready, but no window is watching \u2014 call board_open first`;
+    }
 
     case 'board_clear':
       return send([{ op: 'clear', keepTitle: !!args.keepTitle }]);

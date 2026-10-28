@@ -85,6 +85,15 @@ export function createServer({ board = emptyBoard() } = {}) {
       });
     }
 
+    /* Play the session back, on request from the CLI or the agent. The log is
+       already here, so re-running an explanation costs nothing and the model
+       never has to think the drawing out a second time. */
+    if (p === '/replay') {
+      const drawable = board.log.filter(e => e.op !== 'focus' && e.op !== 'clear').length;
+      if (drawable) broadcast('replay', { rev: board.rev });
+      return json(res, 200, { ok: !!drawable, ops: drawable, viewers: clients.size });
+    }
+
     // The board as one standalone file, for pasting into a PR or a doc.
     if (p === '/snapshot') {
       const { snapshotHTML } = await import('./snapshot.js');

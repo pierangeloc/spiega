@@ -106,6 +106,20 @@ Each step's number appears on its line, so the board and your prose share one
 numbering. Walk a step as you explain it, not all at once — the person can also
 walk them with the arrow keys.
 
+## Playing it back
+
+A board keeps the order it was drawn in, so the explanation can be run again
+for nothing:
+
+```bash
+handwave replay
+```
+
+Every box, line and spoken word in sequence, camera following, captions over
+the picture. **Never re-draw an explanation in order to show it again** — the
+log is already there. Offer a replay when a long explanation lands all at once,
+or when someone asks to see it once more; it is the cheapest thing in the tool.
+
 ## Finishing
 
 ```bash

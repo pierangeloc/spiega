@@ -117,6 +117,7 @@ const HELP = `handwave — a hand-drawn board an agent draws on while it explain
   draw <json|file|->            add to the board (one op, or a list, or a whole spec)
   say  <text>                   put a line in the transcript beside the drawing
   step [N|next|prev|off]        light up one step of the flow
+  replay                        play the board back from its own log, as a movie
   clear [--keep-title]          wipe the board
   render <spec.json> -o F.html  render a spec to a standalone file, no server
   snapshot [-o F.html]          save the live board as a standalone file
@@ -199,6 +200,23 @@ const main = async () => {
       const text = argv.slice(1).filter(a => !a.startsWith('--')).join(' ');
       if (!text) die('handwave say: nothing to say');
       return void (await send([{ op: 'say', text }]));
+    }
+
+    /* The board already holds every op in order, so playing the explanation
+       again is a request, not a redraw: nothing is re-thought and nothing is
+       re-sent. Useful straight after a long answer — "watch that again" — and
+       cheap enough for the agent to offer it itself. */
+    case 'replay': {
+      const url = await boardURL({ autostart: false });
+      if (!url) die('handwave replay: no board is running');
+      const res = await fetch(url + '/replay');
+      // A board started before this command existed answers 404; say so, since
+      // the fix is to restart it and that is not guessable from a stack trace.
+      if (!res.ok) die('handwave replay: the running board is older than this command \u2014 `handwave stop`, then start it again');
+      const r = await res.json();
+      if (!r.ops) die('handwave replay: nothing has been drawn yet');
+      if (!r.viewers) console.error('handwave: no window is watching — run `handwave open` to see it');
+      return void console.log(`replaying ${r.ops} ops for ${r.viewers} viewer${r.viewers === 1 ? '' : 's'}`);
     }
 
     case 'step': {
