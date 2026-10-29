@@ -145,7 +145,7 @@ test('the board page module parses', () => {
 });
 
 test('the browser-side modules parse', () => {
-  for (const f of ['src/board/draw-on.js', 'src/render/render.js', 'src/render/ink.js',
+  for (const f of ['src/board/draw-on.js', 'src/board/narrate.js', 'src/render/render.js', 'src/render/ink.js',
                    'src/render/glyphs.js', 'src/render/edges.js', 'src/render/layout.js']) {
     parses(fs.readFileSync(path.join(ROOT, f), 'utf8'), f);
   }
@@ -1058,6 +1058,29 @@ test('a cycle keeps its order, and the closing edge goes round', async () => {
   ]);
   assert.equal(backEdges(plain.nodes, plain.edges).size, 0);
   assert.equal(renderSVG(plain).planned[0].back, false);
+});
+
+/* The narrator lights the word being spoken. The synthesiser reports how far
+   through the text it has got, not which word it picked, so the mapping from
+   offset to word is ours and is the part most likely to be wrong. */
+test('the spoken offset maps to the right word', async () => {
+  const { wordAt } = await import('../src/board/narrate.js');
+  //            0         1      2       3
+  const text = 'Orders writes the row';
+  const starts = [0, 7, 14, 18];
+
+  assert.equal(wordAt(starts, 0), 0, 'the first word, at its own start');
+  assert.equal(wordAt(starts, 3), 0, 'still inside the first word');
+  assert.equal(wordAt(starts, 7), 1, 'exactly on a boundary belongs to the new word');
+  assert.equal(wordAt(starts, 17), 2);
+  assert.equal(wordAt(starts, 18), 3);
+  assert.equal(wordAt(starts, 999), 3, 'past the end stays on the last word');
+
+  // a sentence can begin with punctuation, and then nothing is being said yet
+  assert.equal(wordAt([4, 11], 0), -1, 'before the first word is no word');
+  assert.equal(wordAt([], 5), -1, 'and an empty line has none to light');
+
+  assert.ok(text.slice(starts[2]).startsWith('the'), 'the fixture is what it claims');
 });
 
 /* A label joined to a point by a leader line. Every other label on the board

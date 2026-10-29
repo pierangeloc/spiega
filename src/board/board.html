@@ -69,7 +69,14 @@
   .said.on .tag{color:var(--accent)}
   .said.off{opacity:.42;box-shadow:3px 3px 0 var(--soft);filter:saturate(.55)}
   /* only the lines that lead somewhere look like they do */
+  /* The word being spoken. A background rather than a colour change, because
+     a colour change on one word in a paragraph is hard to catch at a glance
+     and the whole point is to be followable without looking for it. */
+  .said .w.lit{background:var(--accent);color:var(--paper);border-radius:3px;
+    box-shadow:0 0 0 2px var(--accent)}
+  .said.saying{border-color:var(--accent);box-shadow:3px 3px 0 var(--accent)}
   .said.go{cursor:pointer}
+  .said{cursor:pointer}
   .said.go:hover{border-color:var(--accent);box-shadow:4px 4px 0 var(--accent);transform:translateY(-1px)}
   .said.go:hover .tag{color:var(--accent)}
   .said.go:active{transform:translateY(0);box-shadow:2px 2px 0 var(--accent)}
@@ -129,6 +136,7 @@
     <span class="count" id="count"></span>
     <span class="spacer"></span>
     <button class="btn" id="rail-toggle" title="hide the transcript">transcript</button>
+    <button class="btn" id="narrate" title="read the script aloud — space plays and pauses">narrate</button>
     <button class="btn" id="replay" title="play the session back as it happened">replay</button>
     <button class="btn" id="fit">fit</button>
     <button class="btn" id="snap" title="open a standalone copy of this board">snapshot</button>
@@ -162,6 +170,7 @@ import { renderSVG } from '/src/render/render.js';
 import { animateIn, seedOf } from '/src/board/draw-on.js';
 import { emptyBoard, applyOps } from '/src/board/state.js';
 import { lineStates, clickStep } from '/src/board/script.js';
+import { createNarrator, wrapWords, wordAt } from '/src/board/narrate.js';
 
 const $ = id => document.getElementById(id);
 // which board this page is, as the server knows it — shown in the window title
@@ -283,9 +292,18 @@ function renderRail() {
     if (step == null) delete node.dataset.step; else node.dataset.step = String(step);
     node.title = step == null ? '' : `step ${step + 1} \u2014 click to walk it`;
     const tag = step == null ? '' : `<span class="tag">step ${step + 1}</span>`;
-    const html = tag + mdish(e.text);
-    if (node.dataset.html !== html) { node.innerHTML = html; node.dataset.html = html; }
+    const html = tag + `<span class="said-body">${mdish(e.text)}</span>`;
+    if (node.dataset.html !== html) {
+      node.innerHTML = html;
+      node.dataset.html = html;
+      /* Every word gets its own span, numbered by where it starts. The
+         narrator speaks this element's textContent, so an offset reported by
+         the synthesiser maps straight onto one of these. */
+      wrapWords(node.querySelector('.said-body'));
+    }
   });
+
+  loadTape();
 
   /* Follow the step, not the tail: while a step is lit, its own lines are what
      the reader needs on screen, and in a long session they are far above the
@@ -315,6 +333,66 @@ function renderSteps() {
 
 const focus = step => post([{ op: 'focus', step }]);
 
+/* ---------- the tape ----------
+
+   Each line of the script is a section. Playing one reads it aloud, lights
+   the word being spoken, and — when the line is tagged with a step — walks
+   the board to that step as the line begins, so the picture moves with the
+   words instead of after them.
+
+   Modelled on effect.institute: space plays and pauses, a click starts from
+   the line you clicked, and the tape runs on by itself. */
+const narrator = createNarrator({
+  onState: ({ playing, index }) => {
+    const b = $('narrate');
+    b.classList.toggle('on', playing);
+    b.textContent = playing ? 'pause' : 'narrate';
+    const rail = $('rail');
+    rail.querySelectorAll('.said.saying').forEach(n => n.classList.remove('saying'));
+    const row = rail.querySelector(`.said[data-line="${index}"]`);
+    if (row) {
+      row.classList.add('saying');
+      const top = row.offsetTop - rail.clientHeight / 2 + row.offsetHeight / 2;
+      rail.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    }
+  },
+});
+
+/* Hand the narrator the current script. Rebuilt whenever the rail is, which
+   is cheap: the sections hold references to the rows, not copies of them. */
+function loadTape() {
+  const b = view_of();
+  const t = b?.transcript || [];
+  const states = lineStates(b);
+  narrator.load(t.map((e, i) => {
+    const row = $('rail').querySelector(`.said[data-line="${i}"]`);
+    const body = row?.querySelector('.said-body');
+    const words = body ? [...body.querySelectorAll('.w')] : [];
+    return {
+      text: body ? body.textContent : e.text,
+      step: states[i].step,
+      onStart() {
+        words.forEach(w => w.classList.remove('lit'));
+        // the board goes where the words are
+        if (states[i].step != null && view_of()?.active !== states[i].step) focus(states[i].step);
+      },
+      onWord(at) {
+        const k = wordAt(words.map(w => +w.dataset.at), at);
+        const best = k < 0 ? null : words[k];
+        if (!best || best.classList.contains('lit')) return;
+        words.forEach(w => w.classList.remove('lit'));
+        best.classList.add('lit');
+      },
+      onDone() { words.forEach(w => w.classList.remove('lit')); },
+    };
+  }));
+}
+
+$('narrate').onclick = () => {
+  if (!narrator.available) { $('narrate').textContent = 'no voice'; return; }
+  narrator.toggle();
+};
+
 /* Click a line of the script to walk the step it explains.
 
    One delegated listener rather than one per line, because the rail is
@@ -324,8 +402,12 @@ const focus = step => post([{ op: 'focus', step }]);
    until it ends. */
 $('rail').addEventListener('click', e => {
   if (replaying) return;
-  const row = e.target.closest?.('.said[data-step]');
+  const row = e.target.closest?.('.said');
   if (!row) return;
+  /* A click starts the tape at that line — "advance the tape", rather than
+     "select an item". The step follows from the line, as it does when the
+     tape reaches it by itself. */
+  if (narrator.available && narrator.playing) return narrator.play(Number(row.dataset.line));
   const want = clickStep(view_of(), Number(row.dataset.step));
   if (want !== undefined) focus(want);
 });
@@ -623,12 +705,25 @@ function zoomBy(factor) {
 }
 
 addEventListener('keydown', e => {
+  /* The tape owns the transport keys while it exists. Space plays and pauses,
+     the up and down arrows move between lines, R restarts the current one —
+     the arrangement effect.institute uses, which reads as a player rather
+     than as a stepper. Left and right keep their meaning here: they walk the
+     flow, which is the board's own axis and not the tape's. */
+  if (narrator.available) {
+    if (e.key === ' ') { e.preventDefault(); return narrator.toggle(); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); return narrator.next(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); return narrator.prev(); }
+    if (e.key === 'r' && narrator.playing) { e.preventDefault(); return narrator.restart(); }
+    if (e.key === '[') { e.preventDefault(); return narrator.setRate(narrator.rate - 0.1); }
+    if (e.key === ']') { e.preventDefault(); return narrator.setRate(narrator.rate + 0.1); }
+  }
   if (e.key === '+' || e.key === '=') return zoomBy(1.25);
   if (e.key === '-' || e.key === '_') return zoomBy(1 / 1.25);
   if (e.key === '0') { userMoved = false; return fit(true); }
   if (e.key === 'ArrowRight') $('next').click();
   else if (e.key === 'ArrowLeft') $('prev').click();
-  else if (e.key === ' ') { e.preventDefault(); $('play').click(); }
+
   else if (e.key === 'f') $('fit').click();
   else if (e.key === 'r') $('replay').click();
   else if (e.key === 'Escape') { if (replaying) stopReplay(); else focus(null); }
