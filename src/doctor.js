@@ -31,6 +31,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const HOME = os.homedir();
 const MCP_ENTRY = path.join(ROOT, 'src', 'mcp', 'server.js');
+// honoured, not assumed — see the note in install.js; a profile sets it per launch
+const CONFIG = process.env.XDG_CONFIG_HOME || path.join(HOME, '.config');
 const SKILL_SRC = path.join(ROOT, 'skills', 'spiega');
 
 const sh = (cmd, args, opts = {}) => {
@@ -122,7 +124,7 @@ function skills(rows) {
 /* ---------- instruction blocks ---------- */
 
 const AGENT_FILES = {
-  opencode: path.join(HOME, '.config', 'opencode', 'AGENTS.md'),
+  opencode: path.join(CONFIG, 'opencode', 'AGENTS.md'),
   codex: path.join(HOME, '.codex', 'AGENTS.md'),
   gemini: path.join(HOME, '.gemini', 'GEMINI.md'),
 };
@@ -147,7 +149,7 @@ const readJSON = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } c
 
 const MCP_FILES = [
   ['claude', path.join(HOME, '.claude.json'), c => c?.mcpServers?.spiega?.args?.[0]],
-  ['opencode', path.join(HOME, '.config', 'opencode', 'opencode.json'), c => c?.mcp?.spiega?.command?.[1]],
+  ['opencode', path.join(CONFIG, 'opencode', 'opencode.json'), c => c?.mcp?.spiega?.command?.[1]],
   ['gemini', path.join(HOME, '.gemini', 'settings.json'), c => c?.mcpServers?.spiega?.args?.[0]],
   ['copilot', path.join(HOME, '.copilot', 'mcp-config.json'), c => c?.mcpServers?.spiega?.args?.[0]],
   ['cursor', path.join(HOME, '.cursor', 'mcp.json'), c => c?.mcpServers?.spiega?.args?.[0]],

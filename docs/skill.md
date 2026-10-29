@@ -23,14 +23,43 @@ them. `spiega install` writes whichever apply.
 | **MCP tool descriptions** | anything speaking MCP | per-call guidance, attached to the tool it is about |
 
 The three are not interchangeable, and the difference decides whether the
-agent ever draws unprompted. **A skill file is a retrieval key**: the agent
-reads its one-line description, and loads the rest only once it has already
-decided this looks like a drawing task. It cannot make the agent consider
-drawing, because it is not in the room until the agent goes looking for it.
-**The `AGENTS.md` block is standing context** — present on every turn, whether
-or not the agent went looking. Proactive use lives or dies there, which is why
-the block carries a trigger the agent can check against the answer it is
-already writing, and an instruction to *offer* when drawing would be a detour.
+agent draws unprompted.
+
+**A skill file is two things, and only one of them is lazy.** A harness that
+supports skills advertises them: the name and the `description` from the
+frontmatter are in the prompt from the start, and only the body loads once the
+agent decides it wants it. So the description is itself a trigger, and a
+working one — on an opencode profile carrying no spiega block and no MCP
+server, an unprompted *"I want to understand how an invoice run works"* loaded
+the skill off the description alone. It is worth as much care as the body,
+being the part that is always read.
+
+**The `AGENTS.md` block is standing context in full** — the judgement, not
+just the pitch, on every turn, and the only route that reaches a harness with
+no skill support at all. It carries a trigger the agent can check against the
+answer it is already writing, and an instruction to *offer* when drawing would
+be a detour.
+
+### Profiles
+
+`XDG_CONFIG_HOME` is honoured, not assumed, because people run more than one
+profile by moving it per launch:
+
+```bash
+alias oc-work='XDG_CONFIG_HOME=$HOME/.opencode-work/config opencode'
+```
+
+A profile started that way reads none of `~/.config`, so the same prefix has
+to install into it, and `doctor` has to be asked about it the same way:
+
+```bash
+XDG_CONFIG_HOME=$HOME/.opencode-work/config spiega install opencode
+XDG_CONFIG_HOME=$HOME/.opencode-work/config spiega doctor
+```
+
+Skills are not XDG-scoped — `~/.claude/skills` is read by Claude Code and by
+opencode alike, so one link serves every profile. Which is exactly how a
+profile can end up loading the skill while having no board to draw on.
 
 A skill is linked, not copied, so it tracks the checkout. An `AGENTS.md` block
 is text inside a file you wrote, so it sits between `<!-- SPIEGA_START -->` and

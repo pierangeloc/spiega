@@ -20,6 +20,22 @@ const ROOT = path.resolve(HERE, '..');
 const MCP_ENTRY = path.join(ROOT, 'src', 'mcp', 'server.js');
 const HOME = os.homedir();
 
+/* The XDG config root, honoured rather than assumed.
+
+   opencode (and zed, and herdr) live under it, and people run more than one
+   profile by pointing XDG_CONFIG_HOME somewhere else per launch:
+
+     alias oc-work='XDG_CONFIG_HOME=$HOME/.opencode-work/config opencode'
+
+   A profile started that way reads none of ~/.config, so an install that
+   hardcoded the default wrote a registration that profile never sees — and
+   the failure is silent at both ends: install reports success, and the agent
+   simply has no board. Reading the variable means the same prefix that
+   launches a profile also installs into it:
+
+     XDG_CONFIG_HOME=$HOME/.opencode-work/config spiega install opencode */
+const CONFIG = process.env.XDG_CONFIG_HOME || path.join(HOME, '.config');
+
 const backup = file => {
   if (!fs.existsSync(file)) return null;
   const b = `${file}.bak-spiega-${new Date().toISOString().slice(0, 10)}`;
@@ -201,9 +217,9 @@ export const TARGETS = {
     what: 'opencode — MCP server and AGENTS.md',
     app: 'opencode',
     gets: 'MCP, AGENTS.md',
-    detect: () => fs.existsSync(path.join(HOME, '.config', 'opencode')),
+    detect: () => fs.existsSync(path.join(CONFIG, 'opencode')),
     run: () => {
-      const file = path.join(HOME, '.config', 'opencode', 'opencode.json');
+      const file = path.join(CONFIG, 'opencode', 'opencode.json');
       const cfg = readJSON(file);
       cfg.mcp ||= {};
       const want = { type: 'local', command: ['node', MCP_ENTRY], enabled: true };
@@ -211,7 +227,7 @@ export const TARGETS = {
       if (JSON.stringify(cfg.mcp.spiega) === JSON.stringify(want)) note = 'MCP already registered';
       else { const b = backup(file); cfg.mcp.spiega = want; writeJSON(file, cfg); note = b ? 'MCP registered, config backed up' : 'MCP registered'; wrote = true; }
       // opencode reads no skill file, so the judgement has to ride in AGENTS.md
-      const block = agentsFile(path.join(HOME, '.config', 'opencode', 'AGENTS.md'));
+      const block = agentsFile(path.join(CONFIG, 'opencode', 'AGENTS.md'));
       return [file, `${note}; AGENTS.md ${block[1]}`,
         combine([block, [null, null, wrote ? 'written' : 'unchanged']])];
     },
@@ -254,8 +270,8 @@ export const TARGETS = {
     what: 'Zed — context server',
     app: 'Zed',
     gets: 'context server',
-    detect: () => fs.existsSync(path.join(HOME, '.config', 'zed')),
-    run: () => mcpJSON(path.join(HOME, '.config', 'zed', 'settings.json'), 'context_servers',
+    detect: () => fs.existsSync(path.join(CONFIG, 'zed')),
+    run: () => mcpJSON(path.join(CONFIG, 'zed', 'settings.json'), 'context_servers',
       { source: 'custom', command: 'node', args: [MCP_ENTRY] }),
   },
 
@@ -282,7 +298,7 @@ export const TARGETS = {
     what: 'herdr — a plugin: reach this task\'s board from its pane',
     app: 'herdr',
     gets: 'plugin',
-    detect: () => fs.existsSync(path.join(HOME, '.config', 'herdr')),
+    detect: () => fs.existsSync(path.join(CONFIG, 'herdr')),
     run: () => {
       const dir = path.join(ROOT, 'integrations', 'herdr');
       // linking twice is harmless but reporting it as work is not: ask first
