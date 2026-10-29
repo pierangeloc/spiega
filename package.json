@@ -22,7 +22,8 @@
   "scripts": {
     "test": "node test/smoke.mjs",
     "serve": "node src/cli.js serve --open",
-    "mcp": "node src/mcp/server.js"
+    "mcp": "node src/mcp/server.js",
+    "shapes": "node tools/shapes.js"
   },
   "keywords": [
     "diagram",

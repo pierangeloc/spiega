@@ -31,6 +31,7 @@ Drawing the same `id` twice updates it rather than adding a second.
 ## Node kinds
 
 Nine, each with its own drawing. An unknown kind falls back to `service`.
+[shapes.md](shapes.md) shows what each one looks like.
 
 | kind | drawn as | use it for |
 |---|---|---|

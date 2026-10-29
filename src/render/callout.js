@@ -37,11 +37,14 @@ function target(c, boxes, planned) {
       const l = Math.hypot(q[0] - p[0], q[1] - p[1]);
       if (l > bestLen) { bestLen = l; best = i; }
     }
-    /* A third of the way along, not the middle: the middle of the longest
-       segment is exactly where the edge's own label sits, so aiming there put
-       the leader line through the tag it was meant to annotate. */
+    /* Not the middle: the middle of the longest segment is exactly where the
+       edge's own label sits, so aiming there put the leader line through the
+       tag it was meant to annotate. A third of the way along clears it on a
+       long run; on a short hop between neighbouring columns the tag is nearly
+       as wide as the segment, so the aim moves nearer the start. */
     const [p, q] = [r.pts[best], r.pts[best + 1]];
-    return { x: p[0] + (q[0] - p[0]) * 0.3, y: p[1] + (q[1] - p[1]) * 0.3, kind: 'edge' };
+    const t = bestLen > 220 ? 0.3 : 0.18;
+    return { x: p[0] + (q[0] - p[0]) * t, y: p[1] + (q[1] - p[1]) * t, kind: 'edge' };
   }
 
   const b = boxes[at];
