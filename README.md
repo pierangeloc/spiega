@@ -285,6 +285,11 @@ A Claude skill, a Cursor rule and an MCP server, all driving the same board —
 see [`integrations/`](integrations/). The agent needs no new vocabulary: it
 emits small JSON ops as it talks.
 
+Every op, every node kind and every layout hint is in
+[`docs/vocabulary.md`](docs/vocabulary.md), along with what the board does
+*not* model — worth reading before asking for a sequence diagram. The
+instructions the agent itself reads are in [`docs/skill.md`](docs/skill.md).
+
 ```jsonc
 {"op":"node","id":"db","kind":"datastore","label":"Postgres","sub":"orders"}
 {"op":"edge","from":"orders","to":"bus","label":"publish","async":true}
