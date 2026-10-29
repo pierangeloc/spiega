@@ -116,7 +116,12 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
     `<g${hand ? ' filter="url(#hand)"' : ''} transform="translate(${margin + padL} ${margin + padT})">${body}</g>` +
     `</svg>`;
 
-  return { svg, width: W, height: H, boxes, place, steps, stepOf, planned, callouts: calls };
+  /* `boxes` are layout coordinates; the drawing is shifted by this much to
+     make room for the margin and for callouts that overflow the top left. A
+     caller aiming a camera at a box needs both. */
+  const offset = { x: margin + padL, y: margin + padT };
+
+  return { svg, width: W, height: H, boxes, offset, place, steps, stepOf, planned, callouts: calls };
 }
 
 export { edgeKey };

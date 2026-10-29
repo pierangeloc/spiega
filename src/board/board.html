@@ -146,6 +146,7 @@
     <button class="btn" id="narrate" title="read the script aloud — space plays and pauses">narrate</button>
     <select class="btn pick" id="voicepick" title="which voice reads it — choosing one speaks a sample"></select>
     <button class="btn" id="replay" title="play the session back as it happened">replay</button>
+    <button class="btn" id="follow" title="keep the lit boxes in view while walking the flow">follow</button>
     <button class="btn" id="fit">fit</button>
     <button class="btn" id="snap" title="open a standalone copy of this board">snapshot</button>
   </div>
@@ -179,6 +180,7 @@ import { animateIn, seedOf } from '/src/board/draw-on.js';
 import { emptyBoard, applyOps } from '/src/board/state.js';
 import { lineStates, clickStep } from '/src/board/script.js';
 import { createNarrator, wrapWords, wordAt } from '/src/board/narrate.js';
+import { frame, unionBox, litKeys } from '/src/board/camera.js';
 
 const $ = id => document.getElementById(id);
 // which board this page is, as the server knows it — shown in the window title
@@ -189,6 +191,8 @@ const pan = $('pan'), stage = $('stage');
 let board = null;      // the live board
 let shown = null;      // what is on screen — the live board, or a replay of it
 let lastBoxes = {};
+let lastOffset = { x: 0, y: 0 };
+let lastActive;                 // the step the camera last framed
 const MARGIN = 18;
 const view_of = () => shown || board;
 let drawn = new Set();          // keys already on the board, so they animate once
@@ -211,7 +215,7 @@ function render(fresh = null) {
   const r = renderSVG(board, { margin: MARGIN, active: board.active, hand: false });
   pan.innerHTML = r.svg;
   pan.dataset.w = r.width; pan.dataset.h = r.height;
-  lastBoxes = r.boxes;
+  lastBoxes = r.boxes; lastOffset = r.offset;
 
   // Anything whose key is new gets drawn on; everything else is simply there.
   // Stagger order is boxes, then enclosures, then the lines between them —
@@ -340,6 +344,58 @@ function renderSteps() {
 }
 
 const focus = step => post([{ op: 'focus', step }]);
+
+/* ---------- following the step ----------
+
+   Walking the flow dims everything that is not part of the step. On a board
+   wider than the pane that is the wrong way round: the step you asked for can
+   be off screen, and all you see is the part you were not asking about going
+   grey. So the camera brings the lit boxes into view.
+
+   It is a toggle because the other reading is just as reasonable — someone
+   zoomed into one corner on purpose does not want the view yanked away by a
+   step they pressed to read the script, not to move the picture. The rule for
+   when it stays put lives in board/camera.js, where it can be tested.
+
+   Remembered across reloads: a board is reloaded often enough (a restarted
+   server, a reopened pane) that re-asserting a preference every time would
+   make it feel like it never took. */
+let following = true;
+try { following = localStorage.getItem('spiega.follow') !== 'off'; } catch { /* private window */ }
+
+/* What a reader can actually see: the stage, less the steps bar that floats
+   over the bottom of it. Framing to the full stage would park the subject
+   underneath the bar on a short pane. */
+function visibleArea() {
+  const bar = $('steps');
+  const inset = bar.hidden ? 0 : bar.offsetHeight;
+  return { x0: 0, y0: 0, x1: stage.clientWidth, y1: stage.clientHeight - inset };
+}
+
+function frameStep() {
+  if (!following || replaying) return;
+  const b = view_of();
+  if (b?.active == null) return;
+  const next = frame({
+    subject: unionBox(lastBoxes, litKeys(b.flow?.[b.active])),
+    canvas: { w: +pan.dataset.w || 1, h: +pan.dataset.h || 1 },
+    view, visible: visibleArea(), offset: lastOffset,
+  });
+  if (!next) return;              // already in view, or the whole board is
+  view = next;
+  // the camera is placed now, so a box arriving later must not snap it back
+  userMoved = true;
+  pan.style.transition = 'transform .5s cubic-bezier(.33,.7,.3,1)';
+  applyView();
+}
+
+$('follow').classList.toggle('on', following);
+$('follow').onclick = () => {
+  following = !following;
+  $('follow').classList.toggle('on', following);
+  try { localStorage.setItem('spiega.follow', following ? 'on' : 'off'); } catch { /* private window */ }
+  if (following) frameStep();     // show what it does, rather than describing it
+};
 
 /* ---------- the tape ----------
 
@@ -627,6 +683,10 @@ function onState(b, fresh) {
   render(fresh);
   renderSteps();
   if (first) userMoved = false;
+  // A step change is the only thing the camera follows, and it arrives here
+  // however it was asked for: the arrows, a click in the rail, play, or the
+  // narrator reaching a line that is tagged with it.
+  if (b.active !== lastActive) { lastActive = b.active; frameStep(); }
 }
 
 /* The stream is the only thing keeping this page true. If it dies — the server

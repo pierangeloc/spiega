@@ -10,6 +10,7 @@ import { renderSVG } from '../src/render/render.js';
 import { snapshotHTML } from '../src/board/snapshot.js';
 import { KINDS } from '../src/render/glyphs.js';
 import { scriptSteps, linesFor, lineStates, clickStep, tagReport } from '../src/board/script.js';
+import { frame, unionBox, litKeys } from '../src/board/camera.js';
 import { upsertBlock, removeBlock, START, END, BLOCK } from '../src/agents-block.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1275,6 +1276,97 @@ await atest('migrating from the old name clears every trace it left', async () =
   assert.ok(!second.rows.includes('todo') || true, 'and running twice is safe');
 
   fs.rmSync(home, { recursive: true, force: true });
+});
+
+
+/* ---------- the camera that follows the step ---------- */
+
+const VIS = { x0: 0, y0: 0, x1: 900, y1: 600 };
+const BOXES = {
+  a: { x: 60, y: 100, w: 160, h: 70 },
+  b: { x: 300, y: 100, w: 160, h: 70 },
+  far: { x: 3000, y: 1200, w: 160, h: 70 },
+};
+
+test('a step frames the boxes it lights, both ends of its edge included', () => {
+  assert.deepEqual(litKeys({ edge: 'a>b' }).sort(), ['a', 'b']);
+  assert.deepEqual(litKeys({ step: 'x', lights: ['a'] }), ['a']);
+  assert.deepEqual(litKeys(undefined), []);
+  const u = unionBox(BOXES, ['a', 'b']);
+  assert.deepEqual(u, { x: 60, y: 100, w: 400, h: 70 });
+  // a key the board does not have is skipped, not counted as the origin
+  assert.deepEqual(unionBox(BOXES, ['a', 'nope']), BOXES.a);
+  assert.equal(unionBox(BOXES, ['nope']), null);
+});
+
+test('the camera holds still when the whole board is already in view', () => {
+  const next = frame({
+    subject: BOXES.a,
+    canvas: { w: 700, h: 400 },
+    view: { x: 0, y: 0, k: 1 },
+    visible: VIS,
+  });
+  assert.equal(next, null, 'nothing is hidden, so there is nothing to bring into view');
+});
+
+test('and when the subject is on screen with room around it', () => {
+  const next = frame({
+    subject: BOXES.b,                       // well inside the visible area
+    canvas: { w: 4000, h: 2000 },           // but the board is far wider than the pane
+    view: { x: 0, y: 0, k: 1 },
+    visible: VIS,
+  });
+  assert.equal(next, null, 'consecutive steps should not re-centre the view');
+});
+
+test('a subject off screen is brought in, without zooming in', () => {
+  const view = { x: 0, y: 0, k: 1 };
+  const next = frame({
+    subject: BOXES.far,
+    canvas: { w: 4000, h: 2000 },
+    view, visible: VIS,
+  });
+  assert.ok(next, 'it has to move');
+  assert.equal(next.k, 1, 'the zoom is the reader’s; a subject that fits keeps it');
+  const on = b => ({
+    x0: b.x * next.k + next.x, y0: b.y * next.k + next.y,
+    x1: (b.x + b.w) * next.k + next.x, y1: (b.y + b.h) * next.k + next.y,
+  });
+  const r = on(BOXES.far);
+  assert.ok(r.x0 >= VIS.x0 && r.x1 <= VIS.x1 && r.y0 >= VIS.y0 && r.y1 <= VIS.y1,
+    'and the subject ends up inside the visible area');
+});
+
+test('it pulls back only as far as it must, and never past the paper', () => {
+  const next = frame({
+    subject: { x: 1000, y: 500, w: 1600, h: 900 },   // bigger than the pane at 1:1
+    canvas: { w: 4000, h: 2000 },
+    view: { x: 0, y: 0, k: 1 },
+    visible: VIS,
+  });
+  assert.ok(next.k < 1, 'it has to pull back');
+  assert.ok(next.k >= Math.min((900 - 60) / 1600, (600 - 60) / 900) - 1e-9,
+    'but no further than the subject needs');
+  // the canvas still covers the pane: no empty paper at the edges
+  assert.ok(next.x <= 0 && next.x + 4000 * next.k >= VIS.x1);
+  assert.ok(next.y <= 0 && next.y + 2000 * next.k >= VIS.y1);
+});
+
+test('a subject reached by a zoomed-in reader keeps that reader zoomed in', () => {
+  const next = frame({
+    subject: BOXES.far,
+    canvas: { w: 4000, h: 2000 },
+    view: { x: 0, y: 0, k: 2 },
+    visible: VIS,
+  });
+  assert.equal(next.k, 2, '160x70 fits twice over at 2x, so there is nothing to give up');
+});
+
+test('the camera refuses to frame anything in a pane with no room', () => {
+  assert.equal(frame({ subject: BOXES.far, canvas: { w: 4000, h: 2000 },
+    view: { x: 0, y: 0, k: 1 }, visible: { x0: 0, y0: 0, x1: 20, y1: 10 } }), null);
+  assert.equal(frame({ subject: null, canvas: { w: 4000, h: 2000 },
+    view: { x: 0, y: 0, k: 1 }, visible: VIS }), null, 'and nothing lit is not an error');
 });
 
 console.log(`\n${n} passed`);
