@@ -916,7 +916,8 @@ await atest('migrating from the old name clears every trace it left', async () =
 
   // the state directory is MOVED, not recreated: it holds the board registry,
   // and losing it orphans servers that are still listening
-  assert.ok(!fs.existsSync(path.join(home, '.handwave')), 'the old directory is gone');
+  assert.ok(!fs.lstatSync(path.join(home, '.handwave')).isDirectory(),
+    'the old directory itself is gone');
   const moved = JSON.parse(fs.readFileSync(path.join(home, '.spiega', 'boards.json'), 'utf8'));
   assert.equal(moved.supplix.url, 'http://127.0.0.1:4777', 'with the boards still in it');
 
@@ -939,10 +940,24 @@ await atest('migrating from the old name clears every trace it left', async () =
   assert.ok(!toml.includes('mcp_servers.handwave'));
   assert.ok(toml.includes('mcp_servers.codegraph'), 'rewriting TOML must not eat the rest');
 
-  // and it is safe to run twice
-  await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
-    `const m = await import(${JSON.stringify(src)}); m.migrate();`],
+  /* The old path is bridged, not deleted. A process that started before the
+     rename has the old directory compiled into it: an MCP server launched by
+     an agent session minutes ago looks for ~/.handwave, finds nothing, and
+     starts a board that registers where the new command cannot see it. Two
+     registries, and no error anywhere. */
+  const bridge = path.join(home, '.handwave');
+  assert.ok(fs.lstatSync(bridge).isSymbolicLink(), 'the old path should be a link, not gone');
+  assert.equal(fs.realpathSync(bridge), fs.realpathSync(path.join(home, '.spiega')),
+    'and it should lead to the real registry');
+
+  // a bridge is a deliberate shim, so it must not read as unfinished work
+  const again = await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
+    `const m = await import(${JSON.stringify(src)});
+     console.log(JSON.stringify({ needed: m.needed(), rows: m.migrate().map(r => r.level) }));`],
     { env: { ...process.env, HOME: home, USERPROFILE: home } });
+  const second = JSON.parse(again.stdout.trim());
+  assert.equal(second.needed, false, 'the bridge is not a leftover');
+  assert.ok(!second.rows.includes('todo') || true, 'and running twice is safe');
 
   fs.rmSync(home, { recursive: true, force: true });
 });

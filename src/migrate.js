@@ -40,14 +40,50 @@ const readJSON = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } c
 /* The state directory, boards registry and all. Moved rather than recreated,
    because it holds the registry of running boards and losing it orphans them:
    the servers keep listening and nothing can find them again. */
+const linkedForward = () => {
+  try { return fs.realpathSync(OLD_DIR) === fs.realpathSync(NEW_DIR); } catch { return false; }
+};
+
 function stateDir(rows) {
-  if (!fs.existsSync(OLD_DIR)) return rows.push(skip('state directory', 'nothing to move'));
+  // already migrated, with the compatibility link still in place
+  if (isLink(OLD_DIR) && linkedForward()) {
+    const stale = oldProcesses();
+    if (stale) return rows.push(skip('old path', `kept: ${stale} process(es) still predate the rename`));
+    fs.rmSync(OLD_DIR, { force: true });
+    return rows.push(done('old path', `removed ~/.${OLD} — nothing is using it any more`));
+  }
+  if (!fs.existsSync(OLD_DIR)) {
+    /* Already moved — or never used. Either way, processes that started
+       before the rename still look for the old path, so give them one. This
+       is the common case: the move happens once, and the link is needed for
+       as long as those sessions live. */
+    if (fs.existsSync(NEW_DIR) && oldProcesses()) return link(rows);
+    return rows.push(skip('state directory', 'nothing to move'));
+  }
   if (fs.existsSync(NEW_DIR)) {
     return rows.push(todo('state directory',
       `both ~/.${OLD} and ~/.${NEW} exist — merge them by hand, then remove ~/.${OLD}`));
   }
   fs.renameSync(OLD_DIR, NEW_DIR);
-  rows.push(done('state directory', `~/.${OLD} ${'→'} ~/.${NEW}`));
+  rows.push(done('state directory', `~/.${OLD} → ~/.${NEW}`));
+  link(rows);
+}
+
+/* A process that started before the rename still has the old path compiled
+   into it — an MCP server launched by an agent session minutes ago looks for
+   ~/.handwave, finds nothing, and starts a board that registers into a
+   directory the new command cannot see. Two registries, boards invisible to
+   `spiega boards`, and no error anywhere.
+
+   A symlink costs nothing and keeps those processes correct until their
+   sessions end. A later `migrate` removes it once nothing needs it. */
+function link(rows) {
+  try {
+    fs.symlinkSync(NEW_DIR, OLD_DIR, 'dir');
+    rows.push(done('old path', `~/.${OLD} → ~/.${NEW}, for processes started before the rename`));
+  } catch (e) {
+    rows.push(todo('old path', `could not link ~/.${OLD} (${e.code}) — restart agent sessions promptly`));
+  }
 }
 
 /* Skills are symlinked, so the old link points at a path that no longer
@@ -179,6 +215,25 @@ function binary(rows) {
   if (which) rows.push(todo('old command', `${which} still exists — \`npm unlink -g ${OLD}\``));
 }
 
+/* How many of our own processes started before this checkout's HEAD. The
+   compatibility link stays while any of them are alive. */
+function oldProcesses() {
+  const run = (cmd, args) => execFileSync(cmd, args,
+    { encoding: 'utf8', timeout: 4000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  try {
+    const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+    const head = Number(run('git', ['-C', root, 'log', '-1', '--format=%ct'])) * 1000;
+    if (!head) return 0;
+    const pids = run('ps', ['-Ao', 'pid=,command=']).split('\n')
+      .filter(l => l.includes('mcp/server.js') || /cli\.js.*serve/.test(l))
+      .map(l => Number(l.trim().split(/\s+/)[0])).filter(Boolean);
+    return pids.filter(pid => {
+      const t = Date.parse(run('ps', ['-o', 'lstart=', '-p', String(pid)]));
+      return Number.isFinite(t) && t < head;
+    }).length;
+  } catch { return 0; }
+}
+
 export function migrate() {
   const rows = [];
   stateDir(rows);
@@ -193,7 +248,8 @@ export function migrate() {
 
 /* Whether there is anything to do, cheaply enough to check on every run. */
 export function needed() {
-  if (fs.existsSync(OLD_DIR)) return true;
+  // a forward link is a deliberate compatibility shim, not a leftover
+  if (fs.existsSync(OLD_DIR) && !(isLink(OLD_DIR) && linkedForward())) return true;
   for (const d of ['.claude/skills', '.codex/skills', '.gemini/skills']) {
     if (isLink(path.join(HOME, d, OLD))) return true;
   }

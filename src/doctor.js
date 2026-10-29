@@ -229,7 +229,22 @@ function processes(rows, headTime) {
 function legacy(rows) {
   const OLD = 'handwave';
   const seen = [];
-  if (fs.existsSync(path.join(HOME, `.${OLD}`))) seen.push(`~/.${OLD}`);
+  const oldDir = path.join(HOME, `.${OLD}`);
+  /* A link forward to the new directory is a deliberate bridge for processes
+     that started before the rename, not debris. It is reported so it does not
+     become permanent, but it is not a fault. */
+  const bridged = (() => {
+    try {
+      return fs.lstatSync(oldDir).isSymbolicLink()
+        && fs.realpathSync(oldDir) === fs.realpathSync(path.join(HOME, '.spiega'));
+    } catch { return false; }
+  })();
+  if (bridged) {
+    rows.push(warn('old path', `~/.${OLD} still points at ~/.spiega for processes started before the rename`,
+      'spiega migrate removes it once none are left'));
+  } else if (fs.existsSync(oldDir)) {
+    seen.push(`~/.${OLD}`);
+  }
   for (const [name, dir] of Object.entries(SKILL_DIRS)) {
     const old = path.join(path.dirname(dir), OLD);
     try { if (fs.lstatSync(old)) seen.push(`${name} skill`); } catch { /* absent */ }
