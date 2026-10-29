@@ -77,3 +77,16 @@ export function lineStates(board) {
     state: !anyHere ? 'idle' : step === active ? 'on' : step == null ? 'free' : 'off',
   }));
 }
+
+/* Clicking a line of the script walks the step it explains.
+
+   A second click on the step already lit clears it, so the same gesture gets
+   you back out — otherwise the only way to leave a step is a different
+   control, and the reader has to learn two things instead of one.
+
+   Returns the step to focus, or null to clear. Lives here, with the rest of
+   the script-to-step reasoning, so it can be tested without a DOM. */
+export function clickStep(board, step) {
+  if (!Number.isInteger(step) || step < 0 || step >= (board?.flow?.length || 0)) return undefined;
+  return board?.active === step ? null : step;
+}

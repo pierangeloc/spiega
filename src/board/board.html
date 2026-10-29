@@ -68,6 +68,12 @@
   .said.on{border-color:var(--accent);box-shadow:3px 3px 0 var(--accent);background:var(--paper)}
   .said.on .tag{color:var(--accent)}
   .said.off{opacity:.42;box-shadow:3px 3px 0 var(--soft);filter:saturate(.55)}
+  /* only the lines that lead somewhere look like they do */
+  .said.go{cursor:pointer}
+  .said.go:hover{border-color:var(--accent);box-shadow:4px 4px 0 var(--accent);transform:translateY(-1px)}
+  .said.go:hover .tag{color:var(--accent)}
+  .said.go:active{transform:translateY(0);box-shadow:2px 2px 0 var(--accent)}
+  .said.go.on:hover{box-shadow:4px 4px 0 var(--accent)}
   .said{transition:opacity .28s ease, border-color .28s ease, box-shadow .28s ease, filter .28s ease}
   .said .tag{display:block;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
     color:var(--muted);font-weight:700;margin-bottom:3px}
@@ -155,7 +161,7 @@
 import { renderSVG } from '/src/render/render.js';
 import { animateIn, seedOf } from '/src/board/draw-on.js';
 import { emptyBoard, applyOps } from '/src/board/state.js';
-import { lineStates } from '/src/board/script.js';
+import { lineStates, clickStep } from '/src/board/script.js';
 
 const $ = id => document.getElementById(id);
 // which board this page is, as the server knows it — shown in the window title
@@ -270,7 +276,12 @@ function renderRail() {
     const cls = ['said'];
     if (i === t.length - 1) cls.push('latest');
     if (state !== 'idle') cls.push(state);
+    // A line that names a step is a way into that step: the reader has just
+    // read the words, and the hop they are about is one click away.
+    if (step != null) cls.push('go');
     node.className = cls.join(' ');
+    if (step == null) delete node.dataset.step; else node.dataset.step = String(step);
+    node.title = step == null ? '' : `step ${step + 1} \u2014 click to walk it`;
     const tag = step == null ? '' : `<span class="tag">step ${step + 1}</span>`;
     const html = tag + mdish(e.text);
     if (node.dataset.html !== html) { node.innerHTML = html; node.dataset.html = html; }
@@ -303,6 +314,21 @@ function renderSteps() {
 }
 
 const focus = step => post([{ op: 'focus', step }]);
+
+/* Click a line of the script to walk the step it explains.
+
+   One delegated listener rather than one per line, because the rail is
+   append-only and rebinding on every state change would leak handlers. A
+   second click on the step already lit clears it, so the same gesture gets you
+   out — and a replay owns the screen while it runs, so clicks are ignored
+   until it ends. */
+$('rail').addEventListener('click', e => {
+  if (replaying) return;
+  const row = e.target.closest?.('.said[data-step]');
+  if (!row) return;
+  const want = clickStep(view_of(), Number(row.dataset.step));
+  if (want !== undefined) focus(want);
+});
 $('prev').onclick = () => focus(Math.max(0, (board.active ?? 0) - 1));
 $('next').onclick = () => focus(board.active == null ? 0 : Math.min(board.flow.length - 1, board.active + 1));
 /* Play walks the flow on a timer. Starting and stopping are two named

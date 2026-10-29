@@ -9,7 +9,7 @@ import { emptyBoard, applyOps } from '../src/board/state.js';
 import { renderSVG } from '../src/render/render.js';
 import { snapshotHTML } from '../src/board/snapshot.js';
 import { KINDS } from '../src/render/glyphs.js';
-import { scriptSteps, linesFor, lineStates } from '../src/board/script.js';
+import { scriptSteps, linesFor, lineStates, clickStep } from '../src/board/script.js';
 import { upsertBlock, removeBlock, START, END, BLOCK } from '../src/agents-block.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -301,6 +301,26 @@ test('a snapshot marks the lit step in the script, not just the drawing', () => 
   const two = snapshotHTML(b, { active: 0 });
   assert.ok(/<li class="off"><span class="tag">step 2<\/span>About the second step/.test(two),
     'a line belonging to another step should recede in the still too');
+});
+
+test('clicking a line walks its step, and clicking it again comes back out', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'step', edge: 'a>b', step: 'one' },
+    { op: 'step', edge: 'b>c', step: 'two' },
+    { op: 'say', text: 'about the first hop', step: 1 },
+  ]);
+
+  assert.equal(clickStep(b, 0), 0, 'a line with a step takes you to it');
+  applyOps(b, [{ op: 'focus', step: 0 }]);
+  assert.equal(clickStep(b, 0), null, 'clicking the lit step clears it \u2014 one gesture, both ways');
+  assert.equal(clickStep(b, 1), 1, 'another step still switches');
+
+  // nothing to click through to
+  assert.equal(clickStep(b, 9), undefined, 'a step that does not exist does nothing');
+  assert.equal(clickStep(b, -1), undefined);
+  assert.equal(clickStep(b, NaN), undefined);
+  assert.equal(clickStep(emptyBoard(), 0), undefined, 'a board with no flow has nowhere to go');
 });
 
 /* Tagging after the fact. A model that forgot, or a board drawn before the

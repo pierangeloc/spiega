@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="handwave">
+  <title>handwave</title>
+  <defs>
+    <filter id="hand" x="-8%" y="-8%" width="116%" height="116%" color-interpolation-filters="sRGB">
+      <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="2" seed="5" result="warp"/>
+      <feDisplacementMap in="SourceGraphic" in2="warp" scale="2" xChannelSelector="R" yChannelSelector="G" result="wob"/>
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="11" result="n1"/>
+      <feColorMatrix in="n1" type="matrix" values=".18 0 0 0 .9  .18 0 0 0 .9  .18 0 0 0 .9  0 0 0 0 1" result="grain"/>
+      <feBlend in="wob" in2="grain" mode="multiply"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="108" fill="#f2efe7"/>
+
+  <g filter="url(#hand)" stroke-linecap="round" stroke-linejoin="round" stroke="#231e16">
+
+    <!-- board -->
+    <rect x="64" y="56" width="384" height="288" rx="28"
+          fill="#f8f6f0" stroke-width="14"/>
+
+    <!-- diagram: box → box -->
+    <rect x="108" y="140" width="96" height="70" rx="12"
+          fill="#76a0e2" stroke-width="8"/>
+    <rect x="308" y="140" width="96" height="70" rx="12"
+          fill="#93d3b0" stroke-width="8"/>
+    <path d="M214 175 h80" fill="none" stroke-width="8"/>
+    <path d="M278 161 l24 14 -24 14" fill="none" stroke-width="8"/>
+
+    <!-- title accent -->
+    <circle cx="112" cy="100" r="10" fill="#ef6a4c" stroke-width="0"/>
+    <path d="M134 100 C168 86, 198 114, 232 100 S296 86, 330 100"
+          fill="none" stroke="#ef6a4c" stroke-width="8"/>
+
+    <!-- hand writing with marker (simple silhouette) -->
+    <g transform="translate(300,300)">
+      <!-- wrist / arm -->
+      <path d="M10 40
+               C-10 90, 0 150, 40 190
+               L110 160
+               C90 110, 70 60, 55 30 Z"
+            fill="#f3a6bb" stroke-width="10"/>
+
+      <!-- palm -->
+      <ellipse cx="55" cy="20" rx="58" ry="48"
+               fill="#f3a6bb" stroke-width="10"/>
+
+      <!-- thumb -->
+      <ellipse cx="5" cy="5" rx="24" ry="30" transform="rotate(-35 5 5)"
+               fill="#f3a6bb" stroke-width="9"/>
+
+      <!-- marker held in grip, tip toward board -->
+      <g transform="translate(40,-50) rotate(-42)">
+        <rect x="0" y="0" width="28" height="100" rx="6"
+              fill="#ef6a4c" stroke-width="8"/>
+        <rect x="-1" y="78" width="30" height="14" rx="3"
+              fill="#cf5038" stroke-width="5"/>
+        <path d="M4 0 L14 -26 L24 0 Z" fill="#231e16" stroke-width="0"/>
+      </g>
+    </g>
+
+  </g>
+</svg>

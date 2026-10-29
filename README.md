@@ -186,6 +186,12 @@ The log lives on the board, so a replay can also be asked for from outside —
 an explanation can offer to play it back without thinking the drawing out a
 second time, and nothing is re-sent: it is the same session, run again.
 
+**Clicking the script.** A line tagged with a step is a way into that step:
+click it and the board walks there, so you can read a sentence and go straight
+to the hop it describes rather than hunting for the number. Clicking the step
+already lit clears it, so one gesture goes both ways. Lines tied to no step are
+not clickable and do not pretend to be.
+
 **Keys on the board:** `←` `→` walk the flow, `space` plays it, `r` replays the
 session, `+` `-` zoom a step at a time, `0` or `f` fits, `esc` stops.
 
