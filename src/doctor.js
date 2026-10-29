@@ -147,14 +147,30 @@ function blocks(rows) {
 
 const readJSON = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
+/* name, file, where our entry's path is, and where the servers live.
+
+   The last one exists because the old name has to be looked for inside the
+   server list and nowhere else. These are not all small dedicated files:
+   ~/.claude.json is 130KB of projects, history and usage counters, and a
+   whole-file search for the string found `"handwave": { "usageCount": 1 }`
+   in a telemetry block and reported a registration that was never there.
+   Unfixable, too — `spiega migrate` had nothing to remove, so the warning
+   would have stood forever, which is how a checker teaches people to ignore
+   it. */
 const MCP_FILES = [
-  ['claude', path.join(HOME, '.claude.json'), c => c?.mcpServers?.spiega?.args?.[0]],
-  ['opencode', path.join(CONFIG, 'opencode', 'opencode.json'), c => c?.mcp?.spiega?.command?.[1]],
-  ['gemini', path.join(HOME, '.gemini', 'settings.json'), c => c?.mcpServers?.spiega?.args?.[0]],
-  ['copilot', path.join(HOME, '.copilot', 'mcp-config.json'), c => c?.mcpServers?.spiega?.args?.[0]],
-  ['cursor', path.join(HOME, '.cursor', 'mcp.json'), c => c?.mcpServers?.spiega?.args?.[0]],
-  ['windsurf', path.join(HOME, '.codeium', 'windsurf', 'mcp_config.json'), c => c?.mcpServers?.spiega?.args?.[0]],
+  ['claude', path.join(HOME, '.claude.json'), c => c?.mcpServers?.spiega?.args?.[0], c => c?.mcpServers],
+  ['opencode', path.join(CONFIG, 'opencode', 'opencode.json'), c => c?.mcp?.spiega?.command?.[1], c => c?.mcp],
+  ['gemini', path.join(HOME, '.gemini', 'settings.json'), c => c?.mcpServers?.spiega?.args?.[0], c => c?.mcpServers],
+  ['copilot', path.join(HOME, '.copilot', 'mcp-config.json'), c => c?.mcpServers?.spiega?.args?.[0], c => c?.mcpServers],
+  ['cursor', path.join(HOME, '.cursor', 'mcp.json'), c => c?.mcpServers?.spiega?.args?.[0], c => c?.mcpServers],
+  ['windsurf', path.join(HOME, '.codeium', 'windsurf', 'mcp_config.json'), c => c?.mcpServers?.spiega?.args?.[0], c => c?.mcpServers],
 ];
+
+/* Is there a server registered under the old name? Only a key in the server
+   list counts — the name appearing anywhere else in the file is somebody's
+   history, not something to clean up. */
+export const registeredAs = (cfg, servers, name) =>
+  Boolean(cfg && servers(cfg) && Object.hasOwn(servers(cfg), name));
 
 function registrations(rows) {
   for (const [name, file, pick] of MCP_FILES) {
@@ -292,10 +308,8 @@ function legacy(rows) {
       }
     } catch { /* absent */ }
   }
-  for (const [name, file, ] of MCP_FILES) {
-    const cfg = readJSON(file);
-    const flat = cfg ? JSON.stringify(cfg) : '';
-    if (flat.includes(`"${OLD}"`)) seen.push(`${name} MCP`);
+  for (const [name, file, , servers] of MCP_FILES) {
+    if (registeredAs(readJSON(file), servers, OLD)) seen.push(`${name} MCP`);
   }
   if (seen.length) rows.push(bad('left by the old name', seen.join(', '), 'spiega migrate'));
 }

@@ -11,6 +11,7 @@ import { snapshotHTML } from '../src/board/snapshot.js';
 import { KINDS } from '../src/render/glyphs.js';
 import { scriptSteps, linesFor, lineStates, clickStep, tagReport } from '../src/board/script.js';
 import { frame, unionBox, litKeys } from '../src/board/camera.js';
+import { registeredAs } from '../src/doctor.js';
 import { upsertBlock, removeBlock, START, END, BLOCK } from '../src/agents-block.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1367,6 +1368,30 @@ test('the camera refuses to frame anything in a pane with no room', () => {
     view: { x: 0, y: 0, k: 1 }, visible: { x0: 0, y0: 0, x1: 20, y1: 10 } }), null);
   assert.equal(frame({ subject: null, canvas: { w: 4000, h: 2000 },
     view: { x: 0, y: 0, k: 1 }, visible: VIS }), null, 'and nothing lit is not an error');
+});
+
+
+test('the old name counts only where servers are registered', () => {
+  const servers = c => c?.mcpServers;
+  assert.equal(registeredAs({ mcpServers: { handwave: {} } }, servers, 'handwave'), true);
+  assert.equal(registeredAs({ mcpServers: { spiega: {} } }, servers, 'handwave'), false);
+  assert.equal(registeredAs({ mcpServers: {} }, servers, 'handwave'), false);
+  assert.equal(registeredAs(null, servers, 'handwave'), false);
+  assert.equal(registeredAs({}, servers, 'handwave'), false, 'no server list at all');
+
+  /* The one that bit: ~/.claude.json carries usage counters beside its
+     servers, and a whole-file search called a telemetry key a registration —
+     a fault `spiega migrate` could never clear, so it would have stood for
+     good. */
+  const real = {
+    mcpServers: { firecrawl: {}, codegraph: {}, spiega: {} },
+    tipsHistory: { 'terminal-browser': { usageCount: 5 }, handwave: { usageCount: 1 } },
+    projects: { '/Users/someone/handwave': { history: ['handwave doctor'] } },
+  };
+  assert.equal(registeredAs(real, servers, 'handwave'), false,
+    'the name in history or counters is not something to clean up');
+  assert.equal(JSON.stringify(real).includes('"handwave"'), true,
+    'and a whole-file search would have said otherwise');
 });
 
 console.log(`\n${n} passed`);
