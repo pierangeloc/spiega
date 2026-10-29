@@ -22,6 +22,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { dropTable } from './toml.js';
 
 const HOME = os.homedir();
 const OLD = 'handwave';
@@ -35,6 +36,16 @@ const skip = (what, detail) => ({ level: 'skip', what, detail });
 const todo = (what, detail) => ({ level: 'todo', what, detail });
 
 const isLink = p => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
+
+/* Every file this rewrites was written by someone else. `install` has always
+   backed them up; this did not, which is how a botched TOML edit here had no
+   clean copy to go back to. One per file per day, never overwritten. */
+const backup = file => {
+  if (!fs.existsSync(file)) return null;
+  const b = `${file}.bak-migrate-${new Date().toISOString().slice(0, 10)}`;
+  if (!fs.existsSync(b)) fs.copyFileSync(file, b);
+  return b;
+};
 const readJSON = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 /* The state directory, boards registry and all. Moved rather than recreated,
@@ -127,6 +138,7 @@ function registrations(rows) {
     const node = cfg && pick(cfg);
     if (!node || !(OLD in node)) continue;
     delete node[OLD];
+    backup(file);
     fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n');
     rows.push(done(`${name} MCP`, `dropped the old ${OLD} entry`));
   }
@@ -135,9 +147,10 @@ function registrations(rows) {
   const toml = path.join(HOME, '.codex', 'config.toml');
   if (fs.existsSync(toml)) {
     const raw = fs.readFileSync(toml, 'utf8');
-    if (new RegExp(`^\\s*\\[mcp_servers\\.${OLD}\\]`, 'm').test(raw)) {
-      const cut = raw.replace(new RegExp(`\\n?\\[mcp_servers\\.${OLD}\\][^\\[]*`, 'm'), '\n');
-      fs.writeFileSync(toml, cut.replace(/\n{3,}/g, '\n\n'));
+    const cut = dropTable(raw, OLD);
+    if (cut !== raw) {
+      backup(toml);
+      fs.writeFileSync(toml, cut);
       rows.push(done('codex MCP', `dropped the old [mcp_servers.${OLD}] table`));
     }
   }
@@ -175,6 +188,7 @@ function blocks(rows) {
     const i = text.indexOf(start), j = text.indexOf(end);
     if (i < 0 || j < i) continue;
     const out = (text.slice(0, i) + text.slice(j + end.length)).replace(/\n{3,}/g, '\n\n');
+    backup(file);
     fs.writeFileSync(file, out.replace(/^\n+/, ''));
     rows.push(done(`${name} instructions`, `removed the old ${OLD} block`));
   }

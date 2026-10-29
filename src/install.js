@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { upsertBlock } from './agents-block.js';
+import { upsertTable } from './toml.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -150,12 +151,18 @@ export const TARGETS = {
       const raw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
       let note = 'skill, AGENTS.md';
       let wroteMcp = false;
-      if (!/^\s*\[mcp_servers\.spiega\]/m.test(raw)) {
+      /* Add our table, or repoint it. Add-only was the first version, on the
+         grounds that rewriting someone's TOML eats their comments — but it
+         also left a table pointing at a checkout that had since moved, while
+         install reported success. See toml.js for why this is not a regex
+         written inline. */
+      const body = `[mcp_servers.spiega]\ncommand = "node"\nargs = ["${MCP_ENTRY}"]\n`;
+      const up = upsertTable(raw, 'spiega', body);
+      if (up.how !== 'unchanged') {
         backup(file);
         fs.mkdirSync(path.dirname(file), { recursive: true });
-        const block = `\n[mcp_servers.spiega]\ncommand = "node"\nargs = ["${MCP_ENTRY}"]\n`;
-        fs.writeFileSync(file, raw.replace(/\n*$/, '\n') + block);
-        note += ', MCP server';
+        fs.writeFileSync(file, up.text);
+        note += up.how === 'added' ? ', MCP server' : ', MCP repointed';
         wroteMcp = true;
       } else note += ', MCP already registered';
       return [where, note, combine([skill, block, [null, null, wroteMcp ? 'written' : 'unchanged']])];

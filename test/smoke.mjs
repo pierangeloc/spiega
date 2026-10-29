@@ -874,6 +874,51 @@ await atest('a board is named after the task, and a session keeps the one it has
   fs.rmSync(work, { recursive: true, force: true });
 });
 
+/* Editing one TOML table without eating the rest of the file.
+   `[^[]*` stops at the bracket in `args = [...]` on the table's own second
+   line, orphaning everything after it. That corrupted a real config on this
+   machine, in two places, because the same wrong pattern had been written
+   twice. */
+test('a TOML table is edited without disturbing its neighbours', async () => {
+  const { dropTable, upsertTable, tomlTable } = await import('../src/toml.js');
+
+  // the shape that broke it: a table whose own body contains brackets,
+  // with neighbours on both sides
+  const raw = [
+    '[mcp_servers.codegraph]', 'command = "codegraph"', 'args = ["serve", "--mcp"]', '',
+    '[mcp_servers.spiega]', 'command = "node"', 'args = ["/old/path/src/mcp/server.js"]', '',
+    '[other]', 'k = 1', '',
+  ].join('\n');
+
+  // the match must not stop at the bracket in args
+  assert.ok(raw.match(tomlTable('spiega'))[0].includes('/old/path/'),
+    'the table must include its own args line');
+  assert.ok(!raw.match(tomlTable('spiega'))[0].includes('[other]'),
+    'and must stop before the next table');
+
+  const dropped = dropTable(raw, 'spiega');
+  assert.ok(!dropped.includes('mcp_servers.spiega'), 'the table goes');
+  assert.ok(!dropped.includes('/old/path/'), 'and takes its body with it');
+  assert.ok(dropped.includes('[mcp_servers.codegraph]') && dropped.includes('args = ["serve", "--mcp"]'),
+    "the neighbour above survives whole");
+  assert.ok(dropped.includes('[other]') && dropped.includes('k = 1'), 'and the one below');
+  assert.ok(!/^\[".*\]$/m.test(dropped), 'no orphan line left that TOML would read as a table');
+
+  const up = upsertTable(raw, 'spiega',
+    '[mcp_servers.spiega]\ncommand = "node"\nargs = ["/new/path/src/mcp/server.js"]\n');
+  assert.equal(up.how, 'repointed');
+  assert.ok(up.text.includes('/new/path/') && !up.text.includes('/old/path/'));
+  assert.ok(up.text.includes('[other]'), 'repointing must not eat what follows');
+  assert.equal(upsertTable(up.text, 'spiega',
+    '[mcp_servers.spiega]\ncommand = "node"\nargs = ["/new/path/src/mcp/server.js"]\n').how,
+    'unchanged', 'and is idempotent');
+
+  // absent entirely: appended, nothing else touched
+  const added = upsertTable('[only]\nx = 1\n', 'spiega', '[mcp_servers.spiega]\ncommand = "node"\n');
+  assert.equal(added.how, 'added');
+  assert.ok(added.text.startsWith('[only]'));
+});
+
 /* The rename from handwave. A rename is not a string replacement in a repo:
    the old name is also written into a state directory, three skills
    directories, six MCP configs and three instruction files. The previous
