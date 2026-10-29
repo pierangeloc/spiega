@@ -492,7 +492,7 @@ test('removing the block leaves the rest of the file untouched', () => {
 test('a half-edited block is refused rather than guessed at', () => {
   const f = '/AGENTS.md';
   const store = { [f]: `# Mine\n\n${START}\nsomeone deleted the end marker\n` };
-  assert.throws(() => upsertBlock(fakeFS(store), f), /one handwave marker but not the other/,
+  assert.throws(() => upsertBlock(fakeFS(store), f), /one spiega marker but not the other/,
     'eating the rest of the file is not an acceptable failure');
 });
 
@@ -515,12 +515,12 @@ test('every install target names a real file or directory, and detection is hone
 });
 
 test('a backup never lands inside a directory the harness scans', () => {
-  // `handwave.bak-...` next to `handwave` in ~/.claude/skills is not a backup,
+  // `spiega.bak-...` next to `spiega` in ~/.claude/skills is not a backup,
   // it is a second skill with the same description and older contents.
   const src = fs.readFileSync(path.join(ROOT, 'src/install.js'), 'utf8');
   const fn = src.slice(src.indexOf('const backupDir'), src.indexOf('const mcpJSON'));
   assert.ok(!/\$\{d\}\.bak/.test(fn), 'a sibling of the target is the one place it must not go');
-  assert.ok(/\.handwave['"],\s*['"]backups/.test(fn), 'backups belong somewhere nothing scans');
+  assert.ok(/\.spiega['"],\s*['"]backups/.test(fn), 'backups belong somewhere nothing scans');
 });
 
 test('a browser is detected by its own binary, not its name in any path', async () => {
@@ -566,9 +566,9 @@ test('doctor reports what is stale, and every problem comes with a way out', asy
   assert.ok(clean.includes('Everything an agent reads is current.'), 'a clean run should say so');
   assert.ok(!clean.includes('To fix'), 'and should not offer a fix list');
 
-  const dirty = format([{ level: 'bad', what: 'skill', detail: 'stale', fix: 'handwave install' }]);
+  const dirty = format([{ level: 'bad', what: 'skill', detail: 'stale', fix: 'spiega install' }]);
   assert.ok(dirty.includes('To fix'), 'a problem should bring a fix list');
-  assert.ok(dirty.includes('handwave install'), 'with the command in it');
+  assert.ok(dirty.includes('spiega install'), 'with the command in it');
 });
 
 /* Terminal dressing is for terminals. Piped into a file, a pager, or an agent
@@ -597,15 +597,15 @@ test('colour and glyphs stay out of piped output', async () => {
   process.env = old;
 
   // a long path keeps its tail, which is the part that identifies it
-  const short = term.shortPath('/a/very/deeply/nested/set/of/directories/handwave/skills/handwave', 30);
+  const short = term.shortPath('/a/very/deeply/nested/set/of/directories/spiega/skills/spiega', 30);
   assert.ok(short.length <= 31, `too long: ${short}`);
-  assert.ok(short.endsWith('handwave'), 'the end is what names it');
+  assert.ok(short.endsWith('spiega'), 'the end is what names it');
 });
 
 test('the herdr plugin declares the actions it ships, and its scripts are runnable', () => {
   const dir = path.join(ROOT, 'integrations/herdr');
   const toml = fs.readFileSync(path.join(dir, 'herdr-plugin.toml'), 'utf8');
-  assert.match(toml, /^id = "handwave\.board"/m);
+  assert.match(toml, /^id = "spiega\.board"/m);
   assert.match(toml, /min_herdr_version/, 'herdr refuses a manifest without one');
 
   // every command a manifest names must exist and be executable, or the action
@@ -626,11 +626,11 @@ test('the herdr plugin declares the actions it ships, and its scripts are runnab
 });
 
 test('the skill the installers link to exists, with the frontmatter a harness reads', () => {
-  const f = path.join(ROOT, 'skills/handwave/SKILL.md');
-  assert.ok(fs.existsSync(f), 'skills/handwave/SKILL.md is the one canonical copy');
+  const f = path.join(ROOT, 'skills/spiega/SKILL.md');
+  assert.ok(fs.existsSync(f), 'skills/spiega/SKILL.md is the one canonical copy');
   const head = fs.readFileSync(f, 'utf8').slice(0, 600);
   assert.match(head, /^---\n/, 'it needs YAML frontmatter');
-  assert.match(head, /\nname: handwave\n/);
+  assert.match(head, /\nname: spiega\n/);
   assert.match(head, /\ndescription: .{40,}/, 'the description is what makes a harness load it');
 });
 
@@ -682,7 +682,7 @@ await atest('a replay can be asked for remotely, and re-sends nothing', async ()
   }
 });
 
-/* `handwave say "..." --step 2` goes through argument parsing, which no unit
+/* `spiega say "..." --step 2` goes through argument parsing, which no unit
    test of the attribution touches — and that is exactly where it first broke:
    the flag was read with the wrong call and the "2" ended up in the sentence.
    So drive the real CLI against a real board. */
@@ -695,7 +695,7 @@ await atest('the say and tag commands reach the board, and a bad tag fails loudl
   const run = promisify(execFile);
   const { server, board } = createServer();
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  const env = { ...process.env, HANDWAVE_URL: `http://127.0.0.1:${server.address().port}` };
+  const env = { ...process.env, SPIEGA_URL: `http://127.0.0.1:${server.address().port}` };
   const cli = (...args) => run(process.execPath, [path.join(ROOT, 'src/cli.js'), ...args], { env });
   try {
     await cli('draw', JSON.stringify([
@@ -756,7 +756,7 @@ await atest('the MCP server exits when its client closes the pipe', async () => 
 
 /* Named boards. One board per conversation, because two agents sharing one
    interleave two explanations into one drawing. Run in a child with its own
-   HOME: the registry lives under ~/.handwave and a test must never go near
+   HOME: the registry lives under ~/.spiega and a test must never go near
    the real one. Everything happens in one process, because a board is pruned
    when the process that registered it exits — which is the point of the
    registry, and would otherwise prune these the moment they were written. */
@@ -765,8 +765,8 @@ await atest('boards are found by name, kept apart, and pruned when their server 
   const { promisify } = await import('node:util');
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-home-'));
   const env = { ...process.env, HOME: home, USERPROFILE: home };
-  delete env.HANDWAVE_URL;
-  delete env.HANDWAVE_BOARD;
+  delete env.SPIEGA_URL;
+  delete env.SPIEGA_BOARD;
 
   const script = `
     const m = await import(${JSON.stringify(path.join(ROOT, 'src/board/server.js'))});
@@ -779,11 +779,11 @@ await atest('boards are found by name, kept apart, and pruned when their server 
     out.beta = m.findBoard('beta');
     out.unknown = m.findBoard('nope');
 
-    process.env.HANDWAVE_BOARD = 'beta';           // how a harness picks one
+    process.env.SPIEGA_BOARD = 'beta';           // how a harness picks one
     out.byEnv = m.findBoard();
-    process.env.HANDWAVE_URL = 'http://explicit';  // an explicit url still wins
+    process.env.SPIEGA_URL = 'http://explicit';  // an explicit url still wins
     out.byUrl = m.findBoard();
-    delete process.env.HANDWAVE_URL;
+    delete process.env.SPIEGA_URL;
 
     out.names = Object.keys(m.listBoards()).sort();
     out.gone = m.unregisterBoard('alpha');
@@ -804,7 +804,7 @@ await atest('boards are found by name, kept apart, and pruned when their server 
   assert.equal(r.alpha, 'http://127.0.0.1:1111');
   assert.equal(r.beta, 'http://127.0.0.1:2222', 'two boards, kept apart');
   assert.equal(r.unknown, null, 'an unknown name is nothing, never someone else\'s board');
-  assert.equal(r.byEnv, 'http://127.0.0.1:2222', 'HANDWAVE_BOARD selects');
+  assert.equal(r.byEnv, 'http://127.0.0.1:2222', 'SPIEGA_BOARD selects');
   assert.equal(r.byUrl, 'http://explicit', 'an explicit url outranks the name');
   assert.deepEqual(r.names, ['alpha', 'beta']);
   assert.equal(r.gone, true);
@@ -827,7 +827,7 @@ await atest('a board is named after the task, and a session keeps the one it has
   fs.mkdirSync(task);
 
   const base = { ...process.env, HOME: home, USERPROFILE: home };
-  for (const k of ['HANDWAVE_URL', 'HANDWAVE_BOARD', 'HANDWAVE_SESSION',
+  for (const k of ['SPIEGA_URL', 'SPIEGA_BOARD', 'SPIEGA_SESSION',
                    'CLAUDE_CODE_SESSION_ID', 'HERDR_PANE_ID', 'HERDR_TAB_ID']) delete base[k];
 
   const ask = (env, cwd = task, extra = '') => promisify(execFile)(
@@ -837,25 +837,25 @@ await atest('a board is named after the task, and a session keeps the one it has
     { env: { ...base, ...env }, cwd }).then(r => r.stdout.trim());
 
   // the directory is the task, and a worktree's name is what someone called it
-  assert.equal(await ask({ HANDWAVE_SESSION: 's1' }), 'domain-modeling-for-rights');
+  assert.equal(await ask({ SPIEGA_SESSION: 's1' }), 'domain-modeling-for-rights');
 
   // an explicit name always wins
-  assert.equal(await ask({ HANDWAVE_SESSION: 's1', HANDWAVE_BOARD: 'Review Notes' }), 'review-notes');
+  assert.equal(await ask({ SPIEGA_SESSION: 's1', SPIEGA_BOARD: 'Review Notes' }), 'review-notes');
 
   // A board asked for by name belongs to the asking, not to the session that
   // did the asking: otherwise one `--board notes` call rebinds that session's
   // default board to "notes" for good, since the owner match comes first.
   const named = `m.registerBoard(m.boardName(), 'http://127.0.0.1:9001');`;
-  assert.equal(await ask({ HANDWAVE_SESSION: 's1', HANDWAVE_BOARD: 'notes' }, task,
+  assert.equal(await ask({ SPIEGA_SESSION: 's1', SPIEGA_BOARD: 'notes' }, task,
     named + `if (Object.values(m.listBoards())[0].owner) throw new Error('an explicit board claimed the session');`),
     'notes');
-  assert.equal(await ask({ HANDWAVE_SESSION: 's1' }), 'domain-modeling-for-rights',
+  assert.equal(await ask({ SPIEGA_SESSION: 's1' }), 'domain-modeling-for-rights',
     'and the session still gets the board named after its task');
 
   // register s1's board, then: s1 keeps it, s2 in the same directory does not take it
   const reg = `m.registerBoard('domain-modeling-for-rights', 'http://127.0.0.1:1234', 's1');`;
-  assert.equal(await ask({ HANDWAVE_SESSION: 's1' }, task, reg), 'domain-modeling-for-rights');
-  assert.equal(await ask({ HANDWAVE_SESSION: 's2' }, task, reg), 'domain-modeling-for-rights-2',
+  assert.equal(await ask({ SPIEGA_SESSION: 's1' }, task, reg), 'domain-modeling-for-rights');
+  assert.equal(await ask({ SPIEGA_SESSION: 's2' }, task, reg), 'domain-modeling-for-rights-2',
     'two conversations about one repo get names a person can still say out loud');
 
   // a session is its conversation first, its pane second — one tab holds both
@@ -872,6 +872,79 @@ await atest('a board is named after the task, and a session keeps the one it has
 
   fs.rmSync(home, { recursive: true, force: true });
   fs.rmSync(work, { recursive: true, force: true });
+});
+
+/* The rename from handwave. A rename is not a string replacement in a repo:
+   the old name is also written into a state directory, three skills
+   directories, six MCP configs and three instruction files. The previous
+   rename here — archboard to handwave — missed one file and broke
+   `install cursor` for weeks, so every surface gets a test. */
+await atest('migrating from the old name clears every trace it left', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sp-home-'));
+  const w = (rel, text) => {
+    const f = path.join(home, rel);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, text);
+    return f;
+  };
+
+  // a machine as it looks the moment before the rename
+  fs.mkdirSync(path.join(home, '.handwave'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.handwave', 'boards.json'),
+    JSON.stringify({ supplix: { url: 'http://127.0.0.1:4777', pid: 1 } }));
+  fs.mkdirSync(path.join(home, '.claude', 'skills'), { recursive: true });
+  fs.symlinkSync('/nowhere/skills/handwave', path.join(home, '.claude', 'skills', 'handwave'), 'dir');
+  w('.config/opencode/opencode.json',
+    JSON.stringify({ mcp: { handwave: { command: ['node', 'x'] }, other: { command: ['y'] } } }));
+  w('.config/opencode/AGENTS.md',
+    '# Mine\n\nMy own rule.\n\n<!-- HANDWAVE_START -->\nold guidance\n<!-- HANDWAVE_END -->\n');
+  w('.codex/config.toml', '[mcp_servers.codegraph]\ncommand = "codegraph"\n\n[mcp_servers.handwave]\ncommand = "node"\n');
+
+  const src = path.join(ROOT, 'src/migrate.js');
+  const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
+    `const m = await import(${JSON.stringify(src)});
+     const before = m.needed();
+     const rows = m.migrate();
+     console.log(JSON.stringify({ before, after: m.needed(), rows: rows.map(r => r.what) }));`],
+    { env: { ...process.env, HOME: home, USERPROFILE: home } });
+  const r = JSON.parse(stdout.trim());
+
+  assert.equal(r.before, true, 'it should see there is work to do');
+  assert.equal(r.after, false, 'and none afterwards');
+
+  // the state directory is MOVED, not recreated: it holds the board registry,
+  // and losing it orphans servers that are still listening
+  assert.ok(!fs.existsSync(path.join(home, '.handwave')), 'the old directory is gone');
+  const moved = JSON.parse(fs.readFileSync(path.join(home, '.spiega', 'boards.json'), 'utf8'));
+  assert.equal(moved.supplix.url, 'http://127.0.0.1:4777', 'with the boards still in it');
+
+  // a dangling skill link is read by some harnesses as a second, broken skill
+  assert.ok(!fs.existsSync(path.join(home, '.claude', 'skills', 'handwave')));
+
+  // the old MCP entry goes, anything else in the file stays
+  const oc = JSON.parse(fs.readFileSync(path.join(home, '.config/opencode/opencode.json'), 'utf8'));
+  assert.ok(!('handwave' in oc.mcp), 'two registrations would start two servers');
+  assert.ok('other' in oc.mcp, "someone else's entry must survive");
+
+  // the block is cut out whole and the file's own text is untouched
+  const agents = fs.readFileSync(path.join(home, '.config/opencode/AGENTS.md'), 'utf8');
+  assert.ok(!agents.includes('HANDWAVE_START'), 'the old block is gone');
+  assert.ok(!agents.includes('old guidance'));
+  assert.ok(agents.includes('My own rule.'), 'their own text is not touched');
+
+  // TOML is cut by hand, so check the neighbour survived
+  const toml = fs.readFileSync(path.join(home, '.codex/config.toml'), 'utf8');
+  assert.ok(!toml.includes('mcp_servers.handwave'));
+  assert.ok(toml.includes('mcp_servers.codegraph'), 'rewriting TOML must not eat the rest');
+
+  // and it is safe to run twice
+  await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
+    `const m = await import(${JSON.stringify(src)}); m.migrate();`],
+    { env: { ...process.env, HOME: home, USERPROFILE: home } });
+
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
 console.log(`\n${n} passed`);

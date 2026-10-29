@@ -1,5 +1,5 @@
 /* ============================================================
-   handwave server — holds one board, streams it to whoever is watching.
+   spiega server — holds one board, streams it to whoever is watching.
 
    No dependencies and no build step: the browser imports the same renderer
    modules the CLI does, straight off disk as ES modules. A board you can run
@@ -15,7 +15,15 @@ import { emptyBoard, applyOps } from './state.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
-const SESSION_DIR = path.join(os.homedir(), '.handwave');
+const SESSION_DIR = path.join(os.homedir(), '.spiega');
+
+/* The old name's variables still work.
+
+   An MCP registration written before the rename carries HANDWAVE_BOARD, and so
+   does any shell alias or script someone wrote. Honouring both for a while
+   costs one function and means a half-updated machine keeps working, which is
+   the state every machine is in during a rename. */
+const envVar = name => process.env[`SPIEGA_${name}`] ?? process.env[`HANDWAVE_${name}`];
 export const SESSION_FILE = path.join(SESSION_DIR, 'session.json');
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml', '.css': 'text/css' };
@@ -59,7 +67,7 @@ export function createServer({ board = emptyBoard(), name = null } = {}) {
       return serveFile(res, path.join(ROOT, p.slice(1)));
     }
     if (p === '/state') return json(res, 200, board);
-    // who this board is, for the window title and for `handwave boards`
+    // who this board is, for the window title and for `spiega boards`
     if (p === '/whoami') return json(res, 200, { name: app.name, pid: process.pid });
 
     if (p === '/events') {
@@ -173,7 +181,7 @@ export function listBoards({ prune = true } = {}) {
    the owner match comes first when resolving a name. Measured: three
    `--board` calls from one shell left all three boards claiming it. */
 export function ownerOfThisProcess() {
-  return process.env.HANDWAVE_BOARD ? null : sessionKey();
+  return envVar('BOARD') ? null : sessionKey();
 }
 
 export function registerBoard(name, url, owner = ownerOfThisProcess()) {
@@ -209,10 +217,10 @@ export function unregisterBoard(name) {
 
    Two sessions do sometimes share a directory — two Claude conversations about
    the same repo — and then the names collide and the second is suffixed. If
-   that reads badly, `--board NAME` settles it, and `handwave boards` prints the
+   that reads badly, `--board NAME` settles it, and `spiega boards` prints the
    directory of each so they can be told apart. */
 export function sessionKey() {
-  return process.env.HANDWAVE_SESSION
+  return envVar('SESSION')
     || process.env.CLAUDE_CODE_SESSION_ID   // the conversation itself, where a harness says so
     || process.env.HERDR_PANE_ID            // one pane is one task
     || process.env.HERDR_TAB_ID
@@ -231,7 +239,8 @@ const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^
    the name is stable for as long as the work is. Only a genuine collision —
    two sessions, same directory name, different sessions — gets a suffix. */
 export function boardName() {
-  if (process.env.HANDWAVE_BOARD) return slug(process.env.HANDWAVE_BOARD);
+  const named = envVar('BOARD');
+  if (named) return slug(named);
 
   const key = sessionKey();
   const all = listBoards();
@@ -282,12 +291,13 @@ export function listen(app, port = 4777, tries = 20, name = boardName()) {
 
 /* Where is the board this client should talk to?
 
-   HANDWAVE_URL is absolute and wins — it names a board directly, which is what
-   a test or a script wants. Otherwise the name decides: HANDWAVE_BOARD, which
+   SPIEGA_URL is absolute and wins — it names a board directly, which is what
+   a test or a script wants. Otherwise the name decides: SPIEGA_BOARD, which
    each harness's MCP registration can set, so a Claude session and an opencode
    session reach different boards without either knowing the other exists. */
 export function findBoard(name = boardName()) {
-  if (process.env.HANDWAVE_URL) return process.env.HANDWAVE_URL;
+  const direct = envVar('URL');
+  if (direct) return direct;
   const all = listBoards();
   if (all[name]) return all[name].url;
   // a board from before the registry existed

@@ -1,5 +1,5 @@
 /* ============================================================
-   handwave ink — hand-drawn primitives.
+   spiega ink — hand-drawn primitives.
 
    Two things together sell the hand: geometry that is off true (here) and a
    displacement + grain filter over the whole drawing (theme.handFilter).

@@ -4,7 +4,7 @@ globs:
 alwaysApply: false
 ---
 
-# handwave
+# spiega
 
 A board in a browser pane you draw on **while you are talking**. You keep
 answering in chat; the board carries the boxes, arrows and keywords.
@@ -19,19 +19,19 @@ Run these in the terminal. The first one starts a board and prints its URL;
 give the person that URL once, early.
 
 ```bash
-handwave draw '{"op":"title","text":"Placing an order"}'
-handwave open              # once, at the start: its own chromeless window
-handwave draw '{"op":"node","id":"gw","kind":"gateway","label":"API Gateway","sub":"authn"}'
-handwave draw '{"op":"edge","from":"gw","to":"orders","label":"gRPC"}'
-handwave say  "The gateway does **authn** and rate limiting, then hands off."
-handwave say  "Only after the commit does it publish." --step 4   # tag lines that explain one step:
+spiega draw '{"op":"title","text":"Placing an order"}'
+spiega open              # once, at the start: its own chromeless window
+spiega draw '{"op":"node","id":"gw","kind":"gateway","label":"API Gateway","sub":"authn"}'
+spiega draw '{"op":"edge","from":"gw","to":"orders","label":"gRPC"}'
+spiega say  "The gateway does **authn** and rate limiting, then hands off."
+spiega say  "Only after the commit does it publish." --step 4   # tag lines that explain one step:
                            # the script then lights in time with the drawing
-handwave step 1            # light up one hop of the flow; also: step next / step off
-handwave script            # the lines, numbered, with the step each is tied to
-handwave tag --match "Flyway V25" --step 6   # tie a line said earlier; --step off unties
-handwave replay            # play the whole session back; never re-draw to re-show
-handwave clear             # before a new, unrelated explanation
-handwave snapshot -o docs/flow.html
+spiega step 1            # light up one hop of the flow; also: step next / step off
+spiega script            # the lines, numbered, with the step each is tied to
+spiega tag --match "Flyway V25" --step 6   # tie a line said earlier; --step off unties
+spiega replay            # play the whole session back; never re-draw to re-show
+spiega clear             # before a new, unrelated explanation
+spiega snapshot -o docs/flow.html
 ```
 
 ## Ops

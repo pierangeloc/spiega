@@ -1,5 +1,5 @@
 /* ============================================================
-   handwave glyphs — one drawing per kind of thing on the board.
+   spiega glyphs — one drawing per kind of thing on the board.
 
    Every glyph is built the same way, in this order, because that is the order a
    hand would lay it down and the order that reads correctly when the strokes

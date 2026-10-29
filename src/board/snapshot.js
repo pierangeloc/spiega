@@ -1,5 +1,5 @@
 /* ============================================================
-   handwave snapshot — one self-contained file you can keep.
+   spiega snapshot — one self-contained file you can keep.
 
    A board is a thing you talked over; a snapshot is the thing you paste into
    the PR afterwards. It carries the drawing, what was said, and the numbered
@@ -78,6 +78,6 @@ export function snapshotHTML(board, { active = null, title = null } = {}) {
     ${flow ? `<section><h2>The flow</h2><ol>${flow}</ol></section>` : ''}
     ${said ? `<section><h2>What was said</h2><ul>${said}</ul></section>` : ''}
   </div>
-  <footer>drawn with handwave</footer>
+  <footer>drawn with spiega</footer>
 </div></body></html>`;
 }

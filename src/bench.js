@@ -1,5 +1,5 @@
 /* ============================================================
-   handwave bench — the same explanation, drawn by several models.
+   spiega bench — the same explanation, drawn by several models.
 
    The question this answers is not "can the model emit valid JSON" but
    "does the model draw a board worth looking at": does it label its arrows,
@@ -164,7 +164,7 @@ function indexHTML(prompt, results) {
 
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>handwave bench</title><style>
+<title>spiega bench</title><style>
   body{margin:0;background:${PAPER};background-image:${paperTexture};color:${INK};
     font:13px/1.6 ${MONO};padding:30px 22px 70px}
   .wrap{max-width:1400px;margin:0 auto}
@@ -185,7 +185,7 @@ function indexHTML(prompt, results) {
   .files a{color:${MUTED}} .err{color:${MUTED}}
   .files{font-size:11.5px;margin:0}
 </style></head><body><div class="wrap">
-  <h1>handwave bench</h1>
+  <h1>spiega bench</h1>
   <p class="prompt">${esc(prompt)}</p>
   ${cards}
 </div></body></html>`;
@@ -195,7 +195,7 @@ function indexHTML(prompt, results) {
 
 export async function bench(prompt, { models = [], out = 'bench', timeout = 180 } = {}) {
   if (!models.length) {
-    console.error('handwave bench: --models is required, e.g.\n' +
+    console.error('spiega bench: --models is required, e.g.\n' +
       '  --models github-copilot/claude-opus-5,github-copilot/gpt-6-sol\n' +
       'Run `opencode models` to see what you have.');
     process.exitCode = 1;

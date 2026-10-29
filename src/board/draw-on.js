@@ -1,5 +1,5 @@
 /* ============================================================
-   handwave draw-on — making a box look drawn rather than revealed.
+   spiega draw-on — making a box look drawn rather than revealed.
    ============================================================ */
 
 /* A hand does not draw at a constant speed. It accelerates out of a corner,

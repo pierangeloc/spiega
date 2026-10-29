@@ -3,7 +3,7 @@
 # HERDR_PANE_ID is set when herdr runs us from a pane, but a plugin action can
 # also be invoked globally, and a plugin's own working directory is the plugin,
 # not the task. So ask herdr: the focused pane's foreground_cwd is the directory
-# the person is actually in, which is the directory handwave names a board after.
+# the person is actually in, which is the directory spiega names a board after.
 pane_cwd() {
   herdr pane list 2>/dev/null | node -e '
     let s = ""; process.stdin.on("data", d => s += d).on("end", () => {

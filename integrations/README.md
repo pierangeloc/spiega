@@ -1,8 +1,8 @@
-# Wiring handwave into an agent
+# Wiring spiega into an agent
 
 ```bash
-handwave install            # whatever is on this machine
-handwave install --detect   # what that would be, without doing it
+spiega install            # whatever is on this machine
+spiega install --detect   # what that would be, without doing it
 ```
 
 Every surface drives the same board, so an agent on MCP and a human in a
@@ -15,7 +15,7 @@ terminal can draw on it at the same time.
 | `claude` | the skill, linked into `~/.claude/skills/` |
 | `codex` | the skill, an `~/.codex/AGENTS.md` block, an `mcp_servers` table |
 | `gemini` | the skill, a `GEMINI.md` block, `mcpServers` in `settings.json` |
-| `opencode` | `mcp.handwave` in `opencode.json`, and an `AGENTS.md` block |
+| `opencode` | `mcp.spiega` in `opencode.json`, and an `AGENTS.md` block |
 | `copilot` | `mcpServers` in `~/.copilot/mcp-config.json` |
 | `cursor` | `mcpServers` in `~/.cursor/mcp.json`, and a rule |
 | `windsurf` | `mcpServers` in `~/.codeium/windsurf/mcp_config.json` |
@@ -35,10 +35,10 @@ changes, and a stale skill is worse than none: the agent reads it, believes it,
 and never mentions the thing you shipped an hour ago. The link means the skill
 is whatever the checkout currently says. MCP entries point at the checkout for
 the same reason — though a *running* agent session holds the process it
-started, so restart the session after changing handwave.
+started, so restart the session after changing spiega.
 
-**Instruction files get a delimited block**, `<!-- HANDWAVE_START -->` to
-`<!-- HANDWAVE_END -->`. Your own text is never touched, a second install
+**Instruction files get a delimited block**, `<!-- SPIEGA_START -->` to
+`<!-- SPIEGA_END -->`. Your own text is never touched, a second install
 replaces the block in place rather than appending another copy, and the file is
 backed up first. If the two markers are ever out of step — someone edited one
 away — the install refuses rather than guessing where your text ends.
@@ -55,20 +55,20 @@ converged on.
 For a harness `install` does not know, print the entry and paste it:
 
 ```bash
-handwave mcp-config                  # {"mcpServers": {...}}  — the common shape
-handwave mcp-config --shape servers  # VS Code
-handwave mcp-config --shape opencode # opencode
-handwave mcp-config --shape zed      # Zed
-handwave mcp-config --shape toml     # Codex
+spiega mcp-config                  # {"mcpServers": {...}}  — the common shape
+spiega mcp-config --shape servers  # VS Code
+spiega mcp-config --shape opencode # opencode
+spiega mcp-config --shape zed      # Zed
+spiega mcp-config --shape toml     # Codex
 ```
 
 ```jsonc
 // claude_desktop_config.json, .mcp.json, or your client's equivalent
 {
   "mcpServers": {
-    "handwave": {
+    "spiega": {
       "command": "node",
-      "args": ["/absolute/path/to/handwave/src/mcp/server.js"]
+      "args": ["/absolute/path/to/spiega/src/mcp/server.js"]
     }
   }
 }
@@ -81,10 +81,10 @@ skill, so a client that only reads tool descriptions still behaves.
 
 ## Anything else
 
-It is an HTTP endpoint. Find the board with `handwave url`, then:
+It is an HTTP endpoint. Find the board with `spiega url`, then:
 
 ```bash
-curl -s -X POST "$(handwave url)/op" -H 'content-type: application/json' \
+curl -s -X POST "$(spiega url)/op" -H 'content-type: application/json' \
   -d '{"ops":[{"op":"node","id":"gw","kind":"gateway","label":"API Gateway"}]}'
 ```
 

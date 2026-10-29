@@ -1,7 +1,7 @@
 /* ============================================================
    Terminal dressing.
 
-   handwave's whole argument is that a picture beside the words beats a wall of
+   spiega's whole argument is that a picture beside the words beats a wall of
    text, so its own output should not be a wall of text either. This is the
    small amount of machinery needed to lay a terminal out in columns and mark
    things with a glyph rather than a word.
@@ -25,7 +25,7 @@ export const colourful = () => {
 };
 
 export const fancy = () => {
-  if (env.HANDWAVE_ASCII) return false;
+  if (env.SPIEGA_ASCII || env.HANDWAVE_ASCII) return false;
   const l = `${env.LC_ALL || ''}${env.LC_CTYPE || ''}${env.LANG || ''}`;
   return /UTF-?8/i.test(l) || Boolean(process.stdout.isTTY);
 };

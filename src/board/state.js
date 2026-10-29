@@ -1,5 +1,5 @@
 /* ============================================================
-   handwave state — the board as a list of operations.
+   spiega state — the board as a list of operations.
 
    The agent never sends a whole board. It sends one small op at a time, in the
    order it is talking, and the board grows. That keeps the agent's turn cheap

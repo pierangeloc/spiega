@@ -1,5 +1,5 @@
 /* ============================================================
-   handwave layout — where things land on the board.
+   spiega layout — where things land on the board.
 
    The constraint that shapes all of this: the board is drawn while someone is
    talking. A node that appears must not shove the four already on the board

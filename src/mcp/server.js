@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* ============================================================
-   handwave MCP server — the board as tools, for any MCP client.
+   spiega MCP server — the board as tools, for any MCP client.
 
    Newline-delimited JSON-RPC over stdio, no dependencies. Every tool is a thin
    wrapper over the same HTTP board the CLI drives, so an agent on MCP and a
@@ -301,7 +301,7 @@ async function handle(line) {
     return ok(id, {
       protocolVersion: params?.protocolVersion || '2024-11-05',
       capabilities: { tools: {} },
-      serverInfo: { name: 'handwave', version: '0.1.0' },
+      serverInfo: { name: 'spiega', version: '0.1.0' },
     });
   }
   if (method === 'notifications/initialized' || id == null) return;
@@ -311,7 +311,7 @@ async function handle(line) {
       const text = await call(params?.name, params?.arguments || {});
       return ok(id, { content: [{ type: 'text', text: String(text) }] });
     } catch (e) {
-      return ok(id, { content: [{ type: 'text', text: 'handwave: ' + e.message }], isError: true });
+      return ok(id, { content: [{ type: 'text', text: 'spiega: ' + e.message }], isError: true });
     }
   }
   if (method === 'ping') return ok(id, {});

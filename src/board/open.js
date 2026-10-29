@@ -1,5 +1,5 @@
 /* ============================================================
-   handwave open — put the board in a real window.
+   spiega open — put the board in a real window.
 
    A terminal pane has to encode every frame and push it through the TTY, so
    panning and zooming there cost far more than the drawing itself ever does.
@@ -115,7 +115,7 @@ export function focusBoard(name, url) {
       { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'pipe'] });
   } catch { /* none */ }
   const live = runningBrowsers(procs);
-  if (!live.length) return { ok: false, how: `no browser running \u2014 \`handwave open\`` };
+  if (!live.length) return { ok: false, how: `no browser running \u2014 \`spiega open\`` };
 
   // the board name is in the window title; see board.html
   const tag = `[${name}]`;
@@ -140,5 +140,5 @@ export function focusBoard(name, url) {
       if (out === 'ok') return { ok: true, how: `raised in ${app}` };
     } catch { /* try the next browser */ }
   }
-  return { ok: false, how: `no window showing "${name}" \u2014 \`handwave open\` makes one` };
+  return { ok: false, how: `no window showing "${name}" \u2014 \`spiega open\` makes one` };
 }

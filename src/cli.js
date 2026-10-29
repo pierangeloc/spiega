@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* ============================================================
-   handwave CLI — what the agent actually calls.
+   spiega CLI — what the agent actually calls.
 
    The commands are shaped for an agent mid-sentence, not for a build script:
    one short call adds one thing to the board and returns immediately. If no
@@ -15,8 +15,8 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 let argv = process.argv.slice(2);
 
-/* Flags may come before the command. `handwave --board api draw ...` and
-   `handwave draw --board api ...` are the same thing, and a person who types
+/* Flags may come before the command. `spiega --board api draw ...` and
+   `spiega draw --board api ...` are the same thing, and a person who types
    the first and is told there is no such command "--board" has been failed by
    the parser, not by themselves. The command is rotated to the front; flag()
    and positional() see the array they expect. */
@@ -45,11 +45,11 @@ const die = (msg, code = 1) => { console.error(msg); process.exit(code); };
 
 /* `--board NAME` picks which board this command talks to. It is set into the
    environment rather than threaded through every call site, because that is
-   also how a harness selects one: the MCP registration sets HANDWAVE_BOARD,
+   also how a harness selects one: the MCP registration sets SPIEGA_BOARD,
    and a Claude session and an opencode session then draw on different boards
    without either knowing the other exists. */
 const boardFlag = flag('board');
-if (boardFlag && boardFlag !== true) process.env.HANDWAVE_BOARD = String(boardFlag);
+if (boardFlag && boardFlag !== true) process.env.SPIEGA_BOARD = String(boardFlag);
 
 /* ---------- talking to a running board ---------- */
 
@@ -72,8 +72,8 @@ async function alive(url) {
 /* Start a board in the background and wait for it to answer. An agent that
    draws as its first action should not have to run a server command first. */
 async function startDetached() {
-  const out = fs.openSync(path.join(process.env.TMPDIR || '/tmp', 'handwave.log'), 'a');
-  // the child inherits HANDWAVE_BOARD, so an autostarted board registers under
+  const out = fs.openSync(path.join(process.env.TMPDIR || '/tmp', 'spiega.log'), 'a');
+  // the child inherits SPIEGA_BOARD, so an autostarted board registers under
   // the name the caller was already asking for
   const child = spawn(process.execPath, [path.join(HERE, 'cli.js'), 'serve', '--quiet'], {
     detached: true, stdio: ['ignore', out, out], env: process.env,
@@ -85,7 +85,7 @@ async function startDetached() {
     const url = findBoard();
     if (url && await alive(url)) return url;
   }
-  die('handwave: could not start a board (see $TMPDIR/handwave.log)');
+  die('spiega: could not start a board (see $TMPDIR/spiega.log)');
 }
 
 async function send(ops, { quiet = false } = {}) {
@@ -114,7 +114,7 @@ async function readOps(arg) {
   }
   let parsed;
   try { parsed = JSON.parse(raw); }
-  catch (e) { die(`handwave: that is not valid JSON (${e.message})`); }
+  catch (e) { die(`spiega: that is not valid JSON (${e.message})`); }
   if (Array.isArray(parsed)) return parsed;
   if (parsed.ops) return parsed.ops;
   // A whole spec, not an op list: turn it into the ops that would build it.
@@ -135,11 +135,12 @@ export function specToOps(spec) {
 
 /* ---------- commands ---------- */
 
-const HELP = `handwave — a hand-drawn board an agent draws on while it explains
+const HELP = `spiega — a hand-drawn board an agent draws on while it explains
 
   serve [--port N] [--open]     start the board and keep it running
   open [--tab] [--size WxH]     open the board in its own browser window
   doctor                        check that agents are reading the current version
+  migrate                       move everything over from the old handwave name
   install [targets...]          wire it into your agents (--detect to see what it would do)
   mcp-config [--shape S]        print the MCP entry to paste into any other harness
   bench <prompt> --models a,b   draw the same explanation with several models
@@ -157,10 +158,10 @@ const HELP = `handwave — a hand-drawn board an agent draws on while it explain
   url                           print the running board's URL
   stop [--all]                  stop this shell's board, or every one of them
 
-Every command takes --board NAME (or the HANDWAVE_BOARD environment variable)
+Every command takes --board NAME (or the SPIEGA_BOARD environment variable)
 and talks to that board, starting it if it is not running. One board per
 conversation: a Claude session and an opencode session drawing on the same
-board interleave two explanations into one picture. "handwave install" gives
+board interleave two explanations into one picture. "spiega install" gives
 each harness its own name, so this happens without anyone thinking about it.
 
 Ops are small JSON objects:
@@ -179,11 +180,11 @@ kinds: client gateway service compute datastore cache queue external note
 
 install targets: claude codex gemini opencode copilot cursor windsurf zed
                  vscode claude_desktop project
-  handwave install                 whatever is on this machine
-  handwave install --detect        what that would be, without doing it
-  handwave install --list          every target and what it writes
-  handwave install project         an AGENTS.md block in the current repo
-  handwave install codex gemini    just those
+  spiega install                 whatever is on this machine
+  spiega install --detect        what that would be, without doing it
+  spiega install --list          every target and what it writes
+  spiega install project         an AGENTS.md block in the current repo
+  spiega install codex gemini    just those
 
 Skills are symlinked, not copied, so they track the repo. MCP entries point at
 this checkout, so a new agent session always starts on the current code.
@@ -204,12 +205,12 @@ const main = async () => {
       // running, unreachable, and the ops would go to whichever won the race.
       const existing = findBoard(name);
       if (existing && await alive(existing)) {
-        if (!flag('quiet')) console.log(`handwave: "${name}" is already running on ${existing}`);
+        if (!flag('quiet')) console.log(`spiega: "${name}" is already running on ${existing}`);
         return;
       }
       const app = createServer();
       const url = await listen(app, Number(flag('port', 4777)), 20, name);
-      if (!flag('quiet')) console.log(`handwave listening on ${url}${name === 'default' ? '' : `  (board "${name}")`}`);
+      if (!flag('quiet')) console.log(`spiega listening on ${url}${name === 'default' ? '' : `  (board "${name}")`}`);
       if (flag('open')) {
         const { openBoard } = await import('./board/open.js');
         openBoard(url, { app: !flag('tab'), size: flag('size'), browser: flag('browser') });
@@ -228,6 +229,25 @@ const main = async () => {
       return;
     }
 
+    /* The move from the old name. Safe to run twice and reports what it
+       could not do itself, because a silent half-migration is the failure
+       this exists to prevent. */
+    case 'migrate': {
+      const { migrate } = await import('./migrate.js');
+      const { c, sym, pad, heading } = await import('./term.js');
+      const g = sym();
+      const rows = migrate();
+      const mark = { done: c.good(g.ok), skip: c.dim(g.idle), todo: c.warn(g.warn) };
+      const w = Math.max(...rows.map(r => r.what.length)) + 2;
+      console.log(heading('spiega migrate \u2014 from handwave'));
+      for (const r of rows) console.log(`  ${mark[r.level]} ${c.bold(pad(r.what, w))}${c.dim(r.detail)}`);
+      const left = rows.filter(r => r.level === 'todo');
+      console.log(left.length
+        ? `\n  ${c.warn(g.warn)} ${left.length} thing(s) need you \u2014 then run ${c.plain('spiega install')}\n`
+        : `\n  ${c.dim(`Now run ${c.plain('spiega install')} to register under the new name.`)}\n`);
+      return;
+    }
+
     case 'install': {
       const { install, TARGET_NAMES, TARGETS, detect } = await import('./install.js');
       const { c, sym, pad, shortPath, heading } = await import('./term.js');
@@ -238,18 +258,18 @@ const main = async () => {
       const getsW = Math.max(...Object.values(TARGETS).map(t => t.gets.length)) + 2;
 
       if (want[0] === 'list' || flag('list')) {
-        console.log(heading('handwave install \u2014 targets'));
+        console.log(heading('spiega install \u2014 targets'));
         for (const n of TARGET_NAMES) {
           const t = TARGETS[n];
           console.log(`  ${c.bold(pad(n, nameW))}${pad(c.muted(t.gets), getsW + 10)}${c.dim(t.app)}`);
         }
-        console.log(`\n  ${c.dim('handwave install')} with no arguments does whatever is on this machine.\n`);
+        console.log(`\n  ${c.dim('spiega install')} with no arguments does whatever is on this machine.\n`);
         return;
       }
 
       if (flag('detect')) {
         const here = detect();
-        console.log(heading('handwave install \u2014 what would happen'));
+        console.log(heading('spiega install \u2014 what would happen'));
         for (const n of TARGET_NAMES) {
           const t = TARGETS[n], found = here.includes(n);
           const mark = found ? c.good(g.ok) : c.dim(g.idle);
@@ -263,7 +283,7 @@ const main = async () => {
         return;
       }
 
-      console.log(heading('handwave install'));
+      console.log(heading('spiega install'));
       const results = install(want);
       for (const r of results) {
         const mark = !r.ok ? c.accent(g.bad) : r.state === 'unchanged' ? c.dim(g.idle) : c.good(g.ok);
@@ -284,7 +304,7 @@ const main = async () => {
       console.log(`\n  ${parts.join(c.dim(` ${g.dot} `)) || 'nothing to do'}`);
       // the step people skip, and then conclude the feature was never built
       if (wrote) console.log(`  ${c.dim('Start a fresh agent session \u2014 a running one keeps the server it launched.')}`);
-      console.log(`  ${c.dim(`Check it any time with ${c.plain('handwave doctor')}.`)}\n`);
+      console.log(`  ${c.dim(`Check it any time with ${c.plain('spiega doctor')}.`)}\n`);
       if (failed.length) process.exitCode = 1;
       return;
     }
@@ -297,14 +317,14 @@ const main = async () => {
       const entry = path.join(HERE, 'mcp', 'server.js');
       const shape = String(flag('shape') || 'stdio');
       const shapes = {
-        stdio: { mcpServers: { handwave: { type: 'stdio', command: 'node', args: [entry] } } },
-        servers: { servers: { handwave: { type: 'stdio', command: 'node', args: [entry] } } },
-        opencode: { mcp: { handwave: { type: 'local', command: ['node', entry], enabled: true } } },
-        zed: { context_servers: { handwave: { source: 'custom', command: 'node', args: [entry] } } },
+        stdio: { mcpServers: { spiega: { type: 'stdio', command: 'node', args: [entry] } } },
+        servers: { servers: { spiega: { type: 'stdio', command: 'node', args: [entry] } } },
+        opencode: { mcp: { spiega: { type: 'local', command: ['node', entry], enabled: true } } },
+        zed: { context_servers: { spiega: { source: 'custom', command: 'node', args: [entry] } } },
         toml: null,
       };
-      if (shape === 'toml') return void console.log(`[mcp_servers.handwave]\ncommand = "node"\nargs = ["${entry}"]`);
-      if (!shapes[shape]) die(`handwave mcp-config: unknown shape "${shape}" (stdio, servers, opencode, zed, toml)`);
+      if (shape === 'toml') return void console.log(`[mcp_servers.spiega]\ncommand = "node"\nargs = ["${entry}"]`);
+      if (!shapes[shape]) die(`spiega mcp-config: unknown shape "${shape}" (stdio, servers, opencode, zed, toml)`);
       console.log(JSON.stringify(shapes[shape], null, 2));
       return;
     }
@@ -314,7 +334,7 @@ const main = async () => {
       if (flag('list')) return void console.log((await listModels()).join('\n'));
       const prompt = argv.slice(1).find(a => !a.startsWith('-')
         && argv[argv.indexOf(a) - 1] !== '--models' && argv[argv.indexOf(a) - 1] !== '--out');
-      if (!prompt) die('handwave bench: give me something to explain');
+      if (!prompt) die('spiega bench: give me something to explain');
       await bench(prompt, {
         models: String(flag('models') || '').split(',').map(s => s.trim()).filter(Boolean),
         out: flag('out') || 'bench',
@@ -339,7 +359,7 @@ const main = async () => {
     case 'say': {
       const step = flag('step'), edge = flag('edge');
       const text = positional().join(' ');      // positional() already drops `--flag value` pairs
-      if (!text) die('handwave say: nothing to say');
+      if (!text) die('spiega say: nothing to say');
       // tying the line to a step lets the rail light it when that step is lit
       const op = { op: 'say', text };
       if (step) op.step = Number(step);
@@ -353,14 +373,14 @@ const main = async () => {
        cheap enough for the agent to offer it itself. */
     case 'replay': {
       const url = await boardURL({ autostart: false });
-      if (!url) die('handwave replay: no board is running');
+      if (!url) die('spiega replay: no board is running');
       const res = await fetch(url + '/replay');
       // A board started before this command existed answers 404; say so, since
       // the fix is to restart it and that is not guessable from a stack trace.
-      if (!res.ok) die('handwave replay: the running board is older than this command \u2014 `handwave stop`, then start it again');
+      if (!res.ok) die('spiega replay: the running board is older than this command \u2014 `spiega stop`, then start it again');
       const r = await res.json();
-      if (!r.ops) die('handwave replay: nothing has been drawn yet');
-      if (!r.viewers) console.error('handwave: no window is watching — run `handwave open` to see it');
+      if (!r.ops) die('spiega replay: nothing has been drawn yet');
+      if (!r.viewers) console.error('spiega: no window is watching — run `spiega open` to see it');
       return void console.log(`replaying ${r.ops} ops for ${r.viewers} viewer${r.viewers === 1 ? '' : 's'}`);
     }
 
@@ -369,8 +389,8 @@ const main = async () => {
     case 'tag': {
       const step = flag('step'), edge = flag('edge'), match = flag('match');
       const line = positional()[0];
-      if (!line && !match) die('handwave tag: which line? `handwave script` lists them, or use --match');
-      if (!step && !edge) die('handwave tag: --step N, --edge a>b, or --step off to untie it');
+      if (!line && !match) die('spiega tag: which line? `spiega script` lists them, or use --match');
+      if (!step && !edge) die('spiega tag: --step N, --edge a>b, or --step off to untie it');
       const op = { op: 'tag' };
       if (match) op.match = match; else op.line = Number(line);
       if (edge) op.edge = edge;
@@ -379,10 +399,10 @@ const main = async () => {
     }
 
     /* The script as the board holds it, numbered, with what each line is tied
-       to. The numbers are what `handwave tag` takes. */
+       to. The numbers are what `spiega tag` takes. */
     case 'script': {
       const url = await boardURL({ autostart: false });
-      if (!url) die('handwave script: no board is running');
+      if (!url) die('spiega script: no board is running');
       const b = await (await fetch(url + '/state')).json();
       const { scriptSteps, tagReport } = await import('./board/script.js');
       const { c, sym, pad, heading } = await import('./term.js');
@@ -390,7 +410,7 @@ const main = async () => {
       const at = scriptSteps(b);
       if (!b.transcript.length) return void console.log('nothing said yet');
 
-      console.log(heading('handwave script'));
+      console.log(heading('spiega script'));
       at.forEach((step, i) => {
         const tag = step == null ? c.dim(` ${g.dot} `) : c.accent(` ${String(step + 1).padStart(2)}`);
         const text = b.transcript[i].text.replace(/\n/g, ' ');
@@ -410,7 +430,7 @@ const main = async () => {
         console.log(`  ${c.warn(g.warn)} ${c.plain('the tags run backwards:')} ${c.dim(where)}`);
         console.log(`  ${c.dim('The rail shows what was said, in order, so the numbers will look jumbled.')}`);
         console.log(`  ${c.dim('If the flow is the spine of this explanation, say the lines in step order;')}`);
-        console.log(`  ${c.dim(`otherwise untag the ones that are not about a single hop (${c.plain('handwave tag N --step off')}).`)}`);
+        console.log(`  ${c.dim(`otherwise untag the ones that are not about a single hop (${c.plain('spiega tag N --step off')}).`)}`);
       }
       console.log('');
       return;
@@ -434,7 +454,7 @@ const main = async () => {
 
     case 'render': {
       const file = positional()[0];
-      if (!file) die('handwave render: give me a spec file');
+      if (!file) die('spiega render: give me a spec file');
       const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
       const { emptyBoard, applyOps } = await import('./board/state.js');
       const { snapshotHTML } = await import('./board/snapshot.js');
@@ -449,7 +469,7 @@ const main = async () => {
 
     case 'snapshot': {
       const url = await boardURL();
-      if (!url) die('handwave: no board is running');
+      if (!url) die('spiega: no board is running');
       const html = await (await fetch(url + '/snapshot')).text();
       const out = flag('o') || flag('out') || 'board.html';
       fs.writeFileSync(out, html);
@@ -459,7 +479,7 @@ const main = async () => {
 
     case 'url': {
       const url = await boardURL();
-      if (!url) die('handwave: no board is running', 2);
+      if (!url) die('spiega: no board is running', 2);
       console.log(url);
       return;
     }
@@ -483,9 +503,9 @@ const main = async () => {
           const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
           process.kill(sess.pid); fs.unlinkSync(SESSION_FILE);
           return void console.log('stopped');
-        } catch { die('handwave: nothing to stop'); }
+        } catch { die('spiega: nothing to stop'); }
       }
-      if (!n) die('handwave: nothing to stop');
+      if (!n) die('spiega: nothing to stop');
       return;
     }
 
@@ -497,7 +517,7 @@ const main = async () => {
          handles all three: the window is buried (raise it), the window was
          closed but the board is still serving (make a window — the drawing is
          untouched, a board is a server), or there is no board yet (start one).
-         Being told `handwave open` by a command you ran to see your board is
+         Being told `spiega open` by a command you ran to see your board is
          a refusal dressed as help. */
       const { boardName } = await import('./board/server.js');
       const { focusBoard, openBoard } = await import('./board/open.js');
@@ -533,12 +553,12 @@ const main = async () => {
       }
       const names = Object.keys(all);
       if (!names.length) {
-        return void console.log(`\n  ${c.dim('No boards running.')} ${c.dim(`${g.arrow} handwave open`)}\n`);
+        return void console.log(`\n  ${c.dim('No boards running.')} ${c.dim(`${g.arrow} spiega open`)}\n`);
       }
 
       const here = boardName();
       const w = Math.max(...names.map(n => n.length)) + 2;   // a name is a task name, so it can be long
-      console.log(heading('handwave boards'));
+      console.log(heading('spiega boards'));
       for (const name of names) {
         const { url } = all[name];
         let note = c.accent('not answering'), size = '';
@@ -561,7 +581,7 @@ const main = async () => {
 
     case 'url': {
       const url = await boardURL();
-      if (!url) die('handwave: no board is running', 2);
+      if (!url) die('spiega: no board is running', 2);
       console.log(url);
       return;
     }
@@ -585,9 +605,9 @@ const main = async () => {
           const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
           process.kill(sess.pid); fs.unlinkSync(SESSION_FILE);
           return void console.log('stopped');
-        } catch { die('handwave: nothing to stop'); }
+        } catch { die('spiega: nothing to stop'); }
       }
-      if (!n) die('handwave: nothing to stop');
+      if (!n) die('spiega: nothing to stop');
       return;
     }
 
@@ -599,7 +619,7 @@ const main = async () => {
          handles all three: the window is buried (raise it), the window was
          closed but the board is still serving (make a window — the drawing is
          untouched, a board is a server), or there is no board yet (start one).
-         Being told `handwave open` by a command you ran to see your board is
+         Being told `spiega open` by a command you ran to see your board is
          a refusal dressed as help. */
       const { boardName } = await import('./board/server.js');
       const { focusBoard, openBoard } = await import('./board/open.js');
@@ -649,7 +669,7 @@ const main = async () => {
         console.log(`${name === here ? '\u2192' : ' '} ${name.padEnd(w)}${url.padEnd(24)}${note}${tail}`);
       }
       if (names.length > 1 || here !== DEFAULT_BOARD) {
-        console.log(`\n\u2192 is this shell's board (HANDWAVE_BOARD, or --board NAME).`);
+        console.log(`\n\u2192 is this shell's board (SPIEGA_BOARD, or --board NAME).`);
       }
       return;
     }
@@ -658,8 +678,8 @@ const main = async () => {
       return void console.log(HELP);
 
     default:
-      die(`handwave: no such command "${cmd}"\n\n${HELP}`);
+      die(`spiega: no such command "${cmd}"\n\n${HELP}`);
   }
 };
 
-main().catch(e => die('handwave: ' + (e.stack || e.message)));
+main().catch(e => die('spiega: ' + (e.stack || e.message)));

@@ -1,10 +1,10 @@
 {
-  "name": "handwave",
+  "name": "spiega",
   "version": "0.1.0",
   "description": "A hand-drawn board an AI agent draws on while it explains software architecture.",
   "type": "module",
   "bin": {
-    "handwave": "./src/cli.js"
+    "spiega": "./src/cli.js"
   },
   "exports": {
     ".": "./src/index.js"

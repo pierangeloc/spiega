@@ -1,5 +1,5 @@
 /* ============================================================
-   handwave edges — the lines between things, and what rides on them.
+   spiega edges — the lines between things, and what rides on them.
 
    Routing runs in the gutters between columns, never across them. A node that
    fans out to four others sends four lines out of four distinct points on its

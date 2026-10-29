@@ -1,9 +1,9 @@
 ---
-name: handwave
+name: spiega
 description: Draw on a live hand-drawn board while explaining software architecture — services, queues, datastores, boundaries, and a numbered request flow you can walk through step by step. Use whenever you are explaining how a system works, comparing designs, tracing a request, reviewing an architecture, or answering "how does X talk to Y" — anything where a picture beside the words would help. Also use when the user says board, draw it, sketch it, show me the architecture, or diagram this.
 ---
 
-# handwave
+# spiega
 
 A board in a browser pane that you draw on **while you are talking**, the way
 someone explains a system at a whiteboard. You keep answering in the terminal;
@@ -23,7 +23,7 @@ in your head while reading.
 ## Starting
 
 ```bash
-handwave draw '{"op":"title","text":"Placing an order"}'
+spiega draw '{"op":"title","text":"Placing an order"}'
 ```
 
 That starts a board if none is running and prints its URL.
@@ -31,14 +31,14 @@ That starts a board if none is running and prints its URL.
 Then give it a window, once, at the start:
 
 ```bash
-handwave open --size 1200x900
+spiega open --size 1200x900
 ```
 
 That is a chromeless window of its own, which is where panning and zooming are
 comfortable. Mention it in a few words and move on — do not read the URL out.
 
 If the person prefers the board inside their terminal, `terminal-browser open
-"$(handwave url)" --split right --size 0.5` puts it in a pane. Good for
+"$(spiega url)" --split right --size 0.5` puts it in a pane. Good for
 glancing and for stepping a flow; poor at zooming, since the pane pushes every
 frame through the TTY. Offer it, do not default to it.
 
@@ -47,9 +47,9 @@ frame through the TTY. Offer it, do not default to it.
 One op at a time, as the thing comes up in what you are saying.
 
 ```bash
-handwave draw '{"op":"node","id":"gw","kind":"gateway","label":"API Gateway","sub":"authn + rate limit"}'
-handwave draw '{"op":"edge","from":"gw","to":"orders","label":"gRPC"}'
-handwave say  "The gateway does **authn** and rate limiting, then hands off."
+spiega draw '{"op":"node","id":"gw","kind":"gateway","label":"API Gateway","sub":"authn + rate limit"}'
+spiega draw '{"op":"edge","from":"gw","to":"orders","label":"gRPC"}'
+spiega say  "The gateway does **authn** and rate limiting, then hands off."
 ```
 
 `node` kinds, each with its own drawing:
@@ -70,16 +70,16 @@ Other ops:
 
 ```bash
 # a keyword or an aside, stuck on the board
-handwave draw '{"op":"note","label":"idempotency key\nlives 24h"}'
+spiega draw '{"op":"note","label":"idempotency key\nlives 24h"}'
 
 # an enclosure around things that share a trust zone or a deployment
-handwave draw '{"op":"boundary","label":"our VPC","members":["gw","orders","db"]}'
+spiega draw '{"op":"boundary","label":"our VPC","members":["gw","orders","db"]}'
 
 # an async hop: drawn as a dashed line
-handwave draw '{"op":"edge","from":"orders","to":"bus","label":"publish","async":true}'
+spiega draw '{"op":"edge","from":"orders","to":"bus","label":"publish","async":true}'
 
 # several at once, when they really are one thought
-handwave draw '[{"op":"node","id":"db","kind":"datastore","label":"Postgres"},
+spiega draw '[{"op":"node","id":"db","kind":"datastore","label":"Postgres"},
                  {"op":"edge","from":"orders","to":"db","label":"INSERT"}]'
 ```
 
@@ -95,11 +95,11 @@ lands where it belongs. Nodes already on the board keep their lane.
 When the point is the *order things happen in*, add steps, then walk them.
 
 ```bash
-handwave draw '[{"op":"step","edge":"browser>gw","step":"Browser posts the order"},
+spiega draw '[{"op":"step","edge":"browser>gw","step":"Browser posts the order"},
                  {"op":"step","edge":"gw>orders","step":"Gateway authenticates and forwards"},
                  {"op":"step","edge":"orders>db","step":"Write the order row"}]'
-handwave step 1     # that hop turns orange, both ends halo, the rest dims
-handwave step next
+spiega step 1     # that hop turns orange, both ends halo, the rest dims
+spiega step next
 ```
 
 Each step's number appears on its line, so the board and your prose share one
@@ -116,9 +116,9 @@ reader is left matching sentence to picture by hand, which on a six-step flow
 is most of the work.
 
 ```bash
-handwave say "The browser **POSTs** the order; nothing is trusted yet." --step 1
-handwave say "The gateway checks the token, then forwards over \`gRPC\`." --step 2
-handwave say "Only after the commit does it publish \`order.placed\`." --step 4
+spiega say "The browser **POSTs** the order; nothing is trusted yet." --step 1
+spiega say "The gateway checks the token, then forwards over \`gRPC\`." --step 2
+spiega say "Only after the commit does it publish \`order.placed\`." --step 4
 ```
 
 `--step N` is the number as it appears on the board. `--edge browser>gw` names
@@ -142,7 +142,7 @@ Three rules, and they are easy:
 - An opening or closing remark — "six hops from the browser to the ledger",
   "the whole path is idempotent" — gets **no** tag. It is about the board as a
   whole and should never dim.
-- If you narrate *while* walking (`handwave step 2`, then say the line for it),
+- If you narrate *while* walking (`spiega step 2`, then say the line for it),
   the link is recorded for you and the tag is optional. Tagging is still
   better: it survives the person walking the steps themselves afterwards.
 
@@ -156,13 +156,13 @@ with which step — or be asked why the script does not light up. Tag it then;
 the board keeps the lines, so nothing has to be drawn or said again.
 
 ```bash
-handwave script                              # the lines, numbered, and what each is tied to
-handwave tag 4 --step 3                      # by number
-handwave tag --match "Flyway V25" --step 6   # by its words, which is what you actually have
-handwave tag 1 --step off                    # an opening remark belongs to no step
+spiega script                              # the lines, numbered, and what each is tied to
+spiega tag 4 --step 3                      # by number
+spiega tag --match "Flyway V25" --step 6   # by its words, which is what you actually have
+spiega tag 1 --step off                    # an opening remark belongs to no step
 ```
 
-`handwave script` is also the honest check on your own work. If it says most
+`spiega script` is also the honest check on your own work. If it says most
 lines are tied to nothing, the person is reading an unlit rail; if it says the
 tags run backwards, the script and the flow are telling two different stories
 and the reader has to reconcile them.
@@ -173,7 +173,7 @@ A board keeps the order it was drawn in, so the explanation can be run again
 for nothing:
 
 ```bash
-handwave replay
+spiega replay
 ```
 
 Every box, line and spoken word in sequence, camera following, captions over
@@ -184,7 +184,7 @@ or when someone asks to see it once more; it is the cheapest thing in the tool.
 ## Finishing
 
 ```bash
-handwave snapshot -o docs/order-flow.html
+spiega snapshot -o docs/order-flow.html
 ```
 
 One standalone file: the drawing with its full ink-and-paper texture, what was
@@ -208,13 +208,13 @@ explanation was worth keeping; do not save one every time.
 - Colour is assigned by kind and means something across the whole board. Only
   pass `body` (`tomato` `mustard` `mint` `cobalt` `blush` `slate` `paper`) when
   you are deliberately grouping things that the kinds do not already group.
-- Starting a new explanation? `handwave clear` first. A board holding two
+- Starting a new explanation? `spiega clear` first. A board holding two
   unrelated systems is worse than no board.
 
 ## When something is wrong
 
 Drawing the same `id` again updates it instead of adding a second one, so a
-correction is just the op again with the right fields. `handwave draw
+correction is just the op again with the right fields. `spiega draw
 '{"op":"remove","id":"gw"}'` takes a thing off. Nothing you draw is permanent
 and nothing needs to be right first time — correcting the board out loud is
 what a real whiteboard session looks like.

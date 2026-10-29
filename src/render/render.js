@@ -1,5 +1,5 @@
 /* ============================================================
-   handwave render — a spec becomes one SVG.
+   spiega render — a spec becomes one SVG.
 
    Draw order is the whole trick: boundaries under everything, then edges, then
    nodes on top of the lines that touch them, then notes, which are stuck on

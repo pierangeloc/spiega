@@ -1,6 +1,9 @@
-# handwave
+# spiega
 
 A hand-drawn board an AI agent draws on **while it explains**.
+
+*spiega* is Italian for *explain* — and for *unfold*, which is what this does
+to a long document: spreads it out until you can see the whole shape at once.
 
 You ask how something works. The agent answers in the terminal, as usual — and
 beside it, a board fills in: boxes for the services, labelled arrows for the
@@ -29,9 +32,9 @@ compile and nothing to wait for.
 ### 1. Get it on your PATH
 
 ```bash
-gh repo clone pierangeloc/handwave
-cd handwave
-npm link                  # puts `handwave` on your PATH, pointing at this checkout
+gh repo clone pierangeloc/spiega
+cd spiega
+npm link                  # puts `spiega` on your PATH, pointing at this checkout
 ```
 
 `npm link` rather than a copy on purpose: everything below — the CLI, the MCP
@@ -41,14 +44,14 @@ of it at once. (Not on npm yet, hence the clone.)
 Check it:
 
 ```bash
-handwave help
+spiega help
 ```
 
 ### 2. Wire it into your agents
 
 ```bash
-handwave install --detect     # what it would do, touching nothing
-handwave install              # do it
+spiega install --detect     # what it would do, touching nothing
+spiega install              # do it
 ```
 
 `install` with no arguments does only what it finds on this machine, because
@@ -60,25 +63,25 @@ never asked for. `--list` shows every target and what it writes.
 | `claude` | the skill, linked into `~/.claude/skills/` |
 | `codex` | the skill, an `AGENTS.md` block, an `mcp_servers` table |
 | `gemini` | the skill, a `GEMINI.md` block, an `mcpServers` entry |
-| `opencode` | `mcp.handwave` in `opencode.json`, and an `AGENTS.md` block |
+| `opencode` | `mcp.spiega` in `opencode.json`, and an `AGENTS.md` block |
 | `copilot` `cursor` `windsurf` `zed` `vscode` `claude_desktop` | the MCP server, in each one's own config shape |
 | `herdr` | a plugin: reach this task's board from its pane |
 | `project` | an `AGENTS.md` block in the repo you are in — ask for it by name |
 
 Everything is idempotent and backs up what it rewrites. Skills are
 **symlinked**, so they track the checkout instead of going stale. Instruction
-files get a delimited `HANDWAVE_START`/`HANDWAVE_END` block that leaves your own
-text alone. For a harness nothing here knows about, `handwave mcp-config`
+files get a delimited `SPIEGA_START`/`SPIEGA_END` block that leaves your own
+text alone. For a harness nothing here knows about, `spiega mcp-config`
 prints the entry to paste.
 
 ### 3. See that it works
 
 ```bash
-handwave draw '[{"op":"title","text":"Hello"},
+spiega draw '[{"op":"title","text":"Hello"},
                 {"op":"node","id":"gw","kind":"gateway","label":"API Gateway"},
                 {"op":"node","id":"db","kind":"datastore","label":"Postgres"},
                 {"op":"edge","from":"gw","to":"db","label":"SQL"}]'
-handwave open             # a window of its own
+spiega open             # a window of its own
 ```
 
 Two boxes and a line, drawn on. If you see them, every layer is working: the
@@ -88,37 +91,55 @@ board, the renderer and the CLI.
 
 A running agent session holds the MCP process it started, and that process has
 the code it was launched with. **Start a fresh session after installing**, or
-the agent will be reading an older handwave than the one on disk. The symlink
+the agent will be reading an older spiega than the one on disk. The symlink
 keeps files current; it cannot do anything about processes already running.
 
 Then ask for something architectural — "walk me through how X talks to Y, on
 the board" — and watch the pane.
 
+### Coming from handwave
+
+This was called `handwave` until it wasn't — the word means *baseless, skipping
+the hard part*, which is the opposite of the point. One command moves a machine
+over, and it is safe to run twice:
+
+```bash
+spiega migrate     # old state dir, skills, MCP entries, AGENTS.md blocks
+spiega install     # register under the new name
+npm unlink -g handwave
+```
+
+`HANDWAVE_BOARD`, `HANDWAVE_URL` and `HANDWAVE_SESSION` still work alongside
+their `SPIEGA_` equivalents, so a half-updated machine keeps running. If you
+bound a herdr key to `handwave.board.focus`, change it to `spiega.board.focus`
+— `migrate` says so rather than editing your config. `spiega doctor` reports
+anything the old name left behind.
+
 ### Updating, and checking that it took
 
 ```bash
-cd handwave && git pull && npm test
-handwave install          # only the copies need this: AGENTS.md blocks, the Cursor rule
-handwave doctor           # is what is running the thing that is on disk?
+cd spiega && git pull && npm test
+spiega install          # only the copies need this: AGENTS.md blocks, the Cursor rule
+spiega doctor           # is what is running the thing that is on disk?
 ```
 
-handwave reaches an agent through four kinds of thing, and they go stale
+spiega reaches an agent through four kinds of thing, and they go stale
 differently:
 
 | | goes stale when |
 |---|---|
 | the CLI, via `npm link` | never — it is this checkout |
 | a skill, symlinked | never — but the agent loaded it when its session started |
-| an `AGENTS.md` block, a Cursor rule | the wording changes — re-run `handwave install` |
+| an `AGENTS.md` block, a Cursor rule | the wording changes — re-run `spiega install` |
 | **a running process** | **immediately — it holds the code it was launched with** |
 
 The last one is the trap, and it is the one that looks like a feature that was
-never built. `handwave doctor` finds it:
+never built. `spiega doctor` finds it:
 
 ```
- handwave doctor ──────────────────────────────────────────
+ spiega doctor ──────────────────────────────────────────
 
-  ✓ handwave on PATH     ~/.nvm/…/handwave → this checkout
+  ✓ spiega on PATH     ~/.nvm/…/spiega → this checkout
   ✓ claude skill         linked — tracks the checkout
   ✓ opencode AGENTS.md   block is current
   ✗ agent MCP server     16 running, 16 started before the current commit
@@ -133,7 +154,7 @@ pre-flight check. It makes no network calls and changes nothing.
 ### If you use herdr
 
 ```bash
-handwave install herdr
+spiega install herdr
 ```
 
 Then bind a key, in `~/.config/herdr/config.toml`:
@@ -142,7 +163,7 @@ Then bind a key, in `~/.config/herdr/config.toml`:
 [[keys.command]]
 key = "prefix+alt+h"
 type = "plugin_action"
-command = "handwave.board.focus"
+command = "spiega.board.focus"
 ```
 
 `herdr server reload-config`, and that key brings the board for whatever pane
@@ -151,28 +172,28 @@ you are in to the front — starting one if there is none.
 ## Use it yourself
 
 ```bash
-handwave draw '{"op":"title","text":"Placing an order"}'   # starts a board, prints its URL
-handwave draw '{"op":"node","id":"gw","kind":"gateway","label":"API Gateway","sub":"authn"}'
-handwave draw '{"op":"node","id":"orders","kind":"service","label":"Orders"}'
-handwave draw '{"op":"edge","from":"gw","to":"orders","label":"gRPC"}'
-handwave say  "The gateway does **authn** and rate limiting, then hands off."
+spiega draw '{"op":"title","text":"Placing an order"}'   # starts a board, prints its URL
+spiega draw '{"op":"node","id":"gw","kind":"gateway","label":"API Gateway","sub":"authn"}'
+spiega draw '{"op":"node","id":"orders","kind":"service","label":"Orders"}'
+spiega draw '{"op":"edge","from":"gw","to":"orders","label":"gRPC"}'
+spiega say  "The gateway does **authn** and rate limiting, then hands off."
 ```
 
 Give the board a window of its own — chromeless, no tabs, its own Dock entry,
 so it sits beside your terminal like a native panel:
 
 ```bash
-handwave open --size 1200x900 --pos 60,60
+spiega open --size 1200x900 --pos 60,60
 ```
 
 Render a whole spec with no server, or keep what is on the board:
 
 ```bash
-handwave render examples/order-flow.json -o order-flow.html
-handwave snapshot -o docs/board.html
+spiega render examples/order-flow.json -o order-flow.html
+spiega snapshot -o docs/board.html
 ```
 
-`handwave help` lists the rest.
+`spiega help` lists the rest.
 
 **Replay.** A board holds the order it was drawn in, not just its final state,
 so press **replay** (or `r`) and the session plays back as it happened: the
@@ -182,7 +203,7 @@ anything complex the finished board is a wall; the replay is the explanation.
 It ends on a wide shot of the whole thing.
 
 The log lives on the board, so a replay can also be asked for from outside —
-`handwave replay`, or `board_replay` over MCP. An agent that has just finished
+`spiega replay`, or `board_replay` over MCP. An agent that has just finished
 an explanation can offer to play it back without thinking the drawing out a
 second time, and nothing is re-sent: it is the same session, run again.
 
@@ -195,9 +216,9 @@ not clickable and do not pretend to be.
 **Keys on the board:** `←` `→` walk the flow, `space` plays it, `r` replays the
 session, `+` `-` zoom a step at a time, `0` or `f` fits, `esc` stops.
 
-**Where to put the board.** `handwave open` gives it a real window and is the
+**Where to put the board.** `spiega open` gives it a real window and is the
 right answer for anything interactive. A terminal pane (`terminal-browser
-open "$(handwave url)"`) is good for *glancing* while you work and for stepping
+open "$(spiega url)"`) is good for *glancing* while you work and for stepping
 a flow with the arrow keys — those repaint once per keypress. It is poor at
 continuous zoom and dragging, because every frame has to be encoded and pushed
 through the TTY however fast the page itself is. Both can watch the same board
@@ -210,10 +231,10 @@ agents drawing on the same board interleave two explanations into one picture,
 which is worse than either having none — so boards have names.
 
 ```bash
-handwave boards                      # every board, and which one this shell uses
-handwave focus                       # bring this session's board window forward
-handwave --board api draw '...'      # or HANDWAVE_BOARD=api
-handwave stop --all
+spiega boards                      # every board, and which one this shell uses
+spiega focus                       # bring this session's board window forward
+spiega --board api draw '...'      # or SPIEGA_BOARD=api
+spiega stop --all
 ```
 
 A board names itself after the task: the working directory's own name, which
@@ -221,7 +242,7 @@ for a worktree is the thing you called it — `domain-modeling-for-rights`, not 
 uuid. A session keeps the board it already has, matched on whichever identity
 its harness exposes (the conversation id, else the terminal pane, else the
 directory). Two conversations about one repo get `name` and `name-2`, and
-`handwave boards` prints each board's directory so they can be told apart.
+`spiega boards` prints each board's directory so they can be told apart.
 
 Not per harness, per task: four opencode sessions and four Claude Code sessions
 at once is the normal case, and a board per harness would put four
@@ -232,17 +253,17 @@ daemon inherits that daemon's environment, so the CLI — which runs in the pane
 A board is registered by the process serving it and pruned when that process is
 gone, so a name never resolves to a socket nobody is listening on.
 
-If you run your sessions in [herdr](https://herdr.dev), `handwave install herdr`
+If you run your sessions in [herdr](https://herdr.dev), `spiega install herdr`
 links a plugin that goes from the pane you are working in to that task's board —
-bind a key to **handwave: show this task's board**. It reads the pane's working
+bind a key to **spiega: show this task's board**. It reads the pane's working
 directory rather than the conversation, so it needs nothing from the agent.
 See [`integrations/herdr/`](integrations/herdr/).
 
 ## Compare how models use it
 
 ```bash
-handwave bench --list                     # models you can reach right now
-handwave bench "how a write-through cache works" \
+spiega bench --list                     # models you can reach right now
+spiega bench "how a write-through cache works" \
   --models github-copilot/claude-opus-5.5,github-copilot/gpt-6-sol
 ```
 
@@ -278,15 +299,15 @@ Which lines went with which step is often clear only afterwards, so tags can be
 set on lines already said. The board keeps them; nothing is drawn again.
 
 ```bash
-handwave script                              # the lines, numbered, and what each is tied to
-handwave tag --match "Flyway V25" --step 6
-handwave tag 1 --step off                    # an opening remark belongs to no step
+spiega script                              # the lines, numbered, and what each is tied to
+spiega tag --match "Flyway V25" --step 6
+spiega tag 1 --step off                    # an opening remark belongs to no step
 ```
 
 The rail shows what was said, in the order it was said. So a script narrated
 topic by topic, with each line tagged by whichever step it touches, comes out
 `2, 1, 3, 3, 4, 3, 6` — which looks like a sort gone wrong, though nothing
-sorted anything. `handwave script` says so when it happens, because from the
+sorted anything. `spiega script` says so when it happens, because from the
 board you cannot tell the difference between that and a bug.
 
 Nothing is ever placed by hand. Columns are derived from the edges — a node
@@ -326,7 +347,7 @@ The look — warm paper, flat three-band bodies, the cobalt cast shadow, the
 ink-and-grain filter — follows [Colorfigures](https://april-zhu.com/colorfigures)
 by April Zhu (MIT), which is built on ISO-GLOW by April Zhu and
 [iso-figure](https://github.com/MrBongoC/ai-iso-skill) by Tolga Cohce, both MIT.
-Colorfigures draws machines in isometric 3D; handwave borrows its palette and
+Colorfigures draws machines in isometric 3D; spiega borrows its palette and
 its hand, and points them at software architecture in 2D.
 
 ## License

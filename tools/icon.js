@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* ============================================================
-   handwave icon — a preview harness for the mark. UNFINISHED; see issue #2.
+   spiega icon — a preview harness for the mark. UNFINISHED; see issue #2.
 
    Run `node tools/icon.js` and open the file it prints: the draft rendered at
    16, 24, 32, 48, 64 and 160px side by side. Legibility at 16px is the whole
@@ -68,7 +68,7 @@ export const svg = (inner, size = 100) =>
 if (import.meta.url === `file://${process.argv[1]}`) {
   const inner = draft();
   const sizes = [16, 24, 32, 48, 64, 160];
-  const out = path.join(os.tmpdir(), 'handwave-icon.html');
+  const out = path.join(os.tmpdir(), 'spiega-icon.html');
   fs.writeFileSync(out, `<!doctype html><meta charset=utf-8>` +
     `<style>body{margin:0;background:${PAPER};font:12px ${MONO};padding:26px}` +
     `td{text-align:center;vertical-align:bottom;padding:0 14px}.s{color:${MUTED};font-size:10px;margin-top:6px}</style>` +

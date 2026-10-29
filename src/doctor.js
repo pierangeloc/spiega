@@ -1,7 +1,7 @@
 /* ============================================================
-   handwave doctor — is what is running the thing that is on disk?
+   spiega doctor — is what is running the thing that is on disk?
 
-   handwave reaches an agent through four different kinds of thing, and they go
+   spiega reaches an agent through four different kinds of thing, and they go
    stale in different ways:
 
      a symlink   always current, by construction
@@ -31,7 +31,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const HOME = os.homedir();
 const MCP_ENTRY = path.join(ROOT, 'src', 'mcp', 'server.js');
-const SKILL_SRC = path.join(ROOT, 'skills', 'handwave');
+const SKILL_SRC = path.join(ROOT, 'skills', 'spiega');
 
 const sh = (cmd, args, opts = {}) => {
   try {
@@ -73,25 +73,25 @@ function checkout(rows) {
 /* ---------- the CLI on PATH ---------- */
 
 function cli(rows) {
-  const which = sh('sh', ['-c', 'command -v handwave']);
+  const which = sh('sh', ['-c', 'command -v spiega']);
   if (!which) {
-    return rows.push(bad('handwave on PATH', 'not found', `cd ${tilde(ROOT)} && npm link`));
+    return rows.push(bad('spiega on PATH', 'not found', `cd ${tilde(ROOT)} && npm link`));
   }
   let real = which;
   try { real = fs.realpathSync(which); } catch { /* leave as-is */ }
   const mine = path.resolve(ROOT, 'src', 'cli.js');
   rows.push(real === mine
-    ? ok('handwave on PATH', `${tilde(which)} → this checkout`)
-    : bad('handwave on PATH', `${tilde(which)} → ${tilde(real)}, which is NOT this checkout`,
+    ? ok('spiega on PATH', `${tilde(which)} → this checkout`)
+    : bad('spiega on PATH', `${tilde(which)} → ${tilde(real)}, which is NOT this checkout`,
         `cd ${tilde(ROOT)} && npm link`));
 }
 
 /* ---------- skills ---------- */
 
 const SKILL_DIRS = {
-  claude: path.join(HOME, '.claude', 'skills', 'handwave'),
-  codex: path.join(HOME, '.codex', 'skills', 'handwave'),
-  gemini: path.join(HOME, '.gemini', 'skills', 'handwave'),
+  claude: path.join(HOME, '.claude', 'skills', 'spiega'),
+  codex: path.join(HOME, '.codex', 'skills', 'spiega'),
+  gemini: path.join(HOME, '.gemini', 'skills', 'spiega'),
 };
 
 function skills(rows) {
@@ -100,13 +100,13 @@ function skills(rows) {
     if (!fs.existsSync(parent)) continue;                 // that harness is not here
     let st = null;
     try { st = fs.lstatSync(dest); } catch { /* absent */ }
-    if (!st) { rows.push(warn(`${name} skill`, 'not installed', `handwave install ${name}`)); continue; }
+    if (!st) { rows.push(warn(`${name} skill`, 'not installed', `spiega install ${name}`)); continue; }
 
     if (st.isSymbolicLink()) {
       const to = fs.readlinkSync(dest);
       rows.push(to === SKILL_SRC
         ? ok(`${name} skill`, 'linked — tracks the checkout')
-        : bad(`${name} skill`, `linked to ${tilde(to)}, not this checkout`, `handwave install ${name}`));
+        : bad(`${name} skill`, `linked to ${tilde(to)}, not this checkout`, `spiega install ${name}`));
       continue;
     }
     // a copy: current only until the source changes, so compare it
@@ -114,8 +114,8 @@ function skills(rows) {
     let b = null;
     try { b = fs.readFileSync(path.join(dest, 'SKILL.md'), 'utf8'); } catch { /* unreadable */ }
     rows.push(a === b
-      ? warn(`${name} skill`, 'a copy, currently identical', 'it will go stale on the next change; re-link with `handwave install`')
-      : bad(`${name} skill`, 'a copy, and out of date', `handwave install ${name}`));
+      ? warn(`${name} skill`, 'a copy, currently identical', 'it will go stale on the next change; re-link with `spiega install`')
+      : bad(`${name} skill`, 'a copy, and out of date', `spiega install ${name}`));
   }
 }
 
@@ -133,11 +133,11 @@ function blocks(rows) {
     let text = '';
     try { text = fs.readFileSync(file, 'utf8'); } catch { /* absent */ }
     const i = text.indexOf(START), j = text.indexOf(END);
-    if (i < 0) { rows.push(warn(`${name} AGENTS.md`, 'no handwave block', `handwave install ${name}`)); continue; }
+    if (i < 0) { rows.push(warn(`${name} AGENTS.md`, 'no spiega block', `spiega install ${name}`)); continue; }
     const current = text.slice(i + START.length, j).trim() === BLOCK.trim();
     rows.push(current
       ? ok(`${name} AGENTS.md`, 'block is current')
-      : bad(`${name} AGENTS.md`, 'block is an older wording', `handwave install ${name}`));
+      : bad(`${name} AGENTS.md`, 'block is an older wording', `spiega install ${name}`));
   }
 }
 
@@ -146,30 +146,30 @@ function blocks(rows) {
 const readJSON = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 const MCP_FILES = [
-  ['opencode', path.join(HOME, '.config', 'opencode', 'opencode.json'), c => c?.mcp?.handwave?.command?.[1]],
-  ['gemini', path.join(HOME, '.gemini', 'settings.json'), c => c?.mcpServers?.handwave?.args?.[0]],
-  ['copilot', path.join(HOME, '.copilot', 'mcp-config.json'), c => c?.mcpServers?.handwave?.args?.[0]],
-  ['cursor', path.join(HOME, '.cursor', 'mcp.json'), c => c?.mcpServers?.handwave?.args?.[0]],
-  ['windsurf', path.join(HOME, '.codeium', 'windsurf', 'mcp_config.json'), c => c?.mcpServers?.handwave?.args?.[0]],
+  ['opencode', path.join(HOME, '.config', 'opencode', 'opencode.json'), c => c?.mcp?.spiega?.command?.[1]],
+  ['gemini', path.join(HOME, '.gemini', 'settings.json'), c => c?.mcpServers?.spiega?.args?.[0]],
+  ['copilot', path.join(HOME, '.copilot', 'mcp-config.json'), c => c?.mcpServers?.spiega?.args?.[0]],
+  ['cursor', path.join(HOME, '.cursor', 'mcp.json'), c => c?.mcpServers?.spiega?.args?.[0]],
+  ['windsurf', path.join(HOME, '.codeium', 'windsurf', 'mcp_config.json'), c => c?.mcpServers?.spiega?.args?.[0]],
 ];
 
 function registrations(rows) {
   for (const [name, file, pick] of MCP_FILES) {
     if (!fs.existsSync(file)) continue;
     const entry = pick(readJSON(file));
-    if (!entry) { rows.push(warn(`${name} MCP`, 'not registered', `handwave install ${name}`)); continue; }
+    if (!entry) { rows.push(warn(`${name} MCP`, 'not registered', `spiega install ${name}`)); continue; }
     rows.push(entry === MCP_ENTRY
       ? ok(`${name} MCP`, 'points at this checkout')
-      : bad(`${name} MCP`, `points at ${tilde(entry)}`, `handwave install ${name}`));
+      : bad(`${name} MCP`, `points at ${tilde(entry)}`, `spiega install ${name}`));
   }
   // Codex keeps its servers in TOML
   const toml = path.join(HOME, '.codex', 'config.toml');
   if (fs.existsSync(toml)) {
     const raw = fs.readFileSync(toml, 'utf8');
-    const has = /^\s*\[mcp_servers\.handwave\]/m.test(raw);
+    const has = /^\s*\[mcp_servers\.spiega\]/m.test(raw);
     rows.push(has && raw.includes(MCP_ENTRY)
       ? ok('codex MCP', 'points at this checkout')
-      : warn('codex MCP', has ? 'registered, but not at this checkout' : 'not registered', 'handwave install codex'));
+      : warn('codex MCP', has ? 'registered, but not at this checkout' : 'not registered', 'spiega install codex'));
   }
 }
 
@@ -205,12 +205,12 @@ function processes(rows, headTime) {
   } else {
     let names = [];
     try {
-      const reg = JSON.parse(fs.readFileSync(path.join(HOME, '.handwave', 'boards.json'), 'utf8'));
+      const reg = JSON.parse(fs.readFileSync(path.join(HOME, '.spiega', 'boards.json'), 'utf8'));
       names = Object.entries(reg).filter(([, b]) => boards.includes(b.pid)).map(([n]) => n);
     } catch { /* a board from before the registry */ }
     rows.push(bad('board server',
       `${boards.length} started before the current commit${names.length ? `: ${names.join(', ')}` : ''}`,
-      'handwave stop --board <name>, then draw again — note the drawing is lost (no persistence yet)'));
+      'spiega stop --board <name>, then draw again — note the drawing is lost (no persistence yet)'));
   }
 
   const mcp = find(MCP_ENTRY);
@@ -223,6 +223,32 @@ function processes(rows, headTime) {
 
 /* ---------- the report ---------- */
 
+/* Anything the old name left behind. A rename that is half-done is worse than
+   one not started: two skills, two MCP registrations, two instruction blocks,
+   and an agent reading whichever it finds first. */
+function legacy(rows) {
+  const OLD = 'handwave';
+  const seen = [];
+  if (fs.existsSync(path.join(HOME, `.${OLD}`))) seen.push(`~/.${OLD}`);
+  for (const [name, dir] of Object.entries(SKILL_DIRS)) {
+    const old = path.join(path.dirname(dir), OLD);
+    try { if (fs.lstatSync(old)) seen.push(`${name} skill`); } catch { /* absent */ }
+  }
+  for (const [name, file] of Object.entries(AGENT_FILES)) {
+    try {
+      if (fs.readFileSync(file, 'utf8').includes(`<!-- ${OLD.toUpperCase()}_START -->`)) {
+        seen.push(`${name} block`);
+      }
+    } catch { /* absent */ }
+  }
+  for (const [name, file, ] of MCP_FILES) {
+    const cfg = readJSON(file);
+    const flat = cfg ? JSON.stringify(cfg) : '';
+    if (flat.includes(`"${OLD}"`)) seen.push(`${name} MCP`);
+  }
+  if (seen.length) rows.push(bad('left by the old name', seen.join(', '), 'spiega migrate'));
+}
+
 export function doctor() {
   const rows = [];
   const headTime = checkout(rows);
@@ -230,6 +256,7 @@ export function doctor() {
   skills(rows);
   blocks(rows);
   registrations(rows);
+  legacy(rows);
   processes(rows, headTime);
   return rows;
 }
@@ -240,7 +267,7 @@ export function format(rows) {
   const tint = { ok: c.dim, warn: c.plain, bad: c.plain };
   const w = Math.max(...rows.map(r => r.what.length)) + 2;
 
-  const out = [heading('handwave doctor')];
+  const out = [heading('spiega doctor')];
   for (const r of rows) out.push(`  ${mark[r.level]} ${c.bold(pad(r.what, w))}${tint[r.level](r.detail)}`);
 
   const fixes = [...new Set(rows.filter(r => r.fix).map(r => r.fix))];

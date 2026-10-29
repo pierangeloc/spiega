@@ -5,16 +5,16 @@ behind seven others. Hunting for it is exactly the friction the board was meant
 to remove.
 
 ```bash
-handwave install herdr      # or: herdr plugin link integrations/herdr
+spiega install herdr      # or: herdr plugin link integrations/herdr
 ```
 
 Three actions, offered from the global, workspace, tab and pane menus:
 
 | action | what it does |
 |---|---|
-| **handwave: show this task's board** | raises the board belonging to this pane, starting one if there is none |
-| **handwave: open a board for this task** | a window for this pane's board, always |
-| **handwave: list every board** | a popup: every board and the task it belongs to |
+| **spiega: show this task's board** | raises the board belonging to this pane, starting one if there is none |
+| **spiega: open a board for this task** | a window for this pane's board, always |
+| **spiega: list every board** | a popup: every board and the task it belongs to |
 
 Bind the first one to a key — it is the one worth pressing. In
 `~/.config/herdr/config.toml`:
@@ -23,7 +23,7 @@ Bind the first one to a key — it is the one worth pressing. In
 [[keys.command]]
 key = "prefix+alt+h"
 type = "plugin_action"
-command = "handwave.board.focus"
+command = "spiega.board.focus"
 ```
 
 Then `herdr server reload-config`.
@@ -31,7 +31,7 @@ Then `herdr server reload-config`.
 ## Losing a board, and getting it back
 
 Three things get called "I lost my board", and the one key handles all of them,
-because `handwave focus` does:
+because `spiega focus` does:
 
 | what happened | what you get |
 |---|---|
@@ -39,13 +39,13 @@ because `handwave focus` does:
 | you closed the window | a new one, on the same board — the drawing is untouched, a board is a server |
 | there was never a board here | one is started and opened |
 
-From a shell in the pane, `handwave focus` is the same thing. `handwave boards`
+From a shell in the pane, `spiega focus` is the same thing. `spiega boards`
 lists what exists if you would rather look first.
 
 ## How it finds the right board
 
 It reads the pane, not the conversation. `herdr pane list` gives each pane's
-`foreground_cwd`; handwave names a board after its task's directory; so the
+`foreground_cwd`; spiega names a board after its task's directory; so the
 pane's directory *is* the lookup. Nothing depends on the agent cooperating, or
 even on an agent being in the pane.
 

@@ -16,42 +16,42 @@
    <!-- CODEGRAPH_START --> block in ~/.codex/AGENTS.md on this machine.
    ============================================================ */
 
-export const START = '<!-- HANDWAVE_START -->';
-export const END = '<!-- HANDWAVE_END -->';
+export const START = '<!-- SPIEGA_START -->';
+export const END = '<!-- SPIEGA_END -->';
 
 /* Short on purpose. This sits in a file the agent reads on every single turn,
    so it buys its place in tokens: when to draw, the two rules that are easy to
    get wrong, and where the detail lives. */
-export const BLOCK = `## handwave — draw while you explain
+export const BLOCK = `## spiega — draw while you explain
 
 When you are explaining how a system works — a request path, a comparison, a
-review, "how does X talk to Y" — draw it on the handwave board as you talk,
+review, "how does X talk to Y" — draw it on the spiega board as you talk,
 rather than writing a wall of prose. Boxes and lines arrive beside your words
 and the person watches the picture build.
 
-- \`handwave open\` once, early, so there is something to watch.
+- \`spiega open\` once, early, so there is something to watch.
 - Draw a few things at a time, as you explain them, never the whole diagram in
   one call. A board that appears finished was not explained.
-- \`handwave draw '{"op":"node","id":"gw","kind":"gateway","label":"API Gateway"}'\`
+- \`spiega draw '{"op":"node","id":"gw","kind":"gateway","label":"API Gateway"}'\`
   and \`'{"op":"edge","from":"gw","to":"orders","label":"gRPC"}'\`. You never
   place anything: columns come from the edges.
-- \`handwave say "..."\` puts a line of your explanation beside the drawing.
+- \`spiega say "..."\` puts a line of your explanation beside the drawing.
 
 Two things that are easy to get wrong and spoil the result:
 
-1. **Tag the lines that explain one step.** \`handwave say "..." --step 3\`, the
+1. **Tag the lines that explain one step.** \`spiega say "..." --step 3\`, the
    number as it shows on the board. Walking the flow then lights those words
    with that hop, and untagged lines highlight nothing at all. Tag a line
    because it is about that hop, not because it mentions something the hop
    touches; leave opening and closing remarks untagged. When the flow is the
    spine of the explanation, say the lines in step order — the rail shows what
    you said in the order you said it, so narrating by topic makes the step
-   numbers read as jumbled. \`handwave script\` checks both, and
-   \`handwave tag --match "..." --step N\` fixes it afterwards.
+   numbers read as jumbled. \`spiega script\` checks both, and
+   \`spiega tag --match "..." --step N\` fixes it afterwards.
 2. **Never re-draw an explanation to show it again.** The board keeps its own
-   log: \`handwave replay\` plays the whole session back, words and all.
+   log: \`spiega replay\` plays the whole session back, words and all.
 
-\`handwave help\` lists the rest. If an MCP server named handwave is available,
+\`spiega help\` lists the rest. If an MCP server named spiega is available,
 its tools do the same things and are cheaper than shelling out.`;
 
 /* Put the block in a file, or update the one already there.
@@ -76,7 +76,7 @@ export function upsertBlock(fs, file, block = BLOCK) {
   } else if (i >= 0 || j >= 0) {
     // one marker without the other: someone edited by hand, and guessing where
     // the block ends could eat their text
-    throw new Error(`${file} has one handwave marker but not the other — fix it by hand`);
+    throw new Error(`${file} has one spiega marker but not the other — fix it by hand`);
   } else if (!before.trim()) {
     after = body + '\n';
     how = 'created';

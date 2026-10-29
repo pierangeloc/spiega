@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>handwave</title>
+<title>spiega</title>
 <style>
   :root{
     --paper:#f2efe7; --panel:#f8f6f0; --ink:#231e16; --muted:#857d6e;
@@ -125,7 +125,7 @@
 <body>
   <div class="bar">
     <span class="dot idle" id="live" title="waiting for the agent"></span>
-    <h1 id="title">handwave</h1>
+    <h1 id="title">spiega</h1>
     <span class="count" id="count"></span>
     <span class="spacer"></span>
     <button class="btn" id="rail-toggle" title="hide the transcript">transcript</button>
@@ -140,7 +140,7 @@
       <div class="pan" id="pan"></div>
       <div class="blank" id="blank">
         <div class="k">the board is empty</div>
-        <div><code>handwave draw '{"op":"node","label":"API Gateway","kind":"gateway"}'</code></div>
+        <div><code>spiega draw '{"op":"node","label":"API Gateway","kind":"gateway"}'</code></div>
       </div>
       <div class="offline" id="offline" hidden>
         <span class="k">not connected</span>
@@ -500,10 +500,10 @@ function onState(b, fresh) {
   // A replay owns the screen while it runs; the live board keeps updating
   // underneath and is shown again when the replay ends.
   if (replaying) { $('count').textContent = 'replaying\u2026'; return; }
-  $('title').textContent = b.title || 'handwave';
+  $('title').textContent = b.title || 'spiega';
   // The board name goes in the window title because that is the only handle an
-  // OS has on a browser app window: `handwave focus` finds the window by it.
-  document.title = (b.title ? `${b.title} · handwave` : 'handwave') + (boardTag ? ` [${boardTag}]` : '');
+  // OS has on a browser app window: `spiega focus` finds the window by it.
+  document.title = (b.title ? `${b.title} · spiega` : 'spiega') + (boardTag ? ` [${boardTag}]` : '');
   setLink('live');
   clearTimeout(onState._t);
   onState._t = setTimeout(() => setLink(es && es.readyState === EventSource.OPEN ? 'idle' : 'down'), 2500);
@@ -542,7 +542,7 @@ function connect() {
     onState(JSON.parse(e.data));
   });
   es.addEventListener('patch', e => { const d = JSON.parse(e.data); onState(d.board, d.fresh); });
-  // `handwave replay` — or the agent's own tool — asking for the movie again.
+  // `spiega replay` — or the agent's own tool — asking for the movie again.
   // Always a start, never a toggle: a remote caller cannot see the button.
   es.addEventListener('replay', () => { if (replaying) stopReplay(); replay(); });
   es.addEventListener('error', () => {

@@ -1,4 +1,4 @@
-/* handwave — the public surface. */
+/* spiega — the public surface. */
 export { renderSVG, indexFlow } from './render/render.js';
 export { emptyBoard, applyOp, applyOps } from './board/state.js';
 export { snapshotHTML } from './board/snapshot.js';

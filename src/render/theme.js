@@ -1,5 +1,5 @@
 /* ============================================================
-   handwave theme — paper, ink, body colours, the hand filter.
+   spiega theme — paper, ink, body colours, the hand filter.
 
    The palette and the hand-drawn filter follow Colorfigures / ISO-GLOW
    by April Zhu (MIT), itself built on iso-figure by Tolga Cohce (MIT).

@@ -1,5 +1,5 @@
 /* ============================================================
-   handwave install — put it where your agents will find it.
+   spiega install — put it where your agents will find it.
 
    Every target here is idempotent and backs up any file it rewrites, because
    these are config files you did not write for us and may have spent a long
@@ -21,7 +21,7 @@ const HOME = os.homedir();
 
 const backup = file => {
   if (!fs.existsSync(file)) return null;
-  const b = `${file}.bak-handwave-${new Date().toISOString().slice(0, 10)}`;
+  const b = `${file}.bak-spiega-${new Date().toISOString().slice(0, 10)}`;
   if (!fs.existsSync(b)) fs.copyFileSync(file, b);
   return b;
 };
@@ -44,8 +44,8 @@ const writeJSON = (file, obj) => {
    already symlinks its skill into ~/.codex/skills and ~/.gemini/skills on this
    machine; same idea. If the filesystem refuses a link, fall back to a copy and
    say so, because a stale skill beats no skill. */
-const linkSkill = (dir, name = 'handwave') => {
-  const src = path.join(ROOT, 'skills', 'handwave');
+const linkSkill = (dir, name = 'spiega') => {
+  const src = path.join(ROOT, 'skills', 'spiega');
   const dest = path.join(dir, name);
   fs.mkdirSync(dir, { recursive: true });
   const already = fs.existsSync(dest) || isLink(dest);
@@ -66,12 +66,12 @@ const linkSkill = (dir, name = 'handwave') => {
 
 const isLink = p => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
 /* Never beside the thing being replaced. A skills directory is scanned by the
-   harness, so `handwave.bak-…` sitting next to `handwave` is not a backup — it
+   harness, so `spiega.bak-…` sitting next to `spiega` is not a backup — it
    is a second skill, loaded every session, with the same description and
    older contents. Backups go somewhere nothing reads. */
 const backupDir = d => {
   if (isLink(d) || !fs.existsSync(d)) return null;
-  const b = path.join(HOME, '.handwave', 'backups',
+  const b = path.join(HOME, '.spiega', 'backups',
     `${path.basename(d)}-${Date.now().toString(36)}`);
   fs.mkdirSync(path.dirname(b), { recursive: true });
   fs.cpSync(d, b, { recursive: true });
@@ -86,8 +86,8 @@ const mcpJSON = (file, key, value) => {
   const parts = key.split('.');
   let node = cfg;
   for (const k of parts) node = (node[k] ||= {});
-  const before = JSON.stringify(node.handwave);
-  node.handwave = value;
+  const before = JSON.stringify(node.spiega);
+  node.spiega = value;
   if (before === JSON.stringify(value)) return [file, 'already registered', 'unchanged'];
   const b = backup(file);
   writeJSON(file, cfg);
@@ -98,7 +98,7 @@ const mcpJSON = (file, key, value) => {
 
    A board per harness looked right until the real usage turned up: four
    opencode tasks and four Claude Code tasks at once, each its own problem.
-   Pinning `HANDWAVE_BOARD=opencode` would have forced all four onto one board
+   Pinning `SPIEGA_BOARD=opencode` would have forced all four onto one board
    and overridden the per-task naming that makes them separate. The name is
    worked out per session instead — see boardName() in board/server.js.
 
@@ -150,10 +150,10 @@ export const TARGETS = {
       const raw = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
       let note = 'skill, AGENTS.md';
       let wroteMcp = false;
-      if (!/^\s*\[mcp_servers\.handwave\]/m.test(raw)) {
+      if (!/^\s*\[mcp_servers\.spiega\]/m.test(raw)) {
         backup(file);
         fs.mkdirSync(path.dirname(file), { recursive: true });
-        const block = `\n[mcp_servers.handwave]\ncommand = "node"\nargs = ["${MCP_ENTRY}"]\n`;
+        const block = `\n[mcp_servers.spiega]\ncommand = "node"\nargs = ["${MCP_ENTRY}"]\n`;
         fs.writeFileSync(file, raw.replace(/\n*$/, '\n') + block);
         note += ', MCP server';
         wroteMcp = true;
@@ -188,8 +188,8 @@ export const TARGETS = {
       cfg.mcp ||= {};
       const want = { type: 'local', command: ['node', MCP_ENTRY], enabled: true };
       let note, wrote = false;
-      if (JSON.stringify(cfg.mcp.handwave) === JSON.stringify(want)) note = 'MCP already registered';
-      else { const b = backup(file); cfg.mcp.handwave = want; writeJSON(file, cfg); note = b ? 'MCP registered, config backed up' : 'MCP registered'; wrote = true; }
+      if (JSON.stringify(cfg.mcp.spiega) === JSON.stringify(want)) note = 'MCP already registered';
+      else { const b = backup(file); cfg.mcp.spiega = want; writeJSON(file, cfg); note = b ? 'MCP registered, config backed up' : 'MCP registered'; wrote = true; }
       // opencode reads no skill file, so the judgement has to ride in AGENTS.md
       const block = agentsFile(path.join(HOME, '.config', 'opencode', 'AGENTS.md'));
       return [file, `${note}; AGENTS.md ${block[1]}`,
@@ -213,9 +213,9 @@ export const TARGETS = {
     run: () => {
       const dir = path.join(HOME, '.cursor', 'rules');
       fs.mkdirSync(dir, { recursive: true });
-      const out = path.join(dir, 'handwave.mdc');
+      const out = path.join(dir, 'spiega.mdc');
       const before = fs.existsSync(out) ? fs.readFileSync(out, 'utf8') : null;
-      const src = fs.readFileSync(path.join(ROOT, 'integrations/cursor/handwave.mdc'), 'utf8');
+      const src = fs.readFileSync(path.join(ROOT, 'integrations/cursor/spiega.mdc'), 'utf8');
       if (before !== src) fs.writeFileSync(out, src);
       const mcp = mcpJSON(path.join(HOME, '.cursor', 'mcp.json'), 'mcpServers', STDIO());
       return [mcp[0], mcp[1], combine([mcp, [null, null, before === src ? 'unchanged' : 'written']])];
@@ -271,7 +271,7 @@ export const TARGETS = {
         listed = execFileSync('herdr', ['plugin', 'list'],
           { encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'] });
       } catch { /* herdr may not be running; link anyway */ }
-      if (listed.includes('handwave.board') && listed.includes(dir)) {
+      if (listed.includes('spiega.board') && listed.includes(dir)) {
         return [dir, 'already linked', 'unchanged'];
       }
       try {
@@ -280,7 +280,7 @@ export const TARGETS = {
       } catch (e) {
         throw new Error(`herdr plugin link failed (${String(e.stderr || e.message).split('\n')[0]})`);
       }
-      return [dir, 'linked — bind a key to "handwave: show this task\'s board"', 'written'];
+      return [dir, 'linked — bind a key to "spiega: show this task\'s board"', 'written'];
     },
   },
 
@@ -312,7 +312,7 @@ function claudeDesktopDir() {
       : path.join(HOME, '.config', 'Claude');
 }
 
-/* What is actually on this machine. `handwave install` with no arguments does
+/* What is actually on this machine. `spiega install` with no arguments does
    only these, because writing a config for a harness someone does not use is
    how you end up with a file they never asked for. `project` is excluded: it
    writes into the working directory and should always be asked for by name. */
