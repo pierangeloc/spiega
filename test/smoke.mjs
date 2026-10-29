@@ -904,6 +904,48 @@ test('a process from a previous location is found, not reported as absent', asyn
   assert.deepEqual(scanProcesses(undefined, root), { boards: [], mcp: [] });
 });
 
+/* Documentation that names things in the code goes stale silently, which is
+   the whole reason docs/skill.md is a pointer rather than a copy. These check
+   the two ways these pages can lie: a link to a file that moved, and a list of
+   node kinds or ops that no longer matches what the board accepts. */
+test('every relative link in docs/ points at something that exists', () => {
+  const dir = path.join(ROOT, 'docs');
+  const pages = fs.readdirSync(dir).filter(f => f.endsWith('.md'));
+  assert.ok(pages.length >= 2, 'expected the skill and vocabulary pages');
+  for (const page of pages) {
+    const text = fs.readFileSync(path.join(dir, page), 'utf8');
+    for (const [, target] of text.matchAll(/\]\(([^)#][^)]*)\)/g)) {
+      if (/^(https?:|mailto:)/.test(target)) continue;
+      const file = target.split('#')[0];
+      if (!file) continue;
+      assert.ok(fs.existsSync(path.resolve(dir, file)),
+        `docs/${page} links to ${file}, which is not there`);
+    }
+  }
+});
+
+test('the documented vocabulary matches what the board accepts', () => {
+  const doc = fs.readFileSync(path.join(ROOT, 'docs/vocabulary.md'), 'utf8');
+
+  // every node kind the renderer knows must be in the table, and vice versa
+  for (const kind of KINDS) {
+    assert.ok(new RegExp(`\`${kind}\``).test(doc), `docs/vocabulary.md never mentions the "${kind}" kind`);
+  }
+
+  // every op the board accepts must be listed
+  const src = fs.readFileSync(path.join(ROOT, 'src/board/state.js'), 'utf8');
+  const ops = [...src.matchAll(/^    case '([a-z]+)'/gm)].map(m => m[1]);
+  assert.ok(ops.length >= 10, `expected the op list, found ${ops.length}`);
+  for (const op of ops) {
+    assert.ok(new RegExp(`\`${op}\``).test(doc), `docs/vocabulary.md never mentions the "${op}" op`);
+  }
+
+  // and the layout hints, which exist nowhere else in the docs
+  for (const hint of ['place', 'col', 'row']) {
+    assert.ok(doc.includes(`\`${hint}`), `the ${hint} layout hint is undocumented`);
+  }
+});
+
 /* Editing one TOML table without eating the rest of the file.
    `[^[]*` stops at the bracket in `args = [...]` on the table's own second
    line, orphaning everything after it. That corrupted a real config on this
