@@ -22,6 +22,7 @@ const ROW_GAP = 54;
 const PAD = 64;
 
 import { wrapText } from './ink.js';
+import { measureMath } from './math.js';
 
 const SIZES = {
   service:   (n, tw) => ({ w: Math.max(156, tw + 52), h: 70 }),
@@ -32,6 +33,13 @@ const SIZES = {
   queue:     (n, tw) => ({ w: Math.max(176, tw + 60), h: 48, labelBelow: 34 }),
   client:    (n, tw) => ({ w: Math.max(146, tw + 48), h: 92 }),
   external:  (n, tw) => ({ w: Math.max(182, tw + 96), h: 96 }),
+  /* Measured, not estimated. Every other kind guesses its width from a
+     character count, which is fine for a label and wrong for a formula: a
+     fraction is one line in the source and two on the board. */
+  formula: n => {
+    const m = measureMath(n.label || '', 17);
+    return { w: Math.max(120, m.w + 44), h: Math.max(62, m.h + 42) };
+  },
   note: n => {
     const lines = n.lines || wrapText(n.label, 24);
     const widest = Math.max(1, ...lines.map(l => l.length));

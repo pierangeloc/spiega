@@ -42,6 +42,7 @@ Nine, each with its own drawing. An unknown kind falls back to `service`.
 | `queue` | a row of slots | a topic, a queue, a stream |
 | `external` | a cloud | a third party, something you do not own |
 | `note` | a torn-off scrap | a keyword, a caveat, a number |
+| `formula` | set mathematics, underlined | an equation that *is* the explanation |
 
 Three fields only some kinds read:
 
@@ -50,6 +51,38 @@ Three fields only some kinds read:
 | `sub` | all but `note` | a second, smaller line under the label |
 | `replicas` | `compute` | how many boxes are stacked |
 | `depth` | `queue` | how many slots are drawn filled |
+
+## Mathematics
+
+A `formula` node sets a small subset of LaTeX. It is drawn, not typeset by a
+library: the glyphs are the board's own monospace and the rules — fraction
+bars, radicals — are hand-drawn with the same wobble as the boxes, so a
+formula sits on the board rather than on top of it.
+
+```json
+{"op":"node","kind":"formula","id":"bernoulli",
+ "label":"p + \\tfrac{1}{2}\\rho v^2 + \\rho g h = \\text{const}"}
+```
+
+| supported | |
+|---|---|
+| superscripts, subscripts | `v^2`, `a_i`, `x^{n+1}` |
+| fractions | `\frac{a}{b}`, `\tfrac`, `\dfrac` |
+| roots | `\sqrt{x^2 + y^2}` |
+| Greek | `\rho` `\theta` `\Sigma` … upper and lower case |
+| operators | `\cdot` `\times` `\approx` `\leq` `\neq` `\pm` `\sum` `\int` `\partial` `\nabla` `\infty` `\to` `\Rightarrow` `\in` … |
+| upright words | `\text{const}`, `\mathrm{}` |
+| function names | `\log` `\ln` `\sin` `\exp` `\min` `\max` … |
+
+Spacing is derived, not copied: as in LaTeX, a space in the source is ignored
+and spacing comes from the operators, so `a+b` and `a + b` set identically.
+
+**Anything else is shown as written, dimmed.** `\begin{pmatrix}` appears
+literally on the board rather than as half a matrix, because a formula that is
+silently wrong is worse than one that visibly did not render. Matrices,
+aligned environments, limits set above and below a sum, and stretchy
+delimiters are all outside the subset — this is for the formulas people put on
+a whiteboard while explaining something, not for a paper.
 
 ## Where things go
 

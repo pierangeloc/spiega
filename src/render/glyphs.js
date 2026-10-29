@@ -11,6 +11,7 @@ import {
   roughRect, roughLine, roughEllipse, roughArc, roughPoly, roundedPts,
   stroke, fill, text, hashSeed, wrapText,
 } from './ink.js';
+import { measureMath, drawMath } from './math.js';
 
 const SH_DX = 5, SH_DY = 6;          // the cast shadow sits down and to the left-ish
 const R = 12;                         // default corner radius
@@ -222,9 +223,31 @@ function gNote(box, n, m, seed) {
     stroke(body, { w: 1.6 }) + stroke(fold, { w: 1.3 }) + txt + `</g>`;
 }
 
+/* A formula, standing on its own.
+
+   No box: a box says "a component", and a formula is not one — it is writing
+   on the board, like a note, but set rather than wrapped. The only furniture
+   is a hand-drawn rule beneath it, which is what someone does when they want
+   the formula to be the thing you look at. */
+function gFormula(box, n, m, seed) {
+  const { x, y, w, h } = box;
+  const src = n.label || '';
+  const size = 17;
+  const mm = measureMath(src, size);
+  const cx = w / 2, baseline = h / 2 + mm.a / 2;
+  const rule = roughLine([cx - mm.w / 2 - 6, baseline + mm.d + 7],
+    [cx + mm.w / 2 + 6, baseline + mm.d + 7], { seed: seed + 3, amp: 0.7, step: 11 });
+  return `<g transform="translate(${x} ${y})">` +
+    drawMath(cx, baseline, src, { size, anchor: 'middle', seed }) +
+    stroke(rule, { w: 1.5, color: ACCENT }) +
+    (n.sub ? text(cx, h - 2, n.sub, { size: 10, color: MUTED, weight: 500 }) : '') +
+    `</g>`;
+}
+
 const GLYPHS = {
   service: gService, gateway: gGateway, datastore: gDatastore, queue: gQueue,
   cache: gCache, client: gClient, external: gExternal, compute: gCompute, note: gNote,
+  formula: gFormula,
 };
 
 export const KINDS = Object.keys(GLYPHS);

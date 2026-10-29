@@ -65,6 +65,7 @@ spiega say  "The gateway does **authn** and rate limiting, then hands off."
 | `queue` | a topic, a queue, a stream (`"depth": 4` fills slots) |
 | `external` | a third party, drawn as a cloud |
 | `note` | your own handwriting: a keyword, a caveat, a number |
+| `formula` | an equation that *is* the explanation |
 
 Other ops:
 
@@ -89,6 +90,25 @@ Ids are optional — a label becomes one (`"API Gateway"` → `api-gateway`). Pa
 You never place anything. Columns come from the edges: a node sits one column
 right of whatever points at it. Draw the node, then the edge into it, and it
 lands where it belongs. Nodes already on the board keep their lane.
+
+## When the mathematics is the point
+
+Some explanations are an equation. Write it rather than describing it:
+
+```bash
+spiega draw '{"op":"node","kind":"formula","id":"bernoulli",
+  "label":"p + \\tfrac{1}{2}\\rho v^2 + \\rho g h = \\text{const}"}'
+```
+
+A small LaTeX subset: `^` `_`, `\frac`, `\sqrt`, Greek, the common operators,
+`\text{}` for words, and function names like `\log`. Spacing is derived as in
+LaTeX, so `a+b` and `a + b` are the same.
+
+Anything outside the subset — matrices, aligned environments, limits above and
+below a sum — appears on the board **as you typed it**, dimmed. That is
+deliberate, and it means you should not reach for them: rewrite the idea as
+something a person would actually put on a whiteboard, or say it in a line of
+the script instead.
 
 ## Walking a flow
 

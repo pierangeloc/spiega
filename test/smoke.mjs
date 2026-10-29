@@ -946,6 +946,58 @@ test('the documented vocabulary matches what the board accepts', () => {
   }
 });
 
+/* A small amount of mathematics, drawn rather than typeset. The constraint
+   that shaped it: a board renders in four places and only one is a browser
+   with a network, so a formula has to become SVG here, offline. */
+test('a formula is measured, drawn, and honest about what it cannot do', async () => {
+  const { measureMath, drawMath, hasMath, splitMath } = await import('../src/render/math.js');
+
+  // width has to be real, because layout.js sizes the node from it
+  const one = measureMath('x', 20), two = measureMath('xx', 20);
+  assert.ok(two.w > one.w, 'more characters, more width');
+  assert.ok(measureMath('\\frac{1}{2}', 20).h > measureMath('1', 20).h,
+    'a fraction is taller than a character');
+
+  // spacing is derived, not copied: as in LaTeX, source spaces are ignored
+  assert.equal(measureMath('a+b', 20).w, measureMath('a + b', 20).w,
+    'a+b and a + b must set identically');
+
+  const svg = drawMath(0, 0, 'p + \\tfrac{1}{2}\\rho v^2 = \\text{const}', { size: 16 });
+  assert.ok(svg.includes('\u03c1'), '\\rho becomes the letter');
+  assert.ok(svg.includes('const'), '\\text sets its words');
+  assert.ok(/<path/.test(svg), 'the fraction rule is drawn, not a character');
+  assert.ok(!/NaN|undefined/.test(svg), 'no arithmetic fell through');
+
+  // the honest fallback: shown as written rather than guessed at
+  const un = drawMath(0, 0, '\\begin{pmatrix}', { size: 16 });
+  assert.ok(un.includes('begin'), 'an unknown command appears literally');
+  assert.ok(/opacity="0.55"/.test(un), 'and dimmed, so it reads as unrendered');
+
+  // inline detection, for text that is mostly prose
+  assert.equal(hasMath('the term $\\rho v^2$ dominates'), true);
+  assert.equal(hasMath('no mathematics here'), false);
+  assert.deepEqual(splitMath('a $x^2$ b'),
+    [{ literal: 'a ' }, { math: 'x^2' }, { literal: ' b' }]);
+});
+
+test('a formula node renders on the board, and the snapshot stays standalone', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'node', id: 'pipe', kind: 'service', label: 'Pipe' },
+    { op: 'node', id: 'b', kind: 'formula', label: 'p + \\tfrac{1}{2}\\rho v^2 = \\text{const}' },
+    { op: 'edge', from: 'pipe', to: 'b' },
+  ]);
+  const { svg, boxes } = renderSVG(b);
+  assert.ok(svg.includes('\u03c1'), 'the formula is on the board');
+  assert.ok(boxes.b.w > 140, `a formula sizes itself from its content, got ${boxes.b.w}`);
+
+  // the whole reason this is drawn instead of using MathJax
+  const html = snapshotHTML(b);
+  assert.ok(!/<script/i.test(html), 'a formula must not bring a script into a snapshot');
+  assert.ok(!/https?:\/\/(?!www\.w3\.org)/.test(html), 'nor anything to fetch');
+  assert.ok(html.includes('\u03c1'), 'and it still renders there');
+});
+
 /* Editing one TOML table without eating the rest of the file.
    `[^[]*` stops at the bracket in `args = [...]` on the table's own second
    line, orphaning everything after it. That corrupted a real config on this
