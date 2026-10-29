@@ -23,7 +23,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { roughRect, roughLine, roughPoly, stroke, fill, waver, smooth } from '../src/render/ink.js';
+import { roughRect, roughLine, roughPoly, roundedPts, stroke, fill, waver, smooth } from '../src/render/ink.js';
 import { PAPER, INK, ACCENT, SHADOW, MUTED } from '../src/render/theme.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -48,32 +48,53 @@ const svg = (body, { bg = null } = {}) =>
    recognisable object. What survives is a stroke, a frame, and a letter. */
 
 const make = ({ ink = INK, ground = null }) => ({
-  /* The brief, minus the hand: a board with a stroke on it. The stroke is the
-     writing; the frame is the board. Two shapes, both large. */
-  'board-and-stroke': () =>
-    svg(stroke(roughRect(5, 11, 54, 42, 8, { seed: 5, amp: 0.9 }), { w: 4.4, color: ink }) +
-      stroke(smooth(waver([[15, 36], [30, 27], [45, 33]], { seed: 9, amp: 1.6, step: 7 }), false),
-        { w: 6, color: ACCENT }),
-      { bg: ground }),
+  /* ---- reductions of the chosen logo ----
 
-  /* Talking becoming structure: a free stroke on the left that has turned
-     into a drawn box on the right. The closest of these to what the tool
-     actually does. */
-  'stroke-to-box': () =>
-    svg(stroke(smooth(waver([[5, 38], [17, 33], [26, 31]], { seed: 3, amp: 1.6, step: 8 }), false),
-      { w: 5.5, color: ACCENT }) +
-      stroke(roughRect(27, 17, 31, 30, 7, { seed: 11, amp: 1.1 }), { w: 5, color: ink }),
-      { bg: ground }),
+     The logo is a board with four boxes, three arrows, one of them orange, and
+     a marker drawing it: nine shapes, which is wonderful at 160px and a smudge
+     at 16. These keep the two things that were still legible when it was shrunk
+     — the board's outline and the orange box — and drop everything else.
 
-  /* The initial, written rather than set. One shape, which is the best answer
-     there is to the 16px problem, and the only candidate legible at 16 on the
-     first sheet. The accent mark is where the stroke ends. */
-  'written-s': () =>
-    svg(stroke(smooth(waver([[46, 17], [26, 13], [19, 24], [34, 32], [46, 41], [36, 52], [16, 47]],
-      { seed: 13, amp: 1.2, step: 9 }), false), { w: 6, color: ink }) +
-      fill(smooth([[13, 44], [19, 46], [15, 52]], true), ACCENT),
+     The frame keeps its broken corner, because that gap is most of what makes
+     it read as drawn rather than printed, and it costs no pixels. The orange
+     box is filled rather than outlined: at 16px an outline is a ring with a
+     hole, which is a different shape. */
+
+  /* Two shapes. The most that survives 16px, and the reduction I would bet on. */
+  'icon-frame-box': () => {
+    const f = frame(ink);
+    return svg(f + fill(roughRect(21, 21, 23, 22, 5, { seed: 21, amp: 0.5 }), ACCENT), { bg: ground });
+  },
+
+  /* Three shapes: the orange box with one dark box under it, which hints at a
+     flow without drawing arrows. Riskier at 16, better at 32 and up. */
+  'icon-frame-flow': () => {
+    const f = frame(ink);
+    return svg(f +
+      fill(roughRect(21, 16, 23, 18, 5, { seed: 21, amp: 0.5 }), ACCENT) +
+      fill(roughRect(21, 39, 23, 15, 5, { seed: 23, amp: 0.5 }), ink),
+      { bg: ground });
+  },
+
+  /* No frame at all. A frame spends its pixels on the edge of the mark rather
+     than the middle of it; this spends them on the subject instead. */
+  'icon-two-boxes': () =>
+    svg(fill(roughRect(14, 10, 26, 20, 5, { seed: 31, amp: 0.6 }), ink) +
+      stroke(roughLine([27, 31], [27, 40], { seed: 33, amp: 0.8 }), { w: 5, color: ink }) +
+      fill(roughRect(14, 41, 26, 20, 5, { seed: 35, amp: 0.6 }), ACCENT),
       { bg: ground }),
 });
+
+/* The board's outline: marker weight, rounded, closed.
+
+   The logo leaves its frame open at one corner, which is most of what makes it
+   read as drawn. Reproducing that here by cutting the path short put the gap
+   wherever roundedPts happens to start — at the top, where an open rounded
+   square stops being a board and becomes a cup. The wobble carries the
+   hand-drawn character on its own at these sizes, so the frame is closed. */
+function frame(ink) {
+  return stroke(roughRect(7, 9, 50, 47, 10, { seed: 17, amp: 1.2 }), { w: 5.5, color: ink });
+}
 
 /* Each one twice: ink on paper, and paper on ink. A logo that works on only
    one ground is half a logo — every mark on the first sheet vanished against
