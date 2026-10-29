@@ -12,6 +12,7 @@ import { KINDS } from '../src/render/glyphs.js';
 import { scriptSteps, linesFor, lineStates, clickStep, tagReport } from '../src/board/script.js';
 import { frame, unionBox, litKeys } from '../src/board/camera.js';
 import { registeredAs } from '../src/doctor.js';
+import { lettering } from '../src/render/ink.js';
 import { upsertBlock, removeBlock, START, END, BLOCK } from '../src/agents-block.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1392,6 +1393,34 @@ test('the old name counts only where servers are registered', () => {
     'the name in history or counters is not something to clean up');
   assert.equal(JSON.stringify(real).includes('"handwave"'), true,
     'and a whole-file search would have said otherwise');
+});
+
+
+test('capitals, except where the spelling is the information', () => {
+  // prose is lettered, the way someone writes on a whiteboard
+  assert.equal(lettering('Local input data'), 'LOCAL INPUT DATA');
+  assert.equal(lettering('NCC reporting Kafka'), 'NCC REPORTING KAFKA');
+
+  /* An identifier is a string somebody has to type back exactly.
+     INVOICEBUILDERNCC has lost the humps that said where the words were. */
+  assert.equal(lettering('InvoiceBuilderNCC'), 'InvoiceBuilderNCC');
+  assert.equal(lettering('invoice_builder'), 'invoice_builder');
+  assert.equal(lettering('orders.created'), 'orders.created');
+  assert.equal(lettering('com.dhl.Invoices'), 'com.dhl.Invoices');
+  assert.equal(lettering('run()'), 'run()');
+  assert.equal(lettering('Map<String, Int>'), 'Map<String, Int>');
+
+  // per word, so a sentence naming one keeps both readings
+  assert.equal(lettering('writes to InvoiceBuilderNCC'), 'WRITES TO InvoiceBuilderNCC');
+
+  // a hyphen survives capitals with its boundary intact, so it is not protected
+  assert.equal(lettering('corrections-api'), 'CORRECTIONS-API');
+  // nor is a comparison, which is prose with a bracket in it
+  assert.equal(lettering('latency < 5ms'), 'LATENCY < 5MS');
+
+  // whitespace is preserved exactly: the label is still one string to measure
+  assert.equal(lettering('a  b'), 'A  B');
+  assert.equal(lettering(''), '');
 });
 
 console.log(`\n${n} passed`);

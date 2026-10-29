@@ -9,7 +9,7 @@
    ============================================================ */
 
 import { INK, MUTED, ACCENT, PANEL, PAPER } from './theme.js';
-import { roughLine, roughPoly, roughRect, roughEllipse, stroke, fill, text, arrowHead, hashSeed } from './ink.js';
+import { roughLine, roughPoly, roughRect, roughEllipse, stroke, fill, text, arrowHead, hashSeed, lettering } from './ink.js';
 import { backEdges } from './layout.js';
 
 const GAP = 8;             // breathing room between a box edge and its line
@@ -126,7 +126,7 @@ export function pill(cx, cy, label, {
   size = 10.5, bg = PANEL, fg = INK, border = INK, seed = 1, padX = 9, h = 19,
   weight = 700, spacing = 0.09,
 } = {}) {
-  const s = String(label).toUpperCase();
+  const s = lettering(label);
   const w = s.length * size * 0.62 + padX * 2;
   const d = roughRect(cx - w / 2, cy - h / 2, w, h, h / 2, { seed, amp: 0.6, step: 16 });
   return fill(d, bg) + stroke(d, { w: 1.2, color: border }) +

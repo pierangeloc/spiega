@@ -9,8 +9,7 @@
 import { INK, MUTED, SHADOW, ACCENT, bodyOf, mix } from './theme.js';
 import {
   roughRect, roughLine, roughEllipse, roughArc, roughPoly, roundedPts,
-  stroke, fill, text, hashSeed, wrapText,
-} from './ink.js';
+  stroke, fill, text, hashSeed, wrapText, lettering } from './ink.js';
 import { measureMath, drawMath } from './math.js';
 
 const SH_DX = 5, SH_DY = 6;          // the cast shadow sits down and to the left-ish
@@ -265,7 +264,7 @@ export function drawBoundary(b, box) {
   const { x, y, w, h } = box;
   const seed = hashSeed(b.id || b.label || 'b') % 100000;
   const d = roughRect(x, y, w, h, 16, { seed, amp: 1.4, step: 34 });
-  const lab = String(b.label || '').toUpperCase();
+  const lab = lettering(b.label || '');
   const tw = lab.length * 7.4 + 20;
   const tab = roughRect(x + 16, y - 11, tw, 22, 7, { seed: seed + 3, amp: 0.8 });
   return `<g class="boundary">` +

@@ -151,11 +151,36 @@ export function fill(d, color, { opacity = 1, extra = '' } = {}) {
     (opacity !== 1 ? ` opacity="${opacity}"` : '') + ` ${extra}/>`;
 }
 
+/* Labels are lettered in capitals, the way people write on a whiteboard —
+   except where the spelling is the information.
+
+   `InvoiceBuilderNCC` uppercased is `INVOICEBUILDERNCC`, and the humps that
+   told you where the words were are gone. The name of a class, a topic or a
+   table is not prose that happens to be capitalised; it is a string that has
+   to be typed back exactly, and flattening its case makes the board worse
+   than the sentence it replaced.
+
+   So the transform is per word, and a word is left exactly as written when it
+   carries a boundary that capitals would destroy: a lowercase letter followed
+   by a capital (`camelCase`, `InvoiceBuilderNCC`), an underscore
+   (`invoice_builder`), a dot (`orders.created`, `com.dhl.Invoices`), or the
+   punctuation of code (`::`, `()`, and angle brackets against a word, as in
+   `Map<String, Int>`). Hyphens are not on the list, on purpose:
+   `corrections-api` uppercases to `CORRECTIONS-API` with every boundary still
+   visible, so there is nothing to protect. Nor is a lone `<` with spaces
+   around it, which is someone writing "latency < 5ms", not a type. */
+const CODEY = /[a-z][A-Z]|_|\w\.\w|::|\(\)|\w[<>]|[<>]\w/;
+
+export const lettering = s => String(s)
+  .split(/(\s+)/)
+  .map(w => (CODEY.test(w) ? w : w.toUpperCase()))
+  .join('');
+
 export function text(x, y, s, {
   size = 13, color = INK, weight = 700, anchor = 'middle', spacing = 0.04,
   upper = false, family = null, opacity = 1, cls = 't',
 } = {}) {
-  const body = upper ? String(s).toUpperCase() : String(s);
+  const body = upper ? lettering(s) : String(s);
   return `<text class="${cls}" x="${f(x)}" y="${f(y)}" fill="${color}" font-size="${size}"` +
     ` font-weight="${weight}" text-anchor="${anchor}" letter-spacing="${spacing}em"` +
     (family ? ` font-family="${family}"` : '') +

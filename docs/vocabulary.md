@@ -28,6 +28,14 @@ MCP tool. Ops are applied in order and the board is their accumulation.
 Pass it when you will refer to the node in an edge, which is most of the time.
 Drawing the same `id` twice updates it rather than adding a second.
 
+**Write labels as you would say them, and identifiers as they are spelled.**
+Labels are lettered in capitals — except each word that carries a boundary
+capitals would destroy: `InvoiceBuilderNCC`, `invoice_builder`,
+`orders.created`, `run()`, `Map<String, Int>` are drawn exactly as written,
+while `Local input data` becomes `LOCAL INPUT DATA`. A label of both keeps
+both: `writes to InvoiceBuilderNCC` → `WRITES TO InvoiceBuilderNCC`. The same
+goes for edge labels and boundary labels.
+
 ## Node kinds
 
 Nine, each with its own drawing. An unknown kind falls back to `service`.
