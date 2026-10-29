@@ -218,15 +218,24 @@ async function call(name, args = {}) {
     case 'board_script': {
       const u = await url();
       const b = await (await fetch(u + '/state')).json();
-      const { scriptSteps } = await import('../board/script.js');
+      const { scriptSteps, tagReport } = await import('../board/script.js');
       const at = scriptSteps(b);
       if (!b.transcript.length) return 'nothing said yet';
       const rows = b.transcript.map((t, i) =>
         `${i + 1}. [${at[i] == null ? 'no step' : 'step ' + (at[i] + 1)}] ${t.text.replace(/\n/g, ' ')}`);
-      const loose = at.filter(x => x == null).length;
-      return `${rows.join('\n')}\n\n${b.transcript.length} lines, ${b.transcript.length - loose} tied to a step, ` +
-             `${b.flow.length} steps.` +
-             (loose && b.flow.length ? ' Lines with no step do not highlight; tag the ones that explain a single hop.' : '');
+      const r = tagReport(b);
+      const out = [rows.join('\n'), '',
+        `${r.lines} lines, ${r.tagged} tied to a step, ${r.steps} steps.`];
+      if (r.steps && !r.tagged) {
+        out.push('Nothing is tagged, so the rail highlights nothing. Tag the lines that explain a single hop.');
+      }
+      if (!r.ordered) {
+        out.push(`The tags run backwards at ${r.backwards.map(x => `line ${x.line} (step ${x.step} after step ${x.after})`).join(', ')}.`,
+          'The transcript shows what you said, in the order you said it, so those numbers read as jumbled. ' +
+          'If the flow is the spine of this explanation, say the remaining lines in step order. If a line is ' +
+          'not really about one hop, untie it with board_tag and step: null rather than leaving it mis-tagged.');
+      }
+      return out.join('\n');
     }
 
     case 'board_replay': {

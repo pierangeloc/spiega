@@ -41,10 +41,13 @@ Two things that are easy to get wrong and spoil the result:
 
 1. **Tag the lines that explain one step.** \`handwave say "..." --step 3\`, the
    number as it shows on the board. Walking the flow then lights those words
-   with that hop, and untagged lines highlight nothing at all. Tag every line
-   about a single step, and leave opening and closing remarks untagged — those
-   are about the whole board and should never dim. Fix it afterwards with
-   \`handwave script\` and \`handwave tag --match "..." --step N\`.
+   with that hop, and untagged lines highlight nothing at all. Tag a line
+   because it is about that hop, not because it mentions something the hop
+   touches; leave opening and closing remarks untagged. When the flow is the
+   spine of the explanation, say the lines in step order — the rail shows what
+   you said in the order you said it, so narrating by topic makes the step
+   numbers read as jumbled. \`handwave script\` checks both, and
+   \`handwave tag --match "..." --step N\` fixes it afterwards.
 2. **Never re-draw an explanation to show it again.** The board keeps its own
    log: \`handwave replay\` plays the whole session back, words and all.
 

@@ -384,15 +384,35 @@ const main = async () => {
       const url = await boardURL({ autostart: false });
       if (!url) die('handwave script: no board is running');
       const b = await (await fetch(url + '/state')).json();
-      const { scriptSteps } = await import('./board/script.js');
+      const { scriptSteps, tagReport } = await import('./board/script.js');
+      const { c, sym, pad, heading } = await import('./term.js');
+      const g = sym();
       const at = scriptSteps(b);
       if (!b.transcript.length) return void console.log('nothing said yet');
-      b.transcript.forEach((t, i) => {
-        const tag = at[i] == null ? '  \u2014  ' : ` ${String(at[i] + 1).padStart(2)}  `;
-        console.log(`${String(i + 1).padStart(3)}${tag}${t.text.replace(/\n/g, ' ').slice(0, 92)}`);
+
+      console.log(heading('handwave script'));
+      at.forEach((step, i) => {
+        const tag = step == null ? c.dim(` ${g.dot} `) : c.accent(` ${String(step + 1).padStart(2)}`);
+        const text = b.transcript[i].text.replace(/\n/g, ' ');
+        console.log(`  ${c.dim(String(i + 1).padStart(3))}${tag}  ${text.slice(0, 88)}`);
       });
-      const loose = at.filter(x => x == null).length;
-      console.log(`\n${b.transcript.length} lines, ${b.transcript.length - loose} tied to a step, ${b.flow.length} steps`);
+
+      const r = tagReport(b);
+      console.log(`\n  ${r.lines} lines ${c.dim(g.dot)} ${r.tagged} tied to a step ${c.dim(g.dot)} ${r.steps} steps`);
+      if (r.steps && r.tagged < r.lines && !r.tagged) {
+        console.log(`  ${c.dim('Nothing is tagged, so the rail highlights nothing. Tag the lines that explain one hop.')}`);
+      }
+      /* The rail shows what was said, in order. Tags that run backwards are
+         not a rendering fault, they are the narration order — worth saying,
+         because from the board it looks like a sort gone wrong. */
+      if (!r.ordered) {
+        const where = r.backwards.map(x => `line ${x.line} (step ${x.step} after step ${x.after})`).join(', ');
+        console.log(`  ${c.warn(g.warn)} ${c.plain('the tags run backwards:')} ${c.dim(where)}`);
+        console.log(`  ${c.dim('The rail shows what was said, in order, so the numbers will look jumbled.')}`);
+        console.log(`  ${c.dim('If the flow is the spine of this explanation, say the lines in step order;')}`);
+        console.log(`  ${c.dim(`otherwise untag the ones that are not about a single hop (${c.plain('handwave tag N --step off')}).`)}`);
+      }
+      console.log('');
       return;
     }
 

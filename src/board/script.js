@@ -90,3 +90,37 @@ export function clickStep(board, step) {
   if (!Number.isInteger(step) || step < 0 || step >= (board?.flow?.length || 0)) return undefined;
   return board?.active === step ? null : step;
 }
+
+/* Do the tags run forwards?
+
+   The rail shows what was said, in the order it was said, because that is what
+   a transcript is. So when a script is tagged 2, 1, 3, 3, 4, 3, 6 the step
+   numbers appear to jump — and nothing is sorting them wrongly; that is the
+   order the lines were spoken.
+
+   It means one of two things, and both are worth seeing. Either the
+   explanation is organised by topic while the flow is organised by time, in
+   which case the flow is not really the spine of it. Or lines are being tagged
+   because they mention something a step touches, rather than because they are
+   about that hop.
+
+   Reported, not corrected: reordering someone's transcript would be a lie
+   about the session, and the untagged lines have no place in step order
+   anyway. */
+export function tagReport(board) {
+  const at = scriptSteps(board);
+  const tagged = at.map((step, line) => ({ step, line })).filter(x => x.step != null);
+  const backwards = [];
+  for (let k = 1; k < tagged.length; k++) {
+    if (tagged[k].step < tagged[k - 1].step) {
+      backwards.push({ line: tagged[k].line + 1, step: tagged[k].step + 1, after: tagged[k - 1].step + 1 });
+    }
+  }
+  return {
+    lines: at.length,
+    tagged: tagged.length,
+    steps: board?.flow?.length || 0,
+    backwards,
+    ordered: backwards.length === 0,
+  };
+}

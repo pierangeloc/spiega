@@ -9,7 +9,7 @@ import { emptyBoard, applyOps } from '../src/board/state.js';
 import { renderSVG } from '../src/render/render.js';
 import { snapshotHTML } from '../src/board/snapshot.js';
 import { KINDS } from '../src/render/glyphs.js';
-import { scriptSteps, linesFor, lineStates, clickStep } from '../src/board/script.js';
+import { scriptSteps, linesFor, lineStates, clickStep, tagReport } from '../src/board/script.js';
 import { upsertBlock, removeBlock, START, END, BLOCK } from '../src/agents-block.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -321,6 +321,55 @@ test('clicking a line walks its step, and clicking it again comes back out', () 
   assert.equal(clickStep(b, -1), undefined);
   assert.equal(clickStep(b, NaN), undefined);
   assert.equal(clickStep(emptyBoard(), 0), undefined, 'a board with no flow has nowhere to go');
+});
+
+/* The rail shows what was said, in the order it was said. Tagged by topic
+   rather than in step order, the numbers come out jumbled — and that looks
+   like a sorting fault from the board, so it is worth saying out loud. */
+test('tags that run backwards are reported, not quietly reordered', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'step', edge: 'a>b', step: 'one' },
+    { op: 'step', edge: 'b>c', step: 'two' },
+    { op: 'step', edge: 'c>d', step: 'three' },
+    { op: 'say', text: 'opening' },
+    { op: 'say', text: 'about the second hop', step: 2 },
+    { op: 'say', text: 'about the first hop', step: 1 },     // backwards
+    { op: 'say', text: 'about the third hop', step: 3 },
+  ]);
+
+  const r = tagReport(b);
+  assert.equal(r.lines, 4);
+  assert.equal(r.tagged, 3);
+  assert.equal(r.steps, 3);
+  assert.equal(r.ordered, false);
+  assert.deepEqual(r.backwards, [{ line: 3, step: 1, after: 2 }],
+    'it should name the line, its step, and the step it came after');
+
+  // and the transcript is left exactly as it was said
+  assert.deepEqual(b.transcript.map(t => t.text),
+    ['opening', 'about the second hop', 'about the first hop', 'about the third hop']);
+
+  // narrated in order, there is nothing to report
+  const good = emptyBoard();
+  applyOps(good, [
+    { op: 'step', edge: 'a>b', step: 'one' },
+    { op: 'step', edge: 'b>c', step: 'two' },
+    { op: 'say', text: 'opening' },
+    { op: 'say', text: 'first', step: 1 },
+    { op: 'say', text: 'also first', step: 1 },   // same step twice is fine
+    { op: 'say', text: 'second', step: 2 },
+    { op: 'say', text: 'closing' },
+  ]);
+  const g = tagReport(good);
+  assert.equal(g.ordered, true, 'repeats and untagged asides are not disorder');
+  assert.deepEqual(g.backwards, []);
+
+  // nothing tagged at all is a different problem, and not this one
+  const bare = emptyBoard();
+  applyOps(bare, [{ op: 'step', edge: 'a>b', step: 'one' }, { op: 'say', text: 'hello' }]);
+  assert.equal(tagReport(bare).ordered, true);
+  assert.equal(tagReport(bare).tagged, 0);
 });
 
 /* Tagging after the fact. A model that forgot, or a board drawn before the

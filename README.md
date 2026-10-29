@@ -283,6 +283,12 @@ handwave tag --match "Flyway V25" --step 6
 handwave tag 1 --step off                    # an opening remark belongs to no step
 ```
 
+The rail shows what was said, in the order it was said. So a script narrated
+topic by topic, with each line tagged by whichever step it touches, comes out
+`2, 1, 3, 3, 4, 3, 6` — which looks like a sort gone wrong, though nothing
+sorted anything. `handwave script` says so when it happens, because from the
+board you cannot tell the difference between that and a bug.
+
 Nothing is ever placed by hand. Columns are derived from the edges — a node
 sits one column right of whatever points at it — so the agent draws a box, then
 the arrow into it, and the layout follows.

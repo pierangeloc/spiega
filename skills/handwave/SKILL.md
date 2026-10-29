@@ -126,8 +126,19 @@ the hop instead, which survives steps being added or reordered later.
 
 Three rules, and they are easy:
 
+0. **Say the lines in step order, when the flow is the spine.** The rail shows
+   what you said, in the order you said it. Explain the change topic by topic
+   while tagging each line with whatever step it touches, and the numbers come
+   out 2, 1, 3, 3, 4, 3, 6 — which reads as a sorting fault, though nothing
+   sorted anything. Walk the flow in order and narrate as you go.
+
 - A line about one hop of the flow gets that step's number. Do this for every
   such line, not some of them — a half-tagged script highlights unevenly.
+- **Tag a line because it is about that hop, not because it mentions something
+  the hop touches.** "Roles changed: only administrators may link now" is about
+  the change, not about the step where the link is written. An over-tagged
+  script is as unhelpful as an untagged one, and it is how tags end up out of
+  order.
 - An opening or closing remark — "six hops from the browser to the ledger",
   "the whole path is idempotent" — gets **no** tag. It is about the board as a
   whole and should never dim.
@@ -151,8 +162,10 @@ handwave tag --match "Flyway V25" --step 6   # by its words, which is what you a
 handwave tag 1 --step off                    # an opening remark belongs to no step
 ```
 
-`handwave script` is also the honest check on your own work: if it says most
-lines are tied to nothing, the person is reading an unlit rail.
+`handwave script` is also the honest check on your own work. If it says most
+lines are tied to nothing, the person is reading an unlit rail; if it says the
+tags run backwards, the script and the flow are telling two different stories
+and the reader has to reconcile them.
 
 ## Playing it back
 
