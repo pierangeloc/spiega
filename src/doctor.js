@@ -183,41 +183,74 @@ function startedAt(pid) {
   return Number.isFinite(t) ? t : null;
 }
 
+/* Our own processes in a `ps` listing, and whether each is running from this
+   checkout.
+
+   Matching on the checkout's full path was the first attempt, and it goes
+   blind the moment the directory is renamed: a board server started from the
+   old location stops matching and is reported as "none running on older
+   code" — a clean bill of health for the exact situation it exists to catch.
+   Match on the file, then say where it came from.
+
+   Exported, and taking the listing as an argument, so the cases that matter
+   can be tested without starting anything. */
+export function scanProcesses(psOutput, root) {
+  const out = { boards: [], mcp: [] };
+  for (const line of String(psOutput || '').split('\n')) {
+    if (line.includes('ps -Ao')) continue;
+    const pid = Number(line.trim().split(/\s+/)[0]);
+    if (!pid) continue;
+    const isMcp = /\/src\/mcp\/server\.js(?:\s|$)/.test(line);
+    // `cli.js serve`, and not some other subcommand that mentions the word
+    const isBoard = /\/src\/cli\.js\s/.test(line) && /\bserve\b/.test(line);
+    if (!isMcp && !isBoard) continue;
+    (isMcp ? out.mcp : out.boards).push({ pid, here: line.includes(`${root}/`) });
+  }
+  return out;
+}
+
 function processes(rows, headTime) {
   const ps = sh('ps', ['-Ao', 'pid=,command=']) || '';
-  const lines = ps.split('\n');
-  const find = needle => lines
-    .filter(l => l.includes(needle) && !l.includes('ps -Ao'))
-    .map(l => Number(l.trim().split(/\s+/)[0]))
-    .filter(Boolean);
+  const { boards, mcp } = scanProcesses(ps, ROOT);
 
-  const older = pids => pids.filter(p => {
-    const t = startedAt(p);
+  /* Stale means either of two things, and both leave an agent talking to code
+     that is not the code on disk: started before the current commit, or
+     started from somewhere that is no longer this checkout. */
+  const stale = list => list.filter(p => {
+    if (!p.here) return true;
+    const t = startedAt(p.pid);
     return t != null && headTime && t < headTime;
   });
 
-  /* Board servers. Naming the stale ones matters, because restarting one loses
-     its drawing — boards are in memory only — so this is a decision, not a
-     chore, and it should not be made by a blanket `stop --all`. */
-  const boards = older(find(path.join(ROOT, 'src', 'cli.js')).filter(() => ps.includes('serve')));
-  if (!boards.length) {
-    rows.push(ok('board server', 'none running on older code'));
+  const why = list => {
+    const moved = list.filter(p => !p.here).length;
+    const old = list.length - moved;
+    return [moved && `${moved} from a previous location`, old && `${old} older than the current commit`]
+      .filter(Boolean).join(', ');
+  };
+
+  /* Naming the stale boards matters, because restarting one loses its drawing
+     — boards are in memory only — so this is a decision, not a chore, and it
+     should not be made by a blanket `stop --all`. */
+  const oldBoards = stale(boards);
+  if (!oldBoards.length) {
+    rows.push(ok('board server', boards.length ? `${boards.length} running, all current` : 'none running'));
   } else {
     let names = [];
     try {
       const reg = JSON.parse(fs.readFileSync(path.join(HOME, '.spiega', 'boards.json'), 'utf8'));
-      names = Object.entries(reg).filter(([, b]) => boards.includes(b.pid)).map(([n]) => n);
+      const pids = new Set(oldBoards.map(p => p.pid));
+      names = Object.entries(reg).filter(([, b]) => pids.has(b.pid)).map(([n]) => n);
     } catch { /* a board from before the registry */ }
     rows.push(bad('board server',
-      `${boards.length} started before the current commit${names.length ? `: ${names.join(', ')}` : ''}`,
-      'spiega stop --board <name>, then draw again — note the drawing is lost (no persistence yet)'));
+      `${why(oldBoards)}${names.length ? `: ${names.join(', ')}` : ''}`,
+      'spiega stop --board <name>, then draw again \u2014 note the drawing is lost (no persistence yet)'));
   }
 
-  const mcp = find(MCP_ENTRY);
-  const staleMcp = older(mcp);
-  rows.push(staleMcp.length
-    ? bad('agent MCP server', `${mcp.length} running, ${staleMcp.length} started before the current commit`,
-        'start a fresh agent session — a running one keeps the server it launched')
+  const oldMcp = stale(mcp);
+  rows.push(oldMcp.length
+    ? bad('agent MCP server', `${mcp.length} running, ${why(oldMcp)}`,
+        'start a fresh agent session \u2014 a running one keeps the server it launched')
     : ok('agent MCP server', mcp.length ? `${mcp.length} running, all current` : 'none running'));
 }
 

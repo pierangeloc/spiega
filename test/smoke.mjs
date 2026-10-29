@@ -874,6 +874,36 @@ await atest('a board is named after the task, and a session keeps the one it has
   fs.rmSync(work, { recursive: true, force: true });
 });
 
+/* Finding our own processes. Matching on the checkout's full path goes blind
+   the moment the directory is renamed: a board server started from the old
+   location stops matching and is reported as "none running on older code" —
+   a clean bill of health for exactly the case the check exists to catch. */
+test('a process from a previous location is found, not reported as absent', async () => {
+  const { scanProcesses } = await import('../src/doctor.js');
+  const root = '/Users/x/projects/spiega';
+  const ps = [
+    `  101 node ${root}/src/mcp/server.js`,
+    `  102 node /Users/x/projects/drawing-explanation-tool/src/cli.js serve --quiet`,
+    `  103 node ${root}/src/cli.js serve --port 4778`,
+    `  104 node ${root}/src/cli.js draw {"op":"node"}`,     // not a server
+    `  105 node /somewhere/else/app.js serve`,              // not ours
+    `  106 ps -Ao pid=,command=`,                           // the listing itself
+    '',
+  ].join('\n');
+
+  const { boards, mcp } = scanProcesses(ps, root);
+  assert.deepEqual(mcp, [{ pid: 101, here: true }]);
+  assert.deepEqual(boards, [{ pid: 102, here: false }, { pid: 103, here: true }],
+    'the one from the old location must still be found, and marked as elsewhere');
+
+  // a one-off command is not a server, and neither is somebody else's process
+  assert.ok(!boards.some(b => b.pid === 104), 'cli.js draw is not a board server');
+  assert.ok(![...boards, ...mcp].some(p => p.pid === 105 || p.pid === 106));
+
+  assert.deepEqual(scanProcesses('', root), { boards: [], mcp: [] });
+  assert.deepEqual(scanProcesses(undefined, root), { boards: [], mcp: [] });
+});
+
 /* Editing one TOML table without eating the rest of the file.
    `[^[]*` stops at the bracket in `args = [...]` on the table's own second
    line, orphaning everything after it. That corrupted a real config on this
