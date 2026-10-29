@@ -1016,6 +1016,50 @@ test('a formula node renders on the board, and the snapshot stays standalone', (
   assert.ok(html.includes('\u03c1'), 'and it still renders there');
 });
 
+/* A loop. The model says "back to the one I already drew" by naming its id;
+   nothing else should be needed, and the layout has to make that read as a
+   loop rather than as a line with a long arrow home. */
+test('a cycle keeps its order, and the closing edge goes round', async () => {
+  const { assign, backEdges } = await import('../src/render/layout.js');
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'node', id: 'ref', label: 'Setpoint' }, { op: 'node', id: 'sum', label: 'Error' },
+    { op: 'node', id: 'ctrl', label: 'Controller' }, { op: 'node', id: 'plant', label: 'Plant' },
+    { op: 'node', id: 'sensor', label: 'Sensor' },
+    { op: 'edge', from: 'ref', to: 'sum' }, { op: 'edge', from: 'sum', to: 'ctrl' },
+    { op: 'edge', from: 'ctrl', to: 'plant' }, { op: 'edge', from: 'plant', to: 'sensor' },
+    { op: 'edge', from: 'sensor', to: 'sum' },
+  ]);
+
+  assert.deepEqual([...backEdges(b.nodes, b.edges)], ['sensor>sum'],
+    'the edge that closes the loop is the one set aside');
+
+  /* Before this, resolving the junction recursed round the loop, placed it
+     provisionally, then overwrote that with a column derived from the
+     feedback edge — so it landed at the far right, after the sensor. */
+  const place = assign(b);
+  assert.equal(place.sum.col, 1, `the junction belongs after the setpoint, got ${place.sum.col}`);
+  assert.deepEqual(['ref', 'sum', 'ctrl', 'plant', 'sensor'].map(id => place[id].col), [0, 1, 2, 3, 4],
+    'the signal path reads left to right');
+
+  // and the closing edge leaves the row rather than crossing it
+  const r = renderSVG(b);
+  const loop = r.planned.find(p => p.key === 'sensor>sum');
+  assert.ok(loop.back, 'it is marked as closing the loop');
+  const lowest = Math.max(...Object.values(r.boxes).map(x => x.y + x.h));
+  assert.ok(Math.max(...loop.pts.map(p => p[1])) > lowest,
+    'the return path runs below every box, not through them');
+
+  // a board with no cycle is untouched
+  const plain = emptyBoard();
+  applyOps(plain, [
+    { op: 'node', id: 'a', label: 'A' }, { op: 'node', id: 'b', label: 'B' },
+    { op: 'edge', from: 'a', to: 'b' },
+  ]);
+  assert.equal(backEdges(plain.nodes, plain.edges).size, 0);
+  assert.equal(renderSVG(plain).planned[0].back, false);
+});
+
 /* A label joined to a point by a leader line. Every other label on the board
    is attached to what it names, which leaves no way to say something *about*
    a thing without crowding it. */

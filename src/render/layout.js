@@ -65,10 +65,47 @@ export function sizeOf(n) {
    repeatedly pass nothing and let this recompute — it is cheap, and resolving
    in insertion order is already stable. The parameter is for pinning a layout
    deliberately, which is not what rendering wants. */
+/* The edges that close a loop.
+
+   A column here means "downstream of": a node sits one to the right of
+   whatever points at it. A cycle has no such order, so one edge in it has to
+   be set aside before the rest can be laid out — the back edge, found the
+   standard way, by depth-first search marking any edge that reaches a node
+   still on the stack.
+
+   Without this a feedback loop lays out backwards. Resolving the summing
+   junction recursed around the loop, hit the cycle guard, placed the junction
+   provisionally at column 0, and then the outer call overwrote that with a
+   column computed *from the feedback edge* — so the junction landed after the
+   sensor, at the far right, and the loop read as a straight line with a long
+   arrow home. */
+export function backEdges(nodes, edges) {
+  const out = {};
+  for (const e of edges || []) (out[e.from] ||= []).push(e);
+  const state = {};                       // undefined | 1 visiting | 2 done
+  const back = new Set();
+
+  const visit = id => {
+    state[id] = 1;
+    for (const e of out[id] || []) {
+      if (state[e.to] === 1) back.add(`${e.from}>${e.to}`);   // reaches the stack
+      else if (state[e.to] === undefined) visit(e.to);
+    }
+    state[id] = 2;
+  };
+  for (const n of nodes || []) if (state[n.id] === undefined) visit(n.id);
+  return back;
+}
+
 export function assign(spec, placed = {}) {
   const byId = Object.fromEntries(spec.nodes.map(n => [n.id, n]));
+  const back = backEdges(spec.nodes, spec.edges);
   const incoming = {};
-  for (const e of spec.edges || []) (incoming[e.to] ||= []).push(e.from);
+  // a back edge says nothing about which column its target belongs in
+  for (const e of spec.edges || []) {
+    if (back.has(`${e.from}>${e.to}`)) continue;
+    (incoming[e.to] ||= []).push(e.from);
+  }
 
   // Explicit placement wins, then "right of X" / "below X", then the flow.
   const resolve = (n, guard = new Set()) => {

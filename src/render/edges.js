@@ -10,6 +10,7 @@
 
 import { INK, MUTED, ACCENT, PANEL, PAPER } from './theme.js';
 import { roughLine, roughPoly, roughRect, roughEllipse, stroke, fill, text, arrowHead, hashSeed } from './ink.js';
+import { backEdges } from './layout.js';
 
 const GAP = 8;             // breathing room between a box edge and its line
 const FAN = 0.52;          // how much of a side's length the fan may spread over
@@ -42,11 +43,18 @@ function sidePoint(box, side, t = 0) {
    never cross each other on the way out. */
 export function planEdges(edges, boxes) {
   const groups = {};
+  /* An edge that closes a loop leaves the row and comes back underneath it,
+     because that is what a loop looks like. Routed like any other edge it
+     would run right-to-left straight through every box between its ends. */
+  const back = backEdges(Object.keys(boxes).map(id => ({ id })), edges);
+  const floor = Math.max(0, ...Object.values(boxes).map(b => b.y + b.h)) + 46;
+
   const rec = edges.map(e => {
     const a = boxes[e.from], b = boxes[e.to];
     if (!a || !b) return null;
-    const [sa, sb] = sides(a, b);
-    const r = { e, a, b, sa, sb, key: edgeKey(e) };
+    const isBack = back.has(`${e.from}>${e.to}`);
+    const [sa, sb] = isBack ? ['bottom', 'bottom'] : sides(a, b);
+    const r = { e, a, b, sa, sb, key: edgeKey(e), back: isBack, floor };
     (groups[`${e.from}|${sa}`] ||= []).push({ r, end: 'a' });
     (groups[`${e.to}|${sb}`]   ||= []).push({ r, end: 'b' });
     return r;
@@ -71,9 +79,14 @@ export function planEdges(edges, boxes) {
   return rec;
 }
 
-function route({ a, b, sa, sb, ta = 0, tb = 0, e }) {
+function route({ a, b, sa, sb, ta = 0, tb = 0, e, back, floor }) {
   const A = sidePoint(a, sa, ta);
   const B = sidePoint(b, sb, tb);
+
+  /* Down, back along the floor, and up into the target: the shape every
+     control diagram uses for feedback, and the reason the loop reads as one. */
+  if (back) return [A, [A[0], floor], [B[0], floor], B];
+
   const horiz = sa === 'left' || sa === 'right';
 
   if (e.bend === 'straight' || Math.abs(horiz ? A[1] - B[1] : A[0] - B[0]) < 2) {

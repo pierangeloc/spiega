@@ -128,6 +128,13 @@ so a board drawn incrementally does not reshuffle under the reader.
 Notes are the exception — they have no edges, so they go in a margin column of
 their own, left of everything.
 
+**Loops work, and need nothing special.** Point an edge back at a node already
+drawn — `{"from":"sensor","to":"sum"}` — and that *is* the statement "the same
+one, not a new one". The edge that closes the cycle is set aside when columns
+are worked out, so the signal path still reads left to right, and it is routed
+below the row and up into its target, which is what a loop looks like. Retries,
+reconciliation, sagas and control loops all come out this way.
+
 When the derived layout is wrong, three escape hatches exist, in the order the
 layout consults them:
 
