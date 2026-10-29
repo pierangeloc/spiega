@@ -76,6 +76,9 @@ spiega draw '{"op":"note","label":"idempotency key\nlives 24h"}'
 # an enclosure around things that share a trust zone or a deployment
 spiega draw '{"op":"boundary","label":"our VPC","members":["gw","orders","db"]}'
 
+# a remark about one thing, on a leader line pointing at it
+spiega draw '{"op":"callout","at":"gw>orders","label":"retried 3 times"}'
+
 # an async hop: drawn as a dashed line
 spiega draw '{"op":"edge","from":"orders","to":"bus","label":"publish","async":true}'
 

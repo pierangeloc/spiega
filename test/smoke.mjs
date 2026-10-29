@@ -1016,6 +1016,67 @@ test('a formula node renders on the board, and the snapshot stays standalone', (
   assert.ok(html.includes('\u03c1'), 'and it still renders there');
 });
 
+/* A label joined to a point by a leader line. Every other label on the board
+   is attached to what it names, which leaves no way to say something *about*
+   a thing without crowding it. */
+test('a callout points at a node or an edge, and the canvas grows to hold it', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'node', id: 'gw', kind: 'gateway', label: 'Gateway' },
+    { op: 'node', id: 'db', kind: 'datastore', label: 'Postgres' },
+    { op: 'edge', from: 'gw', to: 'db', label: 'SQL' },
+  ]);
+  const plain = renderSVG(b);
+
+  applyOps(b, [
+    { op: 'callout', at: 'gw>db', label: 'retried 3 times' },
+    { op: 'callout', at: 'gw', side: 'above', label: 'the only hop that authenticates' },
+  ]);
+  const withCallouts = renderSVG(b);
+
+  assert.equal(withCallouts.callouts.length, 2, 'both are planned');
+  assert.ok(withCallouts.svg.includes('data-callout='), 'and drawn');
+  assert.ok(withCallouts.svg.includes('retried 3 times'));
+
+  // a label above the top row falls outside the nodes' bounds, so the canvas
+  // has to grow and the content shift, or it is simply cropped away
+  assert.ok(withCallouts.height > plain.height,
+    `a callout above the board must make room: ${plain.height} -> ${withCallouts.height}`);
+  for (const p of withCallouts.callouts) {
+    assert.ok(Number.isFinite(p.cx) && Number.isFinite(p.cy), 'a callout needs a position');
+    assert.ok(Number.isFinite(p.tip.x) && Number.isFinite(p.tip.y), 'and something to point at');
+  }
+
+  // an edge callout must not land on the edge's own label, which sits at the
+  // middle of the same segment
+  const edgeCall = withCallouts.callouts.find(p => p.c.at === 'gw>db');
+  const route = withCallouts.planned.find(r => r.key === 'gw>db');
+  const mid = [(route.pts[0][0] + route.pts[route.pts.length - 1][0]) / 2,
+               (route.pts[0][1] + route.pts[route.pts.length - 1][1]) / 2];
+  assert.ok(Math.hypot(edgeCall.tip.x - mid[0], edgeCall.tip.y - mid[1]) > 8,
+    'the leader must not point through the edge tag');
+
+  // pointing at nothing draws nothing, rather than throwing
+  const c = emptyBoard();
+  applyOps(c, [{ op: 'node', id: 'a', label: 'A' }, { op: 'callout', at: 'nope', label: 'x' }]);
+  assert.equal(renderSVG(c).callouts.length, 0, 'a callout with no target is dropped');
+});
+
+test('removing a node takes its callouts with it', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'node', id: 'a', label: 'A' }, { op: 'node', id: 'b', label: 'B' },
+    { op: 'edge', from: 'a', to: 'b' },
+    { op: 'callout', at: 'a', label: 'about A' },
+    { op: 'callout', at: 'a>b', label: 'about the hop' },
+    { op: 'callout', at: 'b', label: 'about B' },
+  ]);
+  assert.equal(b.callouts.length, 3);
+  applyOps(b, [{ op: 'remove', id: 'a' }]);
+  assert.deepEqual(b.callouts.map(c => c.label), ['about B'],
+    'a callout pointing at something gone has nothing to say');
+});
+
 /* Editing one TOML table without eating the rest of the file.
    `[^[]*` stops at the bracket in `args = [...]` on the table's own second
    line, orphaning everything after it. That corrupted a real config on this

@@ -13,6 +13,7 @@ export const emptyBoard = () => ({
   edges: [],
   boundaries: [],
   flow: [],
+  callouts: [],
   transcript: [],
   active: null,
   placed: {},        // sticky column/row assignments — see render/layout.js
@@ -112,6 +113,17 @@ export function applyOp(board, op) {
       break;
     }
 
+    /* A label joined to a point by a leader line — "this edge, here, is the
+       retried one". Every other label on the board is attached to the thing it
+       names, which leaves no way to say something *about* a thing without
+       crowding it. */
+    case 'callout': {
+      const c = { ...op }; delete c.op;
+      c.id = c.id || `callout-${(c.at || '').replace(/[^a-z0-9]+/gi, '-')}-${board.callouts.length}`;
+      if (upsert(board.callouts, c)) fresh.boundaries.push(c.id);
+      break;
+    }
+
     case 'boundary': {
       const b = { ...op }; delete b.op;
       b.id = b.id || (b.label || 'b').toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -139,6 +151,9 @@ export function applyOp(board, op) {
       board.nodes = board.nodes.filter(n => n.id !== id);
       board.edges = board.edges.filter(e => e.from !== id && e.to !== id && edgeId(e) !== id);
       board.boundaries = board.boundaries.filter(b => b.id !== id);
+      // a callout pointing at something that is gone has nothing to say
+      board.callouts = board.callouts.filter(c => c.id !== id && c.at !== id
+        && !String(c.at || '').split('>').includes(id));
       delete board.placed[id];
       break;
     }

@@ -14,6 +14,7 @@ MCP tool. Ops are applied in order and the board is their accumulation.
 | `note` | your own handwriting, in the left margin | `label` (`\n` for line breaks) |
 | `edge` | a labelled line between two boxes | `from` `to` `label` `async` |
 | `boundary` | a dashed enclosure around several boxes | `label` `members[]` |
+| `callout` | a label joined to a point by a leader line | `at` `label` `side` |
 | `step` | one numbered hop of the flow | `edge` `step` `lights[]` |
 | `flow` | replace the whole flow at once | `steps[]` |
 | `say` | a line of the script, beside the drawing | `text` `step` \| `edge` |
@@ -51,6 +52,25 @@ Three fields only some kinds read:
 | `sub` | all but `note` | a second, smaller line under the label |
 | `replicas` | `compute` | how many boxes are stacked |
 | `depth` | `queue` | how many slots are drawn filled |
+
+## Saying something *about* a thing
+
+Every other label is attached to what it names — inside a box, or riding on an
+edge. A `callout` is the exception: the words sit in clear space and a thin
+line points at what they are about.
+
+```json
+{"op":"callout","at":"gw>orders","label":"retried 3 times, then dead-lettered"}
+{"op":"callout","at":"db","side":"below","label":"the only durable thing here"}
+```
+
+`at` is a node id or an edge (`from>to`). `side` is `below` (the default),
+`above`, `left` or `right`. There are **no coordinates** — the point is
+derived, and the canvas grows if a label falls outside the board.
+
+Use it for the caveat that would otherwise be crammed into an edge label, or
+exiled to a note that points at nothing. A callout dims with its target when
+another step is lit, because it is part of what that step means.
 
 ## Mathematics
 

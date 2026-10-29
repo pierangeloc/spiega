@@ -10,6 +10,7 @@ import { PAPER, INK, MUTED, ACCENT, PANEL, handFilter } from './theme.js';
 import { roughRect, stroke, fill, text, hashSeed } from './ink.js';
 import { drawNode, drawBoundary } from './glyphs.js';
 import { drawEdge, planEdges, edgeKey } from './edges.js';
+import { planCallouts, drawCallout } from './callout.js';
 import { assign, layout, boundaryBox } from './layout.js';
 
 /* Flow steps may name an edge ("gw>orders") and/or nodes to light. Numbering
@@ -52,7 +53,20 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   const { stepOf, steps } = indexFlow(spec);
   const focus = focusAt(spec, steps, active);
 
-  const W = width + margin * 2, H = height + margin * 2;
+  /* Callouts are planned before the canvas is sized, because a label can sit
+     outside the nodes' bounds and would otherwise be cropped. Whatever falls
+     past an edge becomes extra canvas, and content shifts to make room. */
+  const calls = planCallouts(spec.callouts, boxes, planEdges(edges, boxes));
+  let padL = 0, padT = 0, extraR = 0, extraB = 0;
+  for (const p of calls) {
+    padL = Math.max(padL, -(p.box.x - 10));
+    padT = Math.max(padT, -(p.box.y - 10));
+    extraR = Math.max(extraR, p.box.x + p.box.w + 10 - width);
+    extraB = Math.max(extraB, p.box.y + p.box.h + 10 - height);
+  }
+  padL = Math.max(0, padL); padT = Math.max(0, padT);
+  const W = width + padL + Math.max(0, extraR) + margin * 2;
+  const H = height + padT + Math.max(0, extraB) + margin * 2;
   const k = Math.max(0.7, Math.min(2.2, Math.sqrt(W * H) / 760));
 
   let body = '';
@@ -89,13 +103,20 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   // The wobble already lives in the path data (render/ink.js), so the filter is
   // only ever grain. On a live board that redraws while it animates, the grain
   // is cheaper as a CSS overlay — see board/board.html — so `hand` is off there.
+  for (const p of calls) {
+    const key = String(p.c.at || '');
+    const state = !focus ? 'idle'
+      : (focus.edges.has(key) || focus.nodes.has(key)) ? 'lit' : 'dim';
+    body += drawCallout(p, { state });
+  }
+
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">` +
     (hand ? `<defs>${handFilter(k)}</defs>` : '') +
-    `<g${hand ? ' filter="url(#hand)"' : ''} transform="translate(${margin} ${margin})">${body}</g>` +
+    `<g${hand ? ' filter="url(#hand)"' : ''} transform="translate(${margin + padL} ${margin + padT})">${body}</g>` +
     `</svg>`;
 
-  return { svg, width: W, height: H, boxes, place, steps, stepOf, planned };
+  return { svg, width: W, height: H, boxes, place, steps, stepOf, planned, callouts: calls };
 }
 
 export { edgeKey };
