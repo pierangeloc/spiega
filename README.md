@@ -97,30 +97,6 @@ keeps files current; it cannot do anything about processes already running.
 Then ask for something architectural — "walk me through how X talks to Y, on
 the board" — and watch the pane.
 
-### Coming from handwave
-
-This was called `handwave` until it wasn't — the word means *baseless, skipping
-the hard part*, which is the opposite of the point. One command moves a machine
-over, and it is safe to run twice:
-
-```bash
-spiega migrate     # old state dir, skills, MCP entries, AGENTS.md blocks
-spiega install     # register under the new name
-npm unlink -g handwave
-```
-
-`HANDWAVE_BOARD`, `HANDWAVE_URL` and `HANDWAVE_SESSION` still work alongside
-their `SPIEGA_` equivalents, and `~/.handwave` is left as a link to
-`~/.spiega`, because a process that started before the rename has the old path
-compiled into it — an MCP server from a session that began minutes ago would
-otherwise register boards where the new command cannot see them. Run
-`spiega migrate` again once those sessions have ended and it removes the link.
-**Restart your agent sessions**: they also hold the old command name, which is
-gone from PATH. If you
-bound a herdr key to `handwave.board.focus`, change it to `spiega.board.focus`
-— `migrate` says so rather than editing your config. `spiega doctor` reports
-anything the old name left behind.
-
 ### Updating, and checking that it took
 
 ```bash
