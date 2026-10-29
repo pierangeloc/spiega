@@ -28,6 +28,15 @@ spiega draw '{"op":"title","text":"Placing an order"}'
 
 That starts a board if none is running and prints its URL.
 
+If an MCP server named spiega is available, prefer its tools over the CLI
+throughout: they do the same things and do not depend on `spiega` being on
+PATH, which in an agent's tool shell it frequently is not — installed under
+nvm it exists only in shells that source nvm's init. If `spiega` is missing
+and there is no MCP server either, **say so in one line** and carry on in
+prose. Do not fall back silently: a board that could not be opened looks
+exactly like one you never considered, and the person has no way to tell the
+difference or to fix it.
+
 Then give it a window, once, at the start:
 
 ```bash

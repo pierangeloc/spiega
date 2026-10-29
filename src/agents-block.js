@@ -69,8 +69,11 @@ Two things that are easy to get wrong and spoil the result:
 2. **Never re-draw an explanation to show it again.** The board keeps its own
    log: \`spiega replay\` plays the whole session back, words and all.
 
-\`spiega help\` lists the rest. If an MCP server named spiega is available,
-its tools do the same things and are cheaper than shelling out.`;
+\`spiega help\` lists the rest. **If an MCP server named spiega is available,
+prefer its tools**: they do the same things, cost less than shelling out, and
+do not depend on \`spiega\` being on PATH — which in an agent's tool shell it
+often is not. If neither route works, say so in one line. A board that could
+not be opened looks exactly like one you never thought of.`;
 
 /* Put the block in a file, or update the one already there.
 

@@ -125,14 +125,27 @@ const agentsFile = file => {
 /* ---------- targets ---------- */
 
 export const TARGETS = {
+  /* The MCP server is not a nicety here, it is the only reliable route.
+     Claude Code had the skill alone for a while, which meant the only way to
+     actually draw was to shell out to `spiega` — and the CLI lives wherever
+     npm put it, which with nvm is a directory that exists on PATH only in
+     shells that source nvm's init. An agent's tool shell is not one. The
+     observed failure is worse than it sounds: the skill loads, the agent
+     decides to draw, `command -v spiega` fails, and it falls back to prose
+     without saying anything, which is indistinguishable from never having
+     considered the board at all. MCP is launched by the harness with its own
+     environment and an absolute entry path, so it does not care. */
   claude: {
-    what: 'Claude Code — skill',
+    what: 'Claude Code — skill and MCP server',
     app: 'Claude Code',
-    gets: 'skill',
+    gets: 'skill, MCP',
     detect: () => fs.existsSync(path.join(HOME, '.claude')),
     run: () => {
-      const [where, note] = linkSkill(path.join(HOME, '.claude', 'skills'));
-      return [where, `${note}; restart Claude Code to pick it up`];
+      const parts = [
+        linkSkill(path.join(HOME, '.claude', 'skills')),
+        mcpJSON(path.join(HOME, '.claude.json'), 'mcpServers', STDIO()),
+      ];
+      return [parts[0][0], `skill, MCP server; restart Claude Code to pick it up`, combine(parts)];
     },
   },
 

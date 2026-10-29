@@ -146,6 +146,7 @@ function blocks(rows) {
 const readJSON = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 const MCP_FILES = [
+  ['claude', path.join(HOME, '.claude.json'), c => c?.mcpServers?.spiega?.args?.[0]],
   ['opencode', path.join(HOME, '.config', 'opencode', 'opencode.json'), c => c?.mcp?.spiega?.command?.[1]],
   ['gemini', path.join(HOME, '.gemini', 'settings.json'), c => c?.mcpServers?.spiega?.args?.[0]],
   ['copilot', path.join(HOME, '.copilot', 'mcp-config.json'), c => c?.mcpServers?.spiega?.args?.[0]],
