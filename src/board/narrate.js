@@ -11,14 +11,22 @@
    step, the board walks to that step as the line begins, so the picture and
    the words move together without either leading the other.
 
-   It is synthesised, not recorded. The reference does the same — no audio
-   files, just per-word spans and the browser's own voice — which is what
-   makes this possible with no key, no network and no dependency.
+   It is synthesised here, and that is a real difference from the reference,
+   which ships pre-generated audio files with per-word timings as data and
+   drives the highlight from `currentTime`. That buys a voice of any quality,
+   true seeking, and exact word sync — and it costs a build step, because the
+   audio has to exist before the page does.
 
-   The machinery that makes the highlight work is `onboundary`: as the
-   synthesiser speaks it reports the character offset it has reached, and
-   since the spans were built from the very string handed to it, an offset
-   maps straight to a word.
+   A board has no build step to put it in. Its lines are written by an agent
+   seconds before they are heard, so synthesis at the moment of speaking is
+   not a shortcut here, it is the only thing that fits. What it costs: the
+   voice is whatever the browser has, seeking is impossible, and changing
+   speed restarts the sentence.
+
+   The highlight therefore comes from `onboundary`: as the synthesiser speaks
+   it reports the character offset it has reached, and since the spans were
+   built from the very string handed to it, an offset maps straight to a word.
+   Coarser than shipped timings, and free.
 
    Three traps in the Web Speech API, each worth an afternoon:
 
