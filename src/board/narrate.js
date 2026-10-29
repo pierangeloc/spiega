@@ -86,6 +86,21 @@ export function wordAt(starts, offset) {
 
 const GOOD = /siri|samantha|alex|daniel|serena|karen|moira|google (uk|us)/i;
 
+/* The silences.
+
+   A tape with no gaps in it reads as a machine working through a list. The
+   one that matters is the gap at a step change: the board moves there, and
+   talking over a picture that is still arriving means nobody looks at either.
+   So the camera moves, there is a beat to let the eye land, and then the
+   words. Within a step the lines are one thought continuing, and want only
+   the breath a speaker would take.
+
+   Both scale with rate, because a pause is a length of speech and not a
+   length of time: at 1.5x the words come faster, and a fixed gap starts to
+   sound like the tape has stopped. */
+const LINE_GAP = 420;     // ms between two lines of the same step
+const STEP_GAP = 1250;    // ms when the next line belongs to a different step
+
 export function createNarrator({ onState = () => {} } = {}) {
   const synth = typeof speechSynthesis !== 'undefined' ? speechSynthesis : null;
 
@@ -176,6 +191,10 @@ export function createNarrator({ onState = () => {} } = {}) {
     });
   }
 
+  /* A silence that can be interrupted. Resolves false if the tape moved on
+     while it was waiting, which is what a pause pressed mid-gap looks like. */
+  const hush = (ms, mine) => new Promise(r => setTimeout(() => r(mine === token), ms));
+
   async function run(from) {
     const mine = ++token;
     playing = true;
@@ -183,7 +202,15 @@ export function createNarrator({ onState = () => {} } = {}) {
       if (mine !== token) return;
       index = k;
       announce();
+      /* onStart first, then the pause: the board moves, you get a beat to
+         look at what moved, and the words arrive to a picture that has
+         settled. The other order spends the silence on the old picture and
+         then cuts to the new one mid-sentence. */
       sections[k].onStart?.();
+      if (k !== from) {
+        const turning = sections[k].step != null && sections[k].step !== sections[k - 1].step;
+        if (!await hush((turning ? STEP_GAP : LINE_GAP) / rate, mine)) return;
+      }
       const finished = await speak(sections[k], mine);
       if (mine !== token) return;
       if (!finished) break;
