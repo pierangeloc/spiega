@@ -21,13 +21,31 @@ export const END = '<!-- SPIEGA_END -->';
 
 /* Short on purpose. This sits in a file the agent reads on every single turn,
    so it buys its place in tokens: when to draw, the two rules that are easy to
-   get wrong, and where the detail lives. */
+   get wrong, and where the detail lives.
+
+   The opening is the part that decides whether any of the rest is ever read,
+   and it is written against two observed failures. The first: a trigger
+   phrased as a topic ("when you are explaining how a system works") does not
+   fire during a coding session, because the agent is explaining the thing it
+   just built and that does not feel like the category. So the trigger is a
+   countable property of the answer instead, which can be checked while
+   writing it. The second: the instruction said *draw*, which is expensive
+   mid-task, and offered no cheaper move — so the choice was all or nothing
+   and nothing kept winning. Offering costs a line, and is the move the person
+   cannot make, since nothing on their screen says a board was an option. */
 export const BLOCK = `## spiega — draw while you explain
 
-When you are explaining how a system works — a request path, a comparison, a
-review, "how does X talk to Y" — draw it on the spiega board as you talk,
-rather than writing a wall of prose. Boxes and lines arrive beside your words
-and the person watches the picture build.
+Draw on the spiega board as you talk, rather than writing a wall of prose,
+whenever the answer has **three or more named things and the relationships
+between them** — a request path, a comparison, a review, "how does X talk to
+Y". That test is checkable mid-sentence; "would a picture help here" is not,
+and loses to whatever you were already doing. Not for a yes/no, a single file,
+or anything you can say in three lines.
+
+**Nobody has to ask you first.** If a board feels like a detour mid-task, do
+not drop it silently — finish the thought and offer in one line: *want this on
+the board?* The person cannot make that offer themselves, because nothing on
+their screen says drawing was an option.
 
 - \`spiega open\` once, early, so there is something to watch.
 - Draw a few things at a time, as you explain them, never the whole diagram in

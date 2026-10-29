@@ -221,6 +221,12 @@ explanation was worth keeping; do not save one every time.
 - **A board earns its place or it does not get drawn.** Three boxes and two
   arrows that make a dependency obvious: yes. A restatement of a list you just
   wrote: no. If the words are already clear, skip the board and say so.
+- **You do not wait to be asked.** The test is a countable one — three or more
+  named things and the relationships between them — and it is yours to apply
+  while you are writing the answer, not the person's to apply before it. If
+  drawing genuinely is a detour, say so in one line and offer: *want this on
+  the board?* A silent skip decides for them, and they cannot decide
+  otherwise, because nothing on their screen says a board was an option.
 - **Fewer boxes.** Eight or ten is a board someone can hold in their head.
   Twenty is a map, and a map is a different, worse answer to "how does this
   work". Draw the part under discussion, not the system.

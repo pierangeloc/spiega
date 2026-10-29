@@ -22,6 +22,16 @@ them. `spiega install` writes whichever apply.
 | **`AGENTS.md` block** | opencode, Codex, Gemini CLI | a condensed version: when to draw, the two rules, where the detail is |
 | **MCP tool descriptions** | anything speaking MCP | per-call guidance, attached to the tool it is about |
 
+The three are not interchangeable, and the difference decides whether the
+agent ever draws unprompted. **A skill file is a retrieval key**: the agent
+reads its one-line description, and loads the rest only once it has already
+decided this looks like a drawing task. It cannot make the agent consider
+drawing, because it is not in the room until the agent goes looking for it.
+**The `AGENTS.md` block is standing context** — present on every turn, whether
+or not the agent went looking. Proactive use lives or dies there, which is why
+the block carries a trigger the agent can check against the answer it is
+already writing, and an instruction to *offer* when drawing would be a detour.
+
 A skill is linked, not copied, so it tracks the checkout. An `AGENTS.md` block
 is text inside a file you wrote, so it sits between `<!-- SPIEGA_START -->` and
 `<!-- SPIEGA_END -->` and a reinstall replaces it in place. Tool descriptions
@@ -36,8 +46,11 @@ turn, so it buys its place in tokens.
 
 Summarised so you know whether to go and read it, not so you can avoid doing so:
 
-- **When to draw.** Explaining how a system works — a request path, a
-  comparison, a review, "how does X talk to Y". Not for everything.
+- **When to draw.** Three or more named things and the relationships between
+  them — a request path, a comparison, a review, "how does X talk to Y". Not
+  for a yes/no, a single file, or anything sayable in three lines.
+- **Without being asked**, and when drawing would be a detour, *offer* in one
+  line rather than skipping silently.
 - **Draw a few things at a time**, as you explain them, never the whole diagram
   in one call. A board that appears finished was not explained.
 - **You never place anything.** Columns come from the edges.
