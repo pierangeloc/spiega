@@ -53,7 +53,13 @@ const SYMBOLS = {
   sum: '∑', prod: '∏', int: '∫', partial: '∂', nabla: '∇',
   infty: '∞', deg: '°', ldots: '…', cdots: '⋯',
   to: '→', rightarrow: '→', leftarrow: '←', Rightarrow: '⇒', implies: '⇒',
-  in: '∈', subset: '⊂', forall: '∀', exists: '∃',
+  in: '∈', notin: '∉', subset: '⊂', subseteq: '⊆', supset: '⊃',
+  cup: '∪', cap: '∩', emptyset: '∅', forall: '∀', exists: '∃',
+  oint: '∮', iint: '∬', iiint: '∭', oplus: '⊕', otimes: '⊗',
+  perp: '⊥', parallel: '∥', angle: '∠', sim: '∼', simeq: '≃',
+  ll: '≪', gg: '≫', varepsilon: 'ε', varphi: 'φ', varrho: 'ϱ',
+  ell: 'ℓ', hbar: 'ℏ', Re: 'ℜ', Im: 'ℑ', aleph: 'ℵ',
+  neg: '¬', land: '∧', lor: '∨', therefore: '∴',
   quad: '  ', qquad: '    ', ' ': ' ',
 };
 
@@ -110,6 +116,12 @@ function parse(src) {
       return { t: 'frac', num: group(), den: group() };
     }
     if (name === 'sqrt') return { t: 'sqrt', body: group() };
+    if (name === 'vec' || name === 'hat' || name === 'bar' || name === 'overline') {
+      return { t: 'accent', kind: name === 'overline' ? 'bar' : name, body: group() };
+    }
+    if (name === 'mathbf' || name === 'bf' || name === 'boldsymbol') {
+      return { t: 'bold', body: group() };
+    }
     if (name === 'text' || name === 'mathrm' || name === 'operatorname') {
       return { t: 'text', body: group() };
     }
@@ -211,6 +223,14 @@ function measure(node, size) {
       return { w: b.w + em * 0.72, a: Math.max(b.a, ASCENT * em) + em * 0.16, d: b.d };
     }
 
+    case 'accent': {
+      const b = measure(node.body, em);
+      return { w: b.w, a: b.a + em * 0.2, d: b.d };   // the mark sits above
+    }
+
+    case 'bold':
+      return measure(node.body, em);
+
     default:
       return { w: 0, a: 0, d: 0 };
   }
@@ -283,6 +303,36 @@ function draw(node, x, y, size, color, seed) {
         stroke(roughLine([x + em * 0.54, top], [x + em * 0.64 + b.w, top],
           { seed: seed + 6, amp: 0.5, step: 9 }), { w: Math.max(1.2, em * 0.07), color }) +
         draw(node.body, x + em * 0.64, y, em, color, seed + 7);
+    }
+
+    case 'accent': {
+      /* The mark is a stroke, so it wavers like every other line on the board.
+         This is the construction that fits here best: a vector arrow drawn by
+         hand is what someone actually puts over an E. */
+      const b = measure(node.body, em);
+      const top = y - b.a - em * 0.1;
+      const x0 = x + em * 0.06, x1 = x + b.w - em * 0.06;
+      const w = Math.max(1.1, em * 0.07);
+      let mark = '';
+      if (node.kind === 'vec') {
+        mark = stroke(roughLine([x0, top], [x1, top], { seed: seed + 11, amp: 0.4, step: 6 }),
+          { w, color }) +
+          stroke(smooth([[x1 - em * 0.14, top - em * 0.1], [x1, top], [x1 - em * 0.14, top + em * 0.1]], false),
+            { w, color });
+      } else if (node.kind === 'bar') {
+        mark = stroke(roughLine([x0, top], [x1, top], { seed: seed + 12, amp: 0.4, step: 7 }), { w, color });
+      } else {
+        const mid = (x0 + x1) / 2;
+        mark = stroke(smooth([[mid - em * 0.16, top + em * 0.1], [mid, top - em * 0.05],
+          [mid + em * 0.16, top + em * 0.1]], false), { w, color });
+      }
+      return draw(node.body, x, y, em, color, seed) + mark;
+    }
+
+    case 'bold': {
+      // the other convention for a vector: heavier, not decorated
+      const inner = draw(node.body, x, y, em, color, seed);
+      return inner.replace(/font-weight="\d+"/g, 'font-weight="800"');
     }
 
     default:

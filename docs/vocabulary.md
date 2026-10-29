@@ -70,12 +70,26 @@ formula sits on the board rather than on top of it.
 | fractions | `\frac{a}{b}`, `\tfrac`, `\dfrac` |
 | roots | `\sqrt{x^2 + y^2}` |
 | Greek | `\rho` `\theta` `\Sigma` … upper and lower case |
-| operators | `\cdot` `\times` `\approx` `\leq` `\neq` `\pm` `\sum` `\int` `\partial` `\nabla` `\infty` `\to` `\Rightarrow` `\in` … |
+| operators | `\cdot` `\times` `\approx` `\leq` `\neq` `\pm` `\sum` `\prod` `\int` `\oint` `\iint` `\partial` `\nabla` `\infty` `\to` `\Rightarrow` `\in` `\cup` `\cap` `\perp` … |
+| vectors | `\vec{E}` — an arrow drawn over it; `\mathbf{E}` for the bold convention |
+| accents | `\hat{n}`, `\bar{x}`, `\overline{}` |
 | upright words | `\text{const}`, `\mathrm{}` |
 | function names | `\log` `\ln` `\sin` `\exp` `\min` `\max` … |
 
 Spacing is derived, not copied: as in LaTeX, a space in the source is ignored
 and spacing comes from the operators, so `a+b` and `a + b` set identically.
+
+Enough for vector calculus — all four of Maxwell's equations render, in
+differential or integral form:
+
+```
+\nabla \times \vec{E} = -\frac{\partial \vec{B}}{\partial t}
+\oint \vec{E} \cdot d\vec{A} = \frac{Q}{\varepsilon_0}
+```
+
+The arrow over a vector is *drawn*, not a character, so it wavers like every
+other stroke. `\mathbf` works but SF Mono shows little between weight 600 and
+800 — prefer `\vec`.
 
 **Anything else is shown as written, dimmed.** `\begin{pmatrix}` appears
 literally on the board rather than as half a matrix, because a formula that is

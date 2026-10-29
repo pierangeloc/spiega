@@ -100,9 +100,11 @@ spiega draw '{"op":"node","kind":"formula","id":"bernoulli",
   "label":"p + \\tfrac{1}{2}\\rho v^2 + \\rho g h = \\text{const}"}'
 ```
 
-A small LaTeX subset: `^` `_`, `\frac`, `\sqrt`, Greek, the common operators,
-`\text{}` for words, and function names like `\log`. Spacing is derived as in
-LaTeX, so `a+b` and `a + b` are the same.
+A small LaTeX subset: `^` `_`, `\frac`, `\sqrt`, `\vec{}`, Greek, the common
+operators including `\nabla` `\partial` `\oint`, `\text{}` for words, and
+function names like `\log`. Spacing is derived as in LaTeX, so `a+b` and
+`a + b` are the same. Enough for vector calculus — Maxwell's equations render
+in either form.
 
 Anything outside the subset — matrices, aligned environments, limits above and
 below a sum — appears on the board **as you typed it**, dimmed. That is

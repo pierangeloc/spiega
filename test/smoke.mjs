@@ -973,6 +973,24 @@ test('a formula is measured, drawn, and honest about what it cannot do', async (
   assert.ok(un.includes('begin'), 'an unknown command appears literally');
   assert.ok(/opacity="0.55"/.test(un), 'and dimmed, so it reads as unrendered');
 
+  /* Vector calculus, because "explain Maxwell" is a thing people ask for and
+     the first attempt rendered \\vec and \\oint as dimmed literal text. */
+  const maxwell = drawMath(0, 0,
+    '\\nabla \\times \\vec{E} = -\\frac{\\partial \\vec{B}}{\\partial t}', { size: 18 });
+  assert.ok(maxwell.includes('\u2207'), '\\nabla');
+  assert.ok(maxwell.includes('\u00d7'), '\\times');
+  assert.ok(maxwell.includes('\u2202'), '\\partial');
+  assert.ok(!/\\vec|\\nabla|\\partial/.test(maxwell), 'nothing left unrendered');
+  // the arrow over a vector is drawn, not a character: it is a stroke, so it
+  // wavers like every other line on the board
+  assert.ok((maxwell.match(/<path/g) || []).length >= 3,
+    'two vector arrows and a fraction rule, all drawn');
+  assert.ok(drawMath(0, 0, '\\oint', { size: 16 }).includes('\u222e'), '\\oint');
+  assert.ok(/font-weight="800"/.test(drawMath(0, 0, '\\mathbf{F}', { size: 16 })),
+    '\\mathbf sets heavier');
+  assert.ok(measureMath('\\vec{E}', 20).a > measureMath('E', 20).a,
+    'an accent makes room for itself above');
+
   // inline detection, for text that is mostly prose
   assert.equal(hasMath('the term $\\rho v^2$ dominates'), true);
   assert.equal(hasMath('no mathematics here'), false);
