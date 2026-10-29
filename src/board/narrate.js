@@ -88,11 +88,31 @@ export function createNarrator({ onState = () => {} } = {}) {
   let sections = [];            // [{ text, el, step }]
   let token = 0;                // invalidates callbacks from an abandoned run
 
+  /* Every English voice the browser offers, likely-good ones first.
+
+     A Mac has around 180 installed and most are novelties — Boing, Bells,
+     Jester, Organ — so an alphabetical list buries the handful anyone would
+     narrate with. Ordering is a courtesy, not a filter: everything is still
+     in the list, because which voice sounds right is not mine to decide. */
+  function listVoices() {
+    if (!synth) return [];
+    return synth.getVoices()
+      .filter(v => /^en(-|$)/i.test(v.lang))
+      .map(v => ({ name: v.name, lang: v.lang, local: v.localService }))
+      .sort((a, b) => (GOOD.test(b.name) - GOOD.test(a.name))
+        || (b.local - a.local)
+        || a.name.localeCompare(b.name));
+  }
+
   function chooseVoice() {
     if (!synth) return;
     const all = synth.getVoices().filter(v => /^en(-|$)/i.test(v.lang));
     if (!all.length) return;
-    voice = all.find(v => v.localService && GOOD.test(v.name))
+    // a chosen voice outranks the guess, and survives a reload
+    let want = null;
+    try { want = localStorage.getItem('spiega.voiceName'); } catch { /* private window */ }
+    voice = (want && all.find(v => v.name === want))
+      || all.find(v => v.localService && GOOD.test(v.name))
       || all.find(v => GOOD.test(v.name))
       || all.find(v => v.localService) || all[0];
   }
@@ -170,6 +190,30 @@ export function createNarrator({ onState = () => {} } = {}) {
     get index() { return index; },
     get voiceName() { return voice?.name || null; },
     get rate() { return rate; },
+    voices: listVoices,
+
+    /* Pick one. Remembered, and applied to whatever is said next — changing
+       voice mid-sentence would mean cutting the sentence off. */
+    setVoice(name) {
+      if (!synth) return null;
+      const found = synth.getVoices().find(v => v.name === name);
+      if (!found) return voice?.name || null;
+      voice = found;
+      try { localStorage.setItem('spiega.voiceName', name); } catch { /* private window */ }
+      announce();
+      return name;
+    },
+
+    /* A sentence in the chosen voice, so you can hear it before committing.
+       Stops the tape: two voices at once is nobody's idea of a preview. */
+    sample(text = 'This is how the board will read your explanation.') {
+      if (!synth) return;
+      stop();
+      const u = new SpeechSynthesisUtterance(text);
+      if (voice) u.voice = voice;
+      u.rate = rate;
+      setTimeout(() => synth.speak(u), 30);
+    },
 
     /* The tape's contents. Replacing it keeps the position if it still
        exists, so a line arriving mid-session does not rewind anything. */

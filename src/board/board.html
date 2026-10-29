@@ -22,6 +22,13 @@
 
   /* ---- top bar ---- */
   .bar{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--rule)}
+  /* the voice picker wears the same clothes as the buttons beside it */
+  .pick{font:inherit;max-width:190px;appearance:none;-webkit-appearance:none;
+    padding-right:22px;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),
+    linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+    background-position:calc(100% - 13px) 52%,calc(100% - 8px) 52%;
+    background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+  .pick[hidden]{display:none}
   .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);flex:none}
   .dot.idle{background:var(--rule)}
   .dot.down{background:#b3402a;animation:pulse 1.4s ease-in-out infinite}
@@ -137,6 +144,7 @@
     <span class="spacer"></span>
     <button class="btn" id="rail-toggle" title="hide the transcript">transcript</button>
     <button class="btn" id="narrate" title="read the script aloud — space plays and pauses">narrate</button>
+    <select class="btn pick" id="voicepick" title="which voice reads it — choosing one speaks a sample"></select>
     <button class="btn" id="replay" title="play the session back as it happened">replay</button>
     <button class="btn" id="fit">fit</button>
     <button class="btn" id="snap" title="open a standalone copy of this board">snapshot</button>
@@ -387,6 +395,32 @@ function loadTape() {
     };
   }));
 }
+
+/* The voice list arrives late in Chrome — getVoices() is empty on the first
+   call and fills in on `voiceschanged` — so this runs again when it does. */
+function fillVoices() {
+  const sel = $('voicepick');
+  const all = narrator.voices();
+  if (!all.length) { sel.hidden = true; return; }
+  const current = narrator.voiceName;
+  if (sel.dataset.filled === String(all.length) && sel.value === current) return;
+  sel.innerHTML = all.map(v =>
+    `<option value="${v.name}"${v.name === current ? ' selected' : ''}>` +
+    `${v.name}${v.local ? '' : ' · online'}</option>`).join('');
+  sel.dataset.filled = String(all.length);
+  sel.hidden = false;
+}
+if (typeof speechSynthesis !== 'undefined') {
+  fillVoices();
+  speechSynthesis.addEventListener?.('voiceschanged', fillVoices);
+} else {
+  $('voicepick').hidden = true;
+}
+
+$('voicepick').onchange = e => {
+  narrator.setVoice(e.target.value);
+  narrator.sample();          // hear it immediately, which is how you choose
+};
 
 $('narrate').onclick = () => {
   if (!narrator.available) { $('narrate').textContent = 'no voice'; return; }
