@@ -228,6 +228,17 @@ export function scanProcesses(psOutput, root) {
   return out;
 }
 
+/* What to do about a board process running old code.
+
+   `--board x` is wrong for the shared server: it holds every board, so
+   dropping one of them leaves the stale process serving the other seven. The
+   warning has to name the thing that actually has to go, and say what that
+   costs — boards are in memory only, so restarting the server loses every
+   drawing on it, which makes this a decision rather than a chore. */
+export const staleBoardFix = shared => shared
+  ? 'spiega stop --server, then draw again \u2014 every board on it is lost (no persistence yet)'
+  : 'spiega stop --board <name>, then draw again \u2014 note the drawing is lost (no persistence yet)';
+
 function processes(rows, headTime) {
   const ps = sh('ps', ['-Ao', 'pid=,command=']) || '';
   const { boards, mcp } = scanProcesses(ps, ROOT);
@@ -250,20 +261,26 @@ function processes(rows, headTime) {
 
   /* Naming the stale boards matters, because restarting one loses its drawing
      — boards are in memory only — so this is a decision, not a chore, and it
-     should not be made by a blanket `stop --all`. */
+     should not be made by a blanket `stop --all`.
+
+     Which boards a process holds is the registry's business, and since one
+     server holds many, a single stale process can be several stale boards. */
+  const reg = readJSON(path.join(HOME, '.spiega', 'boards.json')) || {};
+  const server = readJSON(path.join(HOME, '.spiega', 'server.json'));
+  const boardsOn = pids => Object.entries(reg).filter(([, b]) => pids.has(b.pid)).map(([n]) => n);
+
   const oldBoards = stale(boards);
   if (!oldBoards.length) {
-    rows.push(ok('board server', boards.length ? `${boards.length} running, all current` : 'none running'));
+    const held = boardsOn(new Set(boards.map(p => p.pid))).length;
+    rows.push(ok('board server', boards.length
+      ? `${boards.length} running, all current${held ? ` \u2014 ${held} board(s)` : ''}`
+      : 'none running'));
   } else {
-    let names = [];
-    try {
-      const reg = JSON.parse(fs.readFileSync(path.join(HOME, '.spiega', 'boards.json'), 'utf8'));
-      const pids = new Set(oldBoards.map(p => p.pid));
-      names = Object.entries(reg).filter(([, b]) => pids.has(b.pid)).map(([n]) => n);
-    } catch { /* a board from before the registry */ }
+    const pids = new Set(oldBoards.map(p => p.pid));
+    const names = boardsOn(pids);
     rows.push(bad('board server',
       `${why(oldBoards)}${names.length ? `: ${names.join(', ')}` : ''}`,
-      'spiega stop --board <name>, then draw again \u2014 note the drawing is lost (no persistence yet)'));
+      staleBoardFix(Boolean(server && pids.has(server.pid)))));
   }
 
   const oldMcp = stale(mcp);

@@ -1,5 +1,17 @@
 /* ============================================================
-   spiega server — holds one board, streams it to whoever is watching.
+   spiega server — holds every board on this machine, streams each to whoever
+   is watching it.
+
+   One process, many boards, because the arithmetic was indefensible the other
+   way round: the Node runtime is 55-70 MB and a board with nine boxes is a few
+   KB of state, so eight parallel tasks spent ~600 MB holding a few hundred KB
+   of drawing. A board lives at /b/<name>/; the renderer under /src/ is served
+   once and shared by all of them.
+
+   The other reason is staleness. A server per board meant a board started
+   before an update kept serving the old page for as long as it lived, which
+   has already produced a board that 404'd on a route the code had — where the
+   isolation a server per board bought us had never once been needed.
 
    No dependencies and no build step: the browser imports the same renderer
    modules the CLI does, straight off disk as ES modules. A board you can run
@@ -10,6 +22,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps } from './state.js';
 
@@ -24,7 +37,15 @@ const SESSION_DIR = path.join(os.homedir(), '.spiega');
    costs one function and means a half-updated machine keeps working, which is
    the state every machine is in during a rename. */
 const envVar = name => process.env[`SPIEGA_${name}`] ?? process.env[`HANDWAVE_${name}`];
+/* Read, never written any more. It held the url of the one board there used to
+   be, back when that board answered /state and /op at its root. A board is now
+   at /b/<name>, so writing this file would record a url that nothing here
+   serves; reading it still finds a board started before any of that, which is
+   the only reason it existed. */
 export const SESSION_FILE = path.join(SESSION_DIR, 'session.json');
+
+/* The canonical port, and the lock on being the server — see `listen`. */
+export const PORT = Number(envVar('PORT')) || 4777;
 
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml', '.css': 'text/css' };
 
@@ -41,13 +62,41 @@ const readBody = req => new Promise((resolve, reject) => {
   req.on('error', reject);
 });
 
-export function createServer({ board = emptyBoard(), name = null } = {}) {
-  const clients = new Set();
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-  const broadcast = (event, data) => {
-    const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    for (const c of clients) { try { c.write(frame); } catch { clients.delete(c); } }
+export function createServer({ board = emptyBoard(), name = DEFAULT_BOARD } = {}) {
+  /* name -> { name, board, clients }. Nothing else in the process is per
+     board: the renderer, the port and the HTTP server are shared. */
+  const boards = new Map();
+
+  const hold = (nm, b = emptyBoard()) => {
+    const held = boards.get(nm);
+    if (held) return held;
+    const entry = { name: nm, board: b, clients: new Set(), started: Date.now() };
+    boards.set(nm, entry);
+    return entry;
   };
+
+  const drop = nm => {
+    const entry = boards.get(nm);
+    if (!entry) return false;
+    boards.delete(nm);
+    for (const c of entry.clients) { try { c.end(); } catch { /* already gone */ } }
+    return true;
+  };
+
+  const broadcast = (entry, event, data) => {
+    const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const c of entry.clients) { try { c.write(frame); } catch { entry.clients.delete(c); } }
+  };
+
+  const first = hold(name, board);
+
+  /* Where this server is, as the client that is talking to us sees it. Taken
+     from the request rather than from what `listen` recorded, so a server
+     bound to an ephemeral port (every test in this repo) still hands out urls
+     that work. */
+  const baseOf = req => app.url || `http://${req.headers.host || `127.0.0.1:${PORT}`}`;
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
@@ -59,59 +108,124 @@ export function createServer({ board = emptyBoard(), name = null } = {}) {
     }
     res.setHeader('access-control-allow-origin', '*');
 
-    if (p === '/' || p === '/index.html') {
-      return serveFile(res, path.join(HERE, 'board.html'));
-    }
-    // the renderer, served as plain modules for the browser
+    // the renderer, served as plain modules for the browser — one copy, every board
     if (p.startsWith('/src/') && !p.includes('..')) {
       return serveFile(res, path.join(ROOT, p.slice(1)));
     }
-    if (p === '/state') return json(res, 200, board);
-    // who this board is, for the window title and for `spiega boards`
-    if (p === '/whoami') return json(res, 200, { name: app.name, pid: process.pid });
 
-    if (p === '/events') {
+    /* The board list, which is also how a client tells a spiega server from
+       whatever else might be holding the port. */
+    if (p === '/boards') {
+      if (req.method === 'POST') {
+        let want;
+        try { want = JSON.parse(await readBody(req)); }
+        catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + e.message }); }
+        const nm = slug(want.name || DEFAULT_BOARD);
+        const created = !boards.has(nm);
+        hold(nm);
+        const boardUrl = `${baseOf(req)}/b/${nm}`;
+        /* Register on the asking client's behalf, since it is the one whose
+           session owns the board. Only when there is no entry: re-registering
+           an existing board would overwrite the owner that the session which
+           first asked for it recorded, and the owner match is how that session
+           keeps finding the same board. */
+        if (created || !(nm in listBoards({ prune: false }))) {
+          registerBoard(nm, boardUrl, want.owner ?? null, want.cwd || null);
+        }
+        return json(res, 200, { ok: true, name: nm, url: boardUrl, created });
+      }
+      return json(res, 200, {
+        ok: true, pid: process.pid, url: baseOf(req),
+        boards: [...boards.values()].map(e => ({
+          name: e.name, url: `${baseOf(req)}/b/${e.name}`,
+          rev: e.board.rev, nodes: e.board.nodes.length, viewers: e.clients.size,
+        })),
+      });
+    }
+
+    if (p === '/' || p === '/index.html') return index(res, boards);
+
+    const m = /^\/b\/([^/]+)(\/.*)?$/.exec(p);
+    if (!m) { res.writeHead(404); return res.end('not found'); }
+    const nm = decodeURIComponent(m[1]);
+
+    /* /b/<name> is the board; the page lives at /b/<name>/ because it resolves
+       its own api off its own path, and without the slash that path is /b/. */
+    if (m[2] == null) {
+      res.writeHead(302, { location: `/b/${encodeURIComponent(nm)}/` });
+      return res.end();
+    }
+    const rest = m[2];
+
+    const entry = boards.get(nm);
+    if (!entry) {
+      // A client holding a registry entry we no longer honour needs to hear
+      // "gone", not "broken": that is what sends it off to start a board.
+      if (rest === '/') {
+        res.writeHead(404, { 'content-type': 'text/html' });
+        return res.end(`<!doctype html><meta charset=utf-8><title>no board</title>` +
+          `<body style="font:14px system-ui;padding:3rem">No board named <b>${esc(nm)}</b> here. ` +
+          `<a href="/">The ones there are</a>.`);
+      }
+      return json(res, 404, { ok: false, error: `no board named "${nm}"` });
+    }
+    const board = entry.board;
+
+    if (rest === '/') return serveFile(res, path.join(HERE, 'board.html'));
+    if (rest === '/state') return json(res, 200, board);
+    // who this board is, for the window title and for `spiega boards`
+    if (rest === '/whoami') return json(res, 200, { name: entry.name, pid: process.pid });
+
+    if (rest === '/events') {
       res.writeHead(200, {
         'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive',
         'x-accel-buffering': 'no',
       });
       res.write(`event: state\ndata: ${JSON.stringify(board)}\n\n`);
-      clients.add(res);
+      entry.clients.add(res);
       const ka = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 25000);
-      req.on('close', () => { clearInterval(ka); clients.delete(res); });
+      req.on('close', () => { clearInterval(ka); entry.clients.delete(res); });
       return;
     }
 
-    if (p === '/op' && req.method === 'POST') {
+    if (rest === '/op' && req.method === 'POST') {
       let ops;
       try { ops = JSON.parse(await readBody(req)); }
       catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + e.message }); }
       const { fresh, errors } = applyOps(board, ops.ops || ops);
-      broadcast('patch', { board, fresh });
+      broadcast(entry, 'patch', { board, fresh });
       return json(res, errors.length ? 207 : 200, {
         ok: !errors.length, errors, rev: board.rev,
         nodes: board.nodes.length, edges: board.edges.length, steps: board.flow.length,
-        viewers: clients.size,
+        viewers: entry.clients.size,
       });
     }
 
     /* Play the session back, on request from the CLI or the agent. The log is
        already here, so re-running an explanation costs nothing and the model
        never has to think the drawing out a second time. */
-    if (p === '/replay') {
+    if (rest === '/replay') {
       const drawable = board.log.filter(e => e.op !== 'focus' && e.op !== 'clear').length;
-      if (drawable) broadcast('replay', { rev: board.rev });
-      return json(res, 200, { ok: !!drawable, ops: drawable, viewers: clients.size });
+      if (drawable) broadcast(entry, 'replay', { rev: board.rev });
+      return json(res, 200, { ok: !!drawable, ops: drawable, viewers: entry.clients.size });
+    }
+
+    /* Let this board go, and leave the other seven drawing. One process holds
+       all of them, so stopping one is a map deletion, not a kill. */
+    if (rest === '/close' && req.method === 'POST') {
+      drop(nm);
+      unregisterBoard(nm);
+      return json(res, 200, { ok: true, name: nm, left: boards.size });
     }
 
     // The board as one standalone file, for pasting into a PR or a doc.
-    if (p === '/snapshot') {
+    if (rest === '/snapshot') {
       const { snapshotHTML } = await import('./snapshot.js');
       const html = snapshotHTML(board, { active: url.searchParams.get('step') });
       res.writeHead(200, { 'content-type': 'text/html' });
       return res.end(html);
     }
-    if (p === '/snapshot.svg') {
+    if (rest === '/snapshot.svg') {
       const { renderSVG } = await import('../render/render.js');
       const { svg } = renderSVG(board, { margin: 16, active: board.active });
       res.writeHead(200, { 'content-type': 'image/svg+xml' });
@@ -121,9 +235,27 @@ export function createServer({ board = emptyBoard(), name = null } = {}) {
     res.writeHead(404); res.end('not found');
   });
 
-  server.on('close', () => { for (const c of clients) { try { c.end(); } catch {} } });
-  const app = { server, board, broadcast, clients, name };
+  server.on('close', () => {
+    for (const e of boards.values()) for (const c of e.clients) { try { c.end(); } catch {} }
+  });
+
+  const app = { server, boards, hold, drop, broadcast, name, url: null, board: first.board };
   return app;
+}
+
+/* The bare port, for someone who typed it without a board name. One board is
+   almost certainly the one they wanted. */
+function index(res, boards) {
+  const names = [...boards.keys()];
+  if (names.length === 1) {
+    res.writeHead(302, { location: `/b/${encodeURIComponent(names[0])}/` });
+    return res.end();
+  }
+  const rows = names.map(n => `<li><a href="/b/${encodeURIComponent(n)}/">${esc(n)}</a></li>`).join('');
+  res.writeHead(200, { 'content-type': 'text/html' });
+  res.end(`<!doctype html><meta charset=utf-8><title>spiega boards</title>` +
+    `<body style="font:14px system-ui;padding:3rem"><h1 style="font-weight:600">spiega</h1>` +
+    (rows ? `<ul>${rows}</ul>` : `<p>No boards yet.`));
 }
 
 function serveFile(res, file) {
@@ -143,8 +275,12 @@ function serveFile(res, file) {
 
    So boards have names, and a name is all a client needs. The registry maps
    name to url; a board whose server has gone is pruned on read, because a
-   stale entry sends ops into a socket nobody is listening on. */
+   stale entry sends ops into a socket nobody is listening on.
+
+   Since one process serves them all, every entry carries the same pid — the
+   registry is a name-to-path map now rather than a list of live processes. */
 export const BOARDS_FILE = path.join(SESSION_DIR, 'boards.json');
+export const SERVER_FILE = path.join(SESSION_DIR, 'server.json');
 export const DEFAULT_BOARD = 'default';
 
 const readBoards = () => {
@@ -184,9 +320,9 @@ export function ownerOfThisProcess() {
   return envVar('BOARD') ? null : sessionKey();
 }
 
-export function registerBoard(name, url, owner = ownerOfThisProcess()) {
+export function registerBoard(name, url, owner = ownerOfThisProcess(), cwd = process.cwd()) {
   const all = readBoards();
-  all[name] = { url, pid: process.pid, started: Date.now(), owner, cwd: process.cwd() };
+  all[name] = { url, pid: process.pid, started: Date.now(), owner, cwd };
   writeBoards(all);
 }
 
@@ -198,7 +334,57 @@ export function unregisterBoard(name) {
   return true;
 }
 
-/* What counts as "this session".
+/* ---------- the one server ----------
+
+   Where it is, written by whoever won the port. Clients read it to decide
+   between asking for a board and starting a process. */
+export function readServer() {
+  try {
+    const s = JSON.parse(fs.readFileSync(SERVER_FILE, 'utf8'));
+    if (s && s.url && s.pid && running(s.pid)) return s;
+  } catch { /* none, or unreadable */ }
+  return null;
+}
+
+export const findServer = () => readServer()?.url ?? null;
+
+const writeServer = url => {
+  fs.mkdirSync(SESSION_DIR, { recursive: true });
+  fs.writeFileSync(SERVER_FILE, JSON.stringify({ url, pid: process.pid, started: Date.now() }, null, 2) + '\n');
+};
+
+/* Is a board answering at this url? */
+export async function alive(url) {
+  try { return (await fetch(url + '/state', { signal: AbortSignal.timeout(900) })).ok; }
+  catch { return false; }
+}
+
+/* Is the thing holding this port one of ours? Something else on 4777 must not
+   be mistaken for a server with no boards on it. */
+export async function spiegaAt(url) {
+  try {
+    const r = await fetch(url + '/boards', { signal: AbortSignal.timeout(900) });
+    if (!r.ok) return false;
+    return Array.isArray((await r.json()).boards);
+  } catch { return false; }
+}
+
+/* Ask the running server for a board, creating it if it has none by that name.
+   A board is a map entry, so this is cheaper than anything that forks. */
+export async function createBoardOn(serverUrl, name, { owner = ownerOfThisProcess(), cwd = process.cwd() } = {}) {
+  try {
+    const r = await fetch(serverUrl + '/boards', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name, owner, cwd }), signal: AbortSignal.timeout(2000),
+    });
+    if (!r.ok) return null;
+    return (await r.json()).url || null;
+  } catch { return null; }
+}
+
+/* ---------- names ----------
+
+   What counts as "this session".
 
    Not the harness. Someone runs four opencode tasks and four Claude Code tasks
    at once, so a board per harness is barely better than a board for everyone.
@@ -259,34 +445,72 @@ export function boardName() {
   return `${base}-${Date.now().toString(36).slice(-4)}`;
 }
 
-/* Listen, trying the next port if one is taken, and register the board under
-   its name so the CLI and the MCP server can find it again. */
-export function listen(app, port = 4777, tries = 20, name = boardName()) {
-  return new Promise((resolve, reject) => {
-    const attempt = n => {
-      const s = app.server;
-      const onErr = e => {
-        s.removeListener('error', onErr);
-        if (e.code === 'EADDRINUSE' && n < tries) return attempt(n + 1);
-        reject(e);
-      };
-      s.once('error', onErr);
-      s.listen(port + n, '127.0.0.1', () => {
-        s.removeListener('error', onErr);
-        const url = `http://127.0.0.1:${port + n}`;
-        app.name = name;
-        registerBoard(name, url);
-        // session.json stays for the default board only, so anything older
-        // than the registry keeps working
-        if (name === DEFAULT_BOARD) {
-          fs.mkdirSync(SESSION_DIR, { recursive: true });
-          fs.writeFileSync(SESSION_FILE, JSON.stringify({ url, pid: process.pid, started: Date.now(), name }, null, 2));
-        }
-        resolve(url);
-      });
+/* ---------- starting and finding ----------
+
+   Listen, and record what we now hold.
+
+   The port is the lock on being the server. Two agents that draw at the same
+   moment both find nothing running and both spawn one; whoever binds 4777 is
+   the server, and the other is told where it is instead of standing a second
+   one up beside it — which is the whole cost this is here to remove.
+
+   `solo` is the way out if an isolation case ever turns up: a board on its own
+   port, in its own process, reachable by exactly the same url shape, so no
+   client has to know which it is talking to. */
+export async function listen(app, { port = PORT, solo = false, tries = 20 } = {}) {
+  const bind = n => new Promise((resolve, reject) => {
+    const s = app.server;
+    const onErr = e => {
+      s.removeListener('error', onErr);
+      if (e.code === 'EADDRINUSE') return resolve(false);
+      reject(e);
     };
-    attempt(0);
+    s.once('error', onErr);
+    s.listen(n, '127.0.0.1', () => { s.removeListener('error', onErr); resolve(true); });
   });
+
+  for (let n = 0; n < tries; n++) {
+    const at = `http://127.0.0.1:${port + n}`;
+    if (await bind(port + n)) {
+      app.url = at;
+      if (!solo) writeServer(at);
+      for (const name of app.boards.keys()) registerBoard(name, `${at}/b/${name}`);
+      return { url: at, mine: true };
+    }
+    /* Held. If one of ours is there, that is the server: hand the board over
+       rather than stand a second one up on the next port along. Anything else
+       — someone else's service, a board from before all this — we walk past.
+
+       Every rung is probed, not just the first. Checking only 4777 left the
+       lock undone whenever something else held it: four agents starting at
+       once each walked up to a different free port and each became a server,
+       which is the exact outcome this is here to prevent. */
+    if (!solo && await spiegaAt(at)) return { url: at, mine: false };
+  }
+  throw new Error(`no free port in ${port}..${port + tries - 1}`);
+}
+
+/* Serve a board: join the server that is running, or become it.
+
+   `serving` tells the caller whether this process is now the one holding the
+   board — `spiega serve` stays alive on true and exits on false, having done
+   its job by asking the running server for one more map entry. */
+export async function startBoard({ name = boardName(), port = PORT, solo = false } = {}) {
+  if (!solo) {
+    const server = findServer();
+    if (server) {
+      const url = await createBoardOn(server, name);
+      if (url) return { url, serving: false };
+    }
+  }
+  const app = createServer({ name });
+  const r = await listen(app, { port, solo });
+  if (!r.mine) {
+    const url = await createBoardOn(r.url, name);
+    if (url) return { url, serving: false };
+    throw new Error(`a spiega server answered on ${r.url} but would not take a board`);
+  }
+  return { url: `${r.url}/b/${name}`, serving: true, app };
 }
 
 /* Where is the board this client should talk to?
@@ -305,4 +529,49 @@ export function findBoard(name = boardName()) {
     try { return JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8')).url; } catch { /* none */ }
   }
   return null;
+}
+
+/* The board this client should talk to, brought into existence if need be.
+
+   Three rungs, cheapest first: the registry entry, which is a file read; one
+   more board on the server that is already up, which is an http call and a map
+   entry; and only then a process. An agent that draws as its first action
+   should not have to run a server command first, and eight of them drawing at
+   once should not cost eight processes. */
+export async function resolveBoard(name = boardName(), { start = true } = {}) {
+  const direct = envVar('URL');
+  if (direct) return direct;
+
+  const known = findBoard(name);
+  if (known && await alive(known)) return known;
+
+  if (!start) return null;
+
+  const server = findServer();
+  if (server && await spiegaAt(server)) {
+    const url = await createBoardOn(server, name);
+    if (url) return url;
+  }
+  return spawnServer();
+}
+
+/* No server anywhere: start one detached and wait for it to answer.
+
+   The name is recomputed from the registry on each poll rather than asked for
+   here, because the child decides it — `boardName()` matches a session to the
+   board it owns, and the child is the one that registers the ownership. */
+function spawnServer() {
+  const out = fs.openSync(path.join(process.env.TMPDIR || '/tmp', 'spiega.log'), 'a');
+  const child = spawn(process.execPath, [path.join(ROOT, 'src', 'cli.js'), 'serve', '--quiet'], {
+    detached: true, stdio: ['ignore', out, out], env: process.env,
+  });
+  child.unref();
+  return (async () => {
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 100));
+      const url = findBoard();
+      if (url && await alive(url)) return url;
+    }
+    return null;
+  })();
 }

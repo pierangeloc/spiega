@@ -574,6 +574,16 @@ test('doctor reports what is stale, and every problem comes with a way out', asy
   assert.ok(dirty.includes('spiega install'), 'with the command in it');
 });
 
+/* One process holds every board, so the way out of a stale one depends on
+   which process it is. Telling someone to drop a single board would leave the
+   shared server running old code for all the others. */
+test('a stale shared server is not fixed one board at a time', async () => {
+  const { staleBoardFix } = await import('../src/doctor.js');
+  assert.match(staleBoardFix(true), /stop --server/);
+  assert.match(staleBoardFix(true), /every board on it is lost/);
+  assert.match(staleBoardFix(false), /stop --board/);
+});
+
 /* Terminal dressing is for terminals. Piped into a file, a pager, or an agent
    reading the output, escape codes are noise at best and corrupt data at
    worst — and the test process is itself not a TTY, which is the case that
@@ -645,8 +655,9 @@ const atest = async (name, fn) => { await fn(); n++; console.log('  ok  ' + name
 await atest('a replay can be asked for remotely, and re-sends nothing', async () => {
   const { createServer } = await import('../src/board/server.js');
   const { server } = createServer();
+  // one process, many boards: `/state`, `/op` and the rest hang off /b/<name>
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  const U = `http://127.0.0.1:${server.address().port}`;
+  const U = `http://127.0.0.1:${server.address().port}/b/default`;
   try {
     const frames = [];
     const res = await fetch(U + '/events');
@@ -685,6 +696,194 @@ await atest('a replay can be asked for remotely, and re-sends nothing', async ()
   }
 });
 
+/* One process, many boards. This is the whole point of serving them together,
+   so the thing to prove is that sharing a process does not let two
+   explanations touch: ops to one board, a stream on the other, and the second
+   must not see a thing. */
+await atest('one server holds several boards and keeps them apart', async () => {
+  const { createServer } = await import('../src/board/server.js');
+  const app = createServer({ name: 'alpha' });
+  app.hold('beta');
+  const { server } = app;
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const root = `http://127.0.0.1:${server.address().port}`;
+  const B = n => `${root}/b/${n}`;
+  try {
+    // a stream on beta, watching for anything that leaks out of alpha
+    const res = await fetch(B('beta') + '/events');
+    const reader = res.body.getReader();
+    let frames = '';
+    (async () => {
+      for (;;) { const { value, done } = await reader.read(); if (done) break;
+        frames += new TextDecoder().decode(value); }
+    })().catch(() => {});
+    await new Promise(r => setTimeout(r, 80));
+
+    await fetch(B('alpha') + '/op', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ops: [{ op: 'node', id: 'a', label: 'A' }, { op: 'title', text: 'Alpha' }] }),
+    });
+    await new Promise(r => setTimeout(r, 80));
+
+    const alpha = await (await fetch(B('alpha') + '/state')).json();
+    const beta = await (await fetch(B('beta') + '/state')).json();
+    assert.equal(alpha.nodes.length, 1);
+    assert.equal(alpha.title, 'Alpha');
+    assert.equal(beta.nodes.length, 0, 'the other board must not have moved');
+    assert.equal((frames.match(/event: patch/g) || []).length, 0,
+      "beta's viewers must not be told about alpha");
+
+    // each board knows which one it is — that name goes in the window title,
+    // which is the only handle `spiega focus` has on a browser window
+    assert.equal((await (await fetch(B('beta') + '/whoami')).json()).name, 'beta');
+
+    // the renderer is served once, from the root, and shared by all of them
+    assert.ok((await fetch(root + '/src/render/render.js')).ok);
+
+    // a name nobody is serving is gone, not broken: that is what sends a
+    // client with a stale registry entry off to start a board
+    assert.equal((await fetch(B('gamma') + '/state')).status, 404);
+
+    /* The page resolves its own api off its own path, so it has to be served
+       from /b/<name>/ — one directory down from /b/. */
+    const bare = await fetch(B('alpha'), { redirect: 'manual' });
+    assert.equal(bare.status, 302);
+    assert.equal(bare.headers.get('location'), '/b/alpha/');
+
+    await reader.cancel().catch(() => {});
+  } finally {
+    server.close();
+    server.closeAllConnections?.();
+  }
+});
+
+/* Boards come and go while the server stays up. A client asks for one by name
+   and gets a map entry; `spiega stop` drops that entry and leaves the rest
+   drawing. Run in a child with its own HOME: creating a board writes the
+   registry, and a test must never go near the real one. */
+await atest('a board can be asked for and dropped while the server keeps serving', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-home-'));
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  for (const k of ['SPIEGA_URL', 'SPIEGA_BOARD']) delete env[k];
+
+  const script = `
+    const m = await import(${JSON.stringify(path.join(ROOT, 'src/board/server.js'))});
+    const fs = await import('node:fs');
+    const out = {};
+    const app = m.createServer({ name: 'first' });
+    await new Promise(r => app.server.listen(0, '127.0.0.1', r));
+    const root = 'http://127.0.0.1:' + app.server.address().port;
+
+    // what a client probes to tell a spiega server from anything else on 4777
+    out.isSpiega = await m.spiegaAt(root);
+
+    out.asked = await m.createBoardOn(root, 'Review Notes', { owner: 's9', cwd: '/tmp/work' });
+    out.held = [...app.boards.keys()];
+    const reg = JSON.parse(fs.readFileSync(m.BOARDS_FILE, 'utf8'));
+    out.registered = reg['review-notes'];
+    out.samePid = reg['review-notes'].pid === process.pid;
+
+    // asking twice is the same board, not a second one
+    out.again = await m.createBoardOn(root, 'review-notes');
+
+    out.closed = (await (await fetch(root + '/b/review-notes/close', { method: 'POST' })).json());
+    out.leftHeld = [...app.boards.keys()];
+    out.leftRegistered = Object.keys(JSON.parse(fs.readFileSync(m.BOARDS_FILE, 'utf8')));
+    out.firstStillServes = (await fetch(root + '/b/first/state')).ok;
+
+    app.server.close(); app.server.closeAllConnections?.();
+    console.log(JSON.stringify(out));
+  `;
+  const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script], { env });
+  const r = JSON.parse(stdout.trim().split('\n').pop());
+
+  assert.equal(r.isSpiega, true, 'the board list is how a client recognises one of ours');
+  assert.match(r.asked, /\/b\/review-notes$/, 'a name is slugged, and the url carries it');
+  assert.deepEqual(r.held, ['first', 'review-notes']);
+  assert.equal(r.registered.url, r.asked, 'and the registry points at it');
+  assert.equal(r.registered.owner, 's9', "the asking client's session, not the server's");
+  assert.equal(r.registered.cwd, '/tmp/work');
+  assert.equal(r.samePid, true, 'every board on one process means one pid in the registry');
+  assert.equal(r.again, r.asked, 'asking again is the same board');
+
+  assert.equal(r.closed.ok, true);
+  assert.deepEqual(r.leftHeld, ['first'], 'dropping one board leaves the others');
+  // 'first' was seeded straight onto the http server, so it was never registered
+  assert.deepEqual(r.leftRegistered, [], 'and the dropped one is out of the registry');
+  assert.equal(r.firstStillServes, true, 'and the server is still serving them');
+
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+/* The port is the lock on being the server. Eight agents drawing at the same
+   moment all find nothing running and all try to start something; whoever
+   binds first has to be the one the rest hand their board to, or the memory
+   this whole thing is about comes straight back as eight processes. */
+await atest('the port is the lock: a second server joins the first instead of starting', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-home-'));
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  for (const k of ['SPIEGA_URL', 'SPIEGA_BOARD', 'SPIEGA_PORT']) delete env[k];
+
+  const script = `
+    const http = await import('node:http');
+    const m = await import(${JSON.stringify(path.join(ROOT, 'src/board/server.js'))});
+    const out = {};
+
+    // a port we know is free, released before anyone is asked to bind it
+    const probe = http.createServer();
+    await new Promise(r => probe.listen(0, '127.0.0.1', r));
+    const PORT = probe.address().port;
+    await new Promise(r => probe.close(r));
+
+    /* Something that is not us, sitting on the canonical port. Walking past it
+       is right; walking past it and then becoming a server on the next port
+       along is what broke the lock, so both rungs are in play here. */
+    const squatter = http.createServer((q, s) => { s.writeHead(404); s.end('nope'); });
+    await new Promise(r => squatter.listen(PORT, '127.0.0.1', r));
+
+    const first = m.createServer({ name: 'one' });
+    const a = await m.listen(first, { port: PORT });
+    out.first = { mine: a.mine, walkedPast: a.url !== 'http://127.0.0.1:' + PORT };
+
+    const second = m.createServer({ name: 'two' });
+    const b = await m.listen(second, { port: PORT });
+    out.second = { mine: b.mine, url: b.url };
+    out.sameServer = b.url === a.url;
+    out.secondNeverBound = second.server.listening === false;
+
+    // ...and the board it was holding goes to the one that won
+    out.handedOver = await m.createBoardOn(b.url, 'two');
+    out.firstHolds = [...first.boards.keys()];
+
+    // a board of its own, when something really does need isolating
+    const solo = m.createServer({ name: 'alone' });
+    const c = await m.listen(solo, { port: PORT, solo: true });
+    out.solo = { mine: c.mine, ownPort: c.url !== a.url };
+
+    squatter.close(); first.server.close(); solo.server.close();
+    console.log(JSON.stringify(out));
+  `;
+  const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script], { env });
+  const r = JSON.parse(stdout.trim().split('\n').pop());
+
+  assert.deepEqual(r.first, { mine: true, walkedPast: true },
+    'something else on the port is walked past, not joined');
+  assert.equal(r.second.mine, false, 'the second must not become a second server');
+  assert.equal(r.sameServer, true, 'it should be pointed at the one already running');
+  assert.equal(r.secondNeverBound, true, 'and should never have taken a port of its own');
+  assert.match(r.handedOver, /\/b\/two$/, 'its board goes to the server that won');
+  assert.deepEqual(r.firstHolds, ['one', 'two']);
+
+  assert.deepEqual(r.solo, { mine: true, ownPort: true },
+    '--solo is the way out: its own process, its own port');
+
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
 /* `spiega say "..." --step 2` goes through argument parsing, which no unit
    test of the attribution touches — and that is exactly where it first broke:
    the flag was read with the wrong call and the "2" ended up in the sentence.
@@ -698,7 +897,7 @@ await atest('the say and tag commands reach the board, and a bad tag fails loudl
   const run = promisify(execFile);
   const { server, board } = createServer();
   await new Promise(r => server.listen(0, '127.0.0.1', r));
-  const env = { ...process.env, SPIEGA_URL: `http://127.0.0.1:${server.address().port}` };
+  const env = { ...process.env, SPIEGA_URL: `http://127.0.0.1:${server.address().port}/b/default` };
   const cli = (...args) => run(process.execPath, [path.join(ROOT, 'src/cli.js'), ...args], { env });
   try {
     await cli('draw', JSON.stringify([
