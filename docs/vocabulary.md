@@ -38,8 +38,11 @@ goes for edge labels and boundary labels.
 
 ## Node kinds
 
-Nine, each with its own drawing. An unknown kind falls back to `service`.
-[shapes.md](shapes.md) shows what each one looks like.
+Fourteen, each with its own drawing. Eight are software's furniture, `note` and
+`formula` are writing on the board, and the last four carry no infrastructure
+meaning — so a figure that is not about software does not have to lie: water is
+not a database, and a gas is not a queue. An unknown kind falls back to
+`service`. [shapes.md](shapes.md) shows what each one looks like.
 
 | kind | drawn as | use it for |
 |---|---|---|
@@ -53,6 +56,10 @@ Nine, each with its own drawing. An unknown kind falls back to `service`.
 | `external` | a cloud | a third party, something you do not own |
 | `note` | a torn-off scrap | a keyword, a caveat, a number |
 | `formula` | set mathematics, underlined | an equation that *is* the explanation |
+| `blob` | an uneven, organic mass | a body, a region, a substance with no fixed shape |
+| `vessel` | an open pot with a dark rim | a container: a cell, a tank, a reservoir |
+| `particle` | a small speck with two neighbours | a molecule, a drop, one unit of a substance |
+| `source` | a disc throwing rays | the sun, a spring, wherever something comes from |
 
 Three fields only some kinds read:
 

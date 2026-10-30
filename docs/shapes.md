@@ -10,7 +10,8 @@ the picture of it.
 
 ## Node kinds
 
-Nine kinds and a tenth for mathematics. An unknown kind is drawn as a
+Eight kinds for software, `note` and `formula` for writing and mathematics, and
+four that carry no infrastructure meaning. An unknown kind is drawn as a
 `service`, so a guess is never an error.
 
 | | kind | use it for |
@@ -25,6 +26,21 @@ Nine kinds and a tenth for mathematics. An unknown kind is drawn as a
 | <img src="shapes/external.svg" width="175"> | `external` | a third party, something you do not own |
 | <img src="shapes/note.svg" width="140"> | `note` | a keyword, a caveat, a number, in the margin |
 | <img src="shapes/formula.svg" width="150"> | `formula` | an equation that *is* the explanation |
+| <img src="shapes/blob.svg" width="150"> | `blob` | a body, a region, a mass with no fixed form |
+| <img src="shapes/vessel.svg" width="150"> | `vessel` | a container: a cell, a tank, a reservoir |
+| <img src="shapes/particle.svg" width="150"> | `particle` | a molecule, a drop, one unit of a substance |
+| <img src="shapes/source.svg" width="150"> | `source` | the sun, a spring, wherever something comes from |
+
+The last four are the neutral ones. A figure of photosynthesis can say what it
+means without borrowing software's nouns: `source` for the sun, `vessel` for
+water, `particle` for a gas, `blob` for the organism.
+
+```json
+{"op":"node","id":"sun","kind":"source","label":"Sun"}
+{"op":"node","id":"water","kind":"vessel","label":"Water","sub":"H2O"}
+{"op":"node","id":"co2","kind":"particle","label":"CO2"}
+{"op":"node","id":"leaf","kind":"blob","label":"Leaf"}
+```
 
 Colour is assigned by kind, not chosen: a datastore is always mint, a queue
 always tomato. That is what makes two boards of the same system look like the
