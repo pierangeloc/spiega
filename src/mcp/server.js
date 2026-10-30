@@ -8,32 +8,17 @@
    ============================================================ */
 
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { findBoard } from '../board/server.js';
-
-const HERE = path.dirname(fileURLToPath(import.meta.url));
-const CLI = path.join(HERE, '..', 'cli.js');
+import { resolveBoard } from '../board/server.js';
 
 const KINDS = 'client, gateway, service, compute, datastore, cache, queue, external, note';
 
-const alive = async url => {
-  try { return (await fetch(url + '/state', { signal: AbortSignal.timeout(900) })).ok; }
-  catch { return false; }
+/* The board for this session, started if need be. One server holds every
+   board, so this is usually a file read and nothing more. */
+const url = async () => {
+  const u = await resolveBoard();
+  if (!u) throw new Error('could not start a board');
+  return u;
 };
-
-async function url() {
-  let u = findBoard();
-  if (u && await alive(u)) return u;
-  const child = spawn(process.execPath, [CLI, 'serve', '--quiet'], { detached: true, stdio: 'ignore' });
-  child.unref();
-  for (let i = 0; i < 60; i++) {
-    await new Promise(r => setTimeout(r, 100));
-    u = findBoard();
-    if (u && await alive(u)) return u;
-  }
-  throw new Error('could not start a board');
-}
 
 async function send(ops) {
   const u = await url();

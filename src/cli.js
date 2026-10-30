@@ -9,7 +9,6 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -53,40 +52,17 @@ if (boardFlag && boardFlag !== true) process.env.SPIEGA_BOARD = String(boardFlag
 
 /* ---------- talking to a running board ---------- */
 
+/* The board this command is for, started if it is not up yet. One server holds
+   every board, so "starting" one is usually a map entry on a process that is
+   already running — see resolveBoard. */
 async function boardURL({ autostart = false } = {}) {
-  const { findBoard } = await import('./board/server.js');
-  let url = findBoard();
-  if (url && await alive(url)) return url;
-  if (!autostart) return null;
-  return startDetached();
+  const { resolveBoard } = await import('./board/server.js');
+  const url = await resolveBoard(undefined, { start: autostart });
+  if (!url && autostart) die('spiega: could not start a board (see $TMPDIR/spiega.log)');
+  return url;
 }
 
-async function alive(url) {
-  try {
-    const c = AbortSignal.timeout(900);
-    const r = await fetch(url + '/state', { signal: c });
-    return r.ok;
-  } catch { return false; }
-}
-
-/* Start a board in the background and wait for it to answer. An agent that
-   draws as its first action should not have to run a server command first. */
-async function startDetached() {
-  const out = fs.openSync(path.join(process.env.TMPDIR || '/tmp', 'spiega.log'), 'a');
-  // the child inherits SPIEGA_BOARD, so an autostarted board registers under
-  // the name the caller was already asking for
-  const child = spawn(process.execPath, [path.join(HERE, 'cli.js'), 'serve', '--quiet'], {
-    detached: true, stdio: ['ignore', out, out], env: process.env,
-  });
-  child.unref();
-  for (let i = 0; i < 60; i++) {
-    await new Promise(r => setTimeout(r, 100));
-    const { findBoard } = await import('./board/server.js');
-    const url = findBoard();
-    if (url && await alive(url)) return url;
-  }
-  die('spiega: could not start a board (see $TMPDIR/spiega.log)');
-}
+const alive = async url => (await import('./board/server.js')).alive(url);
 
 async function send(ops, { quiet = false } = {}) {
   const url = await boardURL({ autostart: true });
@@ -137,7 +113,7 @@ export function specToOps(spec) {
 
 const HELP = `spiega — a hand-drawn board an agent draws on while it explains
 
-  serve [--port N] [--open]     start the board and keep it running
+  serve [--port N] [--open]     start the board and keep it running (--solo: own process)
   open [--tab] [--size WxH]     open the board in its own browser window
   doctor                        check that agents are reading the current version
   migrate                       move everything over from the old handwave name
@@ -156,13 +132,18 @@ const HELP = `spiega — a hand-drawn board an agent draws on while it explains
   boards                        every board running, and which one this shell uses
   focus                         bring this session's board to the front (opens one if needed)
   url                           print the running board's URL
-  stop [--all]                  stop this shell's board, or every one of them
+  stop [--all|--server]         stop this shell's board, every one, or the server
 
 Every command takes --board NAME (or the SPIEGA_BOARD environment variable)
 and talks to that board, starting it if it is not running. One board per
 conversation: a Claude session and an opencode session drawing on the same
 board interleave two explanations into one picture. "spiega install" gives
 each harness its own name, so this happens without anyone thinking about it.
+
+One process serves them all, on port 4777, each board under /b/<name>. Eight
+boards cost one Node runtime rather than eight, and all of them run the code
+that is on disk. "serve --solo" gives a board a process of its own if you ever
+need one isolated from the rest.
 
 Ops are small JSON objects:
   {"op":"node","id":"gw","kind":"gateway","label":"API Gateway","sub":"authn"}
@@ -199,22 +180,28 @@ through the TTY, so it is good for glancing and for stepping a flow, not for roa
 const main = async () => {
   switch (cmd) {
     case 'serve': {
-      const { createServer, listen, boardName, findBoard } = await import('./board/server.js');
+      const { startBoard, boardName, findBoard, alive: up, PORT } = await import('./board/server.js');
       const name = boardName();
       // Refuse to start a second board under one name: the first would keep
       // running, unreachable, and the ops would go to whichever won the race.
       const existing = findBoard(name);
-      if (existing && await alive(existing)) {
+      if (existing && await up(existing)) {
         if (!flag('quiet')) console.log(`spiega: "${name}" is already running on ${existing}`);
         return;
       }
-      const app = createServer();
-      const url = await listen(app, Number(flag('port', 4777)), 20, name);
-      if (!flag('quiet')) console.log(`spiega listening on ${url}${name === 'default' ? '' : `  (board "${name}")`}`);
+      const solo = !!flag('solo');
+      const { url, serving } = await startBoard({ name, port: Number(flag('port', PORT)), solo });
+      if (!flag('quiet')) {
+        console.log(serving
+          ? `spiega serving ${url}${solo ? '  (its own process)' : ''}`
+          : `spiega: board "${name}" is on the server already running \u2014 ${url}`);
+      }
       if (flag('open')) {
         const { openBoard } = await import('./board/open.js');
         openBoard(url, { app: !flag('tab'), size: flag('size'), browser: flag('browser') });
       }
+      // On `serving` the http server holds the loop open; otherwise there is
+      // nothing left to do and this process is done.
       return;
     }
 
@@ -485,20 +472,43 @@ const main = async () => {
     }
 
     case 'stop': {
-      const { SESSION_FILE, listBoards, unregisterBoard, boardName, DEFAULT_BOARD } =
+      const { SESSION_FILE, SERVER_FILE, listBoards, unregisterBoard, boardName, readServer, DEFAULT_BOARD } =
         await import('./board/server.js');
       const all = listBoards();
-      const names = flag('all') ? Object.keys(all) : [boardName()];
+      const srv = readServer();
+      /* One process holds every board, so stopping one is a request to drop it
+         and stopping the server is a kill. Telling them apart by pid keeps a
+         `--solo` board, and a board from before all this, working the old way:
+         if nothing else is on that pid, the kill is the drop. */
+      const shared = b => srv && b?.pid === srv.pid;
+      const killServer = !!(flag('all') || flag('server'));
+      const names = flag('server') ? [] : flag('all') ? Object.keys(all) : [boardName()];
+
       let n = 0;
       for (const name of names) {
         const b = all[name];
-        if (b?.pid) { try { process.kill(b.pid); } catch { /* already gone */ } }
-        if (unregisterBoard(name)) n++;
+        if (!b) continue;
+        // --all is about to end the process anyway; no point asking it politely
+        if (shared(b) && !killServer) {
+          try { await fetch(b.url + '/close', { method: 'POST' }); } catch { /* gone */ }
+        } else if (!shared(b) && b.pid) {
+          try { process.kill(b.pid); } catch { /* already gone */ }
+        }
+        unregisterBoard(name);
         if (name === DEFAULT_BOARD) { try { fs.unlinkSync(SESSION_FILE); } catch { /* none */ } }
-        if (b) console.log(`stopped ${name === DEFAULT_BOARD ? 'the board' : `"${name}"`}`);
+        console.log(`stopped ${name === DEFAULT_BOARD ? 'the board' : `"${name}"`}`);
+        n++;
       }
+
+      if (killServer && srv) {
+        try { process.kill(srv.pid); } catch { /* already gone */ }
+        try { fs.unlinkSync(SERVER_FILE); } catch { /* none */ }
+        console.log('stopped the server');
+        n++;
+      }
+
       // a board from before the registry existed
-      if (!n && !flag('all')) {
+      if (!n && !killServer) {
         try {
           const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
           process.kill(sess.pid); fs.unlinkSync(SESSION_FILE);
@@ -538,7 +548,8 @@ const main = async () => {
 
     /* Which boards exist, and who is watching them. */
     case 'boards': {
-      const { listBoards, boardName, DEFAULT_BOARD, SESSION_FILE } = await import('./board/server.js');
+      const { listBoards, boardName, readServer, DEFAULT_BOARD, SESSION_FILE, alive: up } =
+        await import('./board/server.js');
       const { c, sym, pad, shortPath, heading } = await import('./term.js');
       const g = sym();
       const all = listBoards();
@@ -548,7 +559,7 @@ const main = async () => {
       if (!all[DEFAULT_BOARD]) {
         try {
           const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
-          if (sess.url && await alive(sess.url)) all[DEFAULT_BOARD] = { url: sess.url, legacy: true };
+          if (sess.url && await up(sess.url)) all[DEFAULT_BOARD] = { url: sess.url, legacy: true };
         } catch { /* none */ }
       }
       const names = Object.keys(all);
@@ -557,6 +568,7 @@ const main = async () => {
       }
 
       const here = boardName();
+      const srv = readServer();
       const w = Math.max(...names.map(n => n.length)) + 2;   // a name is a task name, so it can be long
       console.log(heading('spiega boards'));
       for (const name of names) {
@@ -568,109 +580,24 @@ const main = async () => {
           note = st.title ? c.plain(st.title) : c.dim('untitled');
         } catch { /* left as not answering */ }
         const mine = name === here;
+        /* The port, not the path: with one server the url is the same for
+           every row apart from the name that is already in the first column.
+           A board on its own port is the only one worth pointing out. */
+        const where = (url.match(/:(\d+)/) || [, '?'])[1];
         const tail = all[name].legacy
           ? c.dim('  (started before boards had names)')
           : c.dim(`  ${shortPath(all[name].cwd || '', 34)}`);
         console.log(`  ${mine ? c.accent(g.arrow) : ' '} ${c.bold(pad(name, w))}` +
-          `${c.dim(pad(url.replace('http://127.0.0.1:', ':'), 8))}${pad(c.dim(size), 10)}${note}${tail}`);
+          `${c.dim(pad(':' + where, 8))}${pad(c.dim(size), 10)}${note}${tail}`);
       }
+      const own = names.filter(n => !all[n].legacy && srv && all[n].pid !== srv.pid).length;
       console.log(`\n  ${c.accent(g.arrow)} ${c.dim("this shell's board")}   ` +
-        `${c.dim(`boxes ${g.dot} lines   \u2014 switch with --board NAME`)}\n`);
-      return;
-    }
-
-    case 'url': {
-      const url = await boardURL();
-      if (!url) die('spiega: no board is running', 2);
-      console.log(url);
-      return;
-    }
-
-    case 'stop': {
-      const { SESSION_FILE, listBoards, unregisterBoard, boardName, DEFAULT_BOARD } =
-        await import('./board/server.js');
-      const all = listBoards();
-      const names = flag('all') ? Object.keys(all) : [boardName()];
-      let n = 0;
-      for (const name of names) {
-        const b = all[name];
-        if (b?.pid) { try { process.kill(b.pid); } catch { /* already gone */ } }
-        if (unregisterBoard(name)) n++;
-        if (name === DEFAULT_BOARD) { try { fs.unlinkSync(SESSION_FILE); } catch { /* none */ } }
-        if (b) console.log(`stopped ${name === DEFAULT_BOARD ? 'the board' : `"${name}"`}`);
+        `${c.dim(`boxes ${g.dot} lines   \u2014 switch with --board NAME`)}`);
+      if (srv) {
+        console.log(`  ${c.dim(`One server on :${(srv.url.match(/:(\d+)/) || [, '?'])[1]} holds ` +
+          `${names.length - own} of them${own ? `; ${own} on ${own === 1 ? 'its' : 'their'} own` : ''}.`)}`);
       }
-      // a board from before the registry existed
-      if (!n && !flag('all')) {
-        try {
-          const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
-          process.kill(sess.pid); fs.unlinkSync(SESSION_FILE);
-          return void console.log('stopped');
-        } catch { die('spiega: nothing to stop'); }
-      }
-      if (!n) die('spiega: nothing to stop');
-      return;
-    }
-
-    /* Bring this session's board to the front. With eight tasks in flight the
-       window you want is behind seven others, and hunting for it is exactly
-       the friction the board was meant to remove. */
-    case 'focus': {
-      /* "I have lost my board" has three shapes and one intent, so this
-         handles all three: the window is buried (raise it), the window was
-         closed but the board is still serving (make a window — the drawing is
-         untouched, a board is a server), or there is no board yet (start one).
-         Being told `spiega open` by a command you ran to see your board is
-         a refusal dressed as help. */
-      const { boardName } = await import('./board/server.js');
-      const { focusBoard, openBoard } = await import('./board/open.js');
-      const name = boardName();
-
-      let url = await boardURL({ autostart: false });
-      const started = !url;
-      if (!url) url = await boardURL({ autostart: true });
-
-      if (!started) {
-        const r = focusBoard(name, url);
-        if (r.ok) return void console.log(`${name}  ${url}  (${r.how})`);
-      }
-      // no window to raise: give it one
-      const o = openBoard(url, { app: !flag('tab'), size: flag('size'), browser: flag('browser') });
-      return void console.log(`${name}  ${url}  (new ${o.how})`);
-    }
-
-    /* Which boards exist, and who is watching them. */
-    case 'boards': {
-      const { listBoards, boardName, DEFAULT_BOARD, SESSION_FILE } = await import('./board/server.js');
-      const all = listBoards();
-      /* A board started before the registry existed is in session.json and
-         nowhere else. Saying "no boards running" while one is plainly open on
-         screen is worse than saying nothing. */
-      if (!all[DEFAULT_BOARD]) {
-        try {
-          const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
-          if (sess.url && await alive(sess.url)) all[DEFAULT_BOARD] = { url: sess.url, legacy: true };
-        } catch { /* none */ }
-      }
-      const names = Object.keys(all);
-      if (!names.length) return void console.log('no boards running');
-      const here = boardName();
-      const w = Math.max(...names.map(n => n.length)) + 2;   // a name is a task name, so it can be long
-      for (const name of names) {
-        const { url } = all[name];
-        let note = 'not answering';
-        try {
-          const st = await (await fetch(url + '/state', { signal: AbortSignal.timeout(900) })).json();
-          note = `${st.nodes.length} boxes, ${st.edges.length} lines` + (st.title ? ` \u2014 ${st.title}` : '');
-        } catch { /* left as not answering */ }
-        // the directory tells two same-named boards apart, which happens when
-        // two conversations are about one repo
-        const where = all[name].cwd ? `  ${all[name].cwd.replace(process.env.HOME, '~')}` : '';
-        const tail = all[name].legacy ? '  (started before boards had names)' : where;
-        console.log(`${name === here ? '\u2192' : ' '} ${name.padEnd(w)}${url.padEnd(24)}${note}${tail}`);
-      }
-      if (names.length > 1 || here !== DEFAULT_BOARD) {
-        console.log(`\n\u2192 is this shell's board (SPIEGA_BOARD, or --board NAME).`);
-      }
+      console.log('');
       return;
     }
 

@@ -183,9 +183,16 @@ import { createNarrator, wrapWords, wordAt } from '/src/board/narrate.js';
 import { frame, unionBox, litKeys } from '/src/board/camera.js';
 
 const $ = id => document.getElementById(id);
+
+/* One server holds every board, each under /b/<name>/, so this page's own path
+   is its api root. Taken from the location rather than from a name baked into
+   the html, because the same file serves every board. The renderer above is
+   imported from /src/ instead: one copy, shared by all of them. */
+const API = location.pathname.replace(/[^/]*$/, '');
+
 // which board this page is, as the server knows it — shown in the window title
 let boardTag = '';
-fetch('/whoami').then(r => r.json()).then(w => { boardTag = w.name || ''; }).catch(() => {});
+fetch(API + 'whoami').then(r => r.json()).then(w => { boardTag = w.name || ''; }).catch(() => {});
 const pan = $('pan'), stage = $('stage');
 
 let board = null;      // the live board
@@ -663,7 +670,7 @@ $('replay').onclick = replay;
 /* ---------- plumbing ---------- */
 
 async function post(ops) {
-  await fetch('/op', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ops }) });
+  await fetch(API + 'op', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ops }) });
 }
 
 function onState(b, fresh) {
@@ -708,7 +715,7 @@ function setLink(state) {           // 'live' | 'idle' | 'down'
 function connect() {
   clearTimeout(retryTimer);
   if (es) { try { es.close(); } catch {} }
-  es = new EventSource('/events');
+  es = new EventSource(API + 'events');
 
   es.addEventListener('open', () => { retry = 0; setLink('idle'); });
   es.addEventListener('state', e => {
@@ -737,7 +744,7 @@ connect();
 addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   if (!es || es.readyState !== EventSource.OPEN) connect();
-  else fetch('/state').then(r => r.json()).then(b => { if (b.rev !== board?.rev) onState(b); }).catch(() => {});
+  else fetch(API + 'state').then(r => r.json()).then(b => { if (b.rev !== board?.rev) onState(b); }).catch(() => {});
 });
 
 /* ---------- pan, zoom, keys ---------- */
@@ -774,7 +781,7 @@ stage.addEventListener('pointercancel', endDrag);
 stage.addEventListener('dblclick', () => { userMoved = false; fit(true); });
 
 $('fit').onclick = () => { userMoved = false; fit(true); };
-$('snap').onclick = () => window.open('/snapshot', '_blank');
+$('snap').onclick = () => window.open(API + 'snapshot', '_blank');
 $('rail-toggle').onclick = e => {
   $('main').classList.toggle('norail');
   e.target.classList.toggle('on', !$('main').classList.contains('norail'));

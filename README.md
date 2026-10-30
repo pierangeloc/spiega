@@ -216,7 +216,8 @@ which is worse than either having none — so boards have names.
 spiega boards                      # every board, and which one this shell uses
 spiega focus                       # bring this session's board window forward
 spiega --board api draw '...'      # or SPIEGA_BOARD=api
-spiega stop --all
+spiega stop                        # drop this board; the others keep drawing
+spiega stop --all                  # all of them, and the server with them
 ```
 
 A board names itself after the task: the working directory's own name, which
@@ -234,6 +235,29 @@ daemon inherits that daemon's environment, so the CLI — which runs in the pane
 
 A board is registered by the process serving it and pruned when that process is
 gone, so a name never resolves to a socket nobody is listening on.
+
+## One server, all the boards
+
+They all live in one process, on port 4777, each under `/b/<name>`. It used to
+be a process and a port per board, and the arithmetic was indefensible: the
+Node runtime is 55-70 MB and a board with nine boxes is a few KB of state, so
+eight parallel tasks spent ~600 MB holding a few hundred KB of drawing.
+
+The second reason is staleness, and it is the one that actually bit. A server
+per board meant a board started before an update kept serving the old page for
+as long as it lived — one of them 404'd on a route the code on disk had — while
+the isolation that a process per board bought had never once been needed.
+
+So: one port, no scanning upward, one copy of the renderer served to every
+board, and every board running the code that is on disk. Starting a board is a
+map entry on a process that is almost certainly already up; the port itself is
+the lock, so two agents drawing at the same moment do not end up with two
+servers. `spiega stop` drops one board and leaves the rest drawing;
+`spiega stop --server` ends the process and everything on it.
+
+`spiega serve --solo` gives a board its own process and its own port if an
+isolation case ever turns up. Clients cannot tell the difference: the url shape
+is the same either way, and `spiega boards` says which boards are on their own.
 
 If you run your sessions in [herdr](https://herdr.dev), `spiega install herdr`
 links a plugin that goes from the pane you are working in to that task's board —
@@ -310,7 +334,7 @@ the arrow into it, and the layout follows.
 | `src/render/edges.js` | gutter routing, fan-out anchors, numbered tags |
 | `src/render/layout.js` | columns from the flow, order-stable so nothing jumps |
 | `src/board/state.js` | the board as an op log |
-| `src/board/server.js` | HTTP + SSE; serves the renderer to the browser as plain ES modules |
+| `src/board/server.js` | one process, every board; HTTP + SSE, and the renderer as plain ES modules |
 | `src/board/board.html` | the pane: transcript rail, step strip, pan and zoom |
 | `src/board/draw-on.js` | the hand: variable pen speed, uneven pauses, ink then colour |
 | `src/mcp/server.js` | the same board as MCP tools |
