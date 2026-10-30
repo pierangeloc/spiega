@@ -138,6 +138,11 @@
     color:var(--paper);font-size:11.5px}
   .offline[hidden]{display:none}
   .offline .k{text-transform:uppercase;letter-spacing:.12em;font-weight:700;flex:none}
+  /* min-width:0 is the whole fix. A flex item defaults to min-width:auto, so
+     the sentence refused to shrink below its own length and ran off the edge
+     instead of breaking — flex-wrap alone does nothing, because there is only
+     one item to wrap. */
+  .offline .msg{min-width:0;flex:0 1 auto;overflow-wrap:anywhere}
   /* Not red: being disconnected means this board may be stale, which a
      reconnect fixes. Not being saved means the session is going to be lost,
      which nothing here fixes. Two different alarms deserve two colours. */
@@ -171,11 +176,11 @@
       <div class="warnings">
         <div class="offline" id="offline" hidden>
           <span class="k">not connected</span>
-          <span>this board may be out of date &mdash; reconnecting&hellip;</span>
+          <span class="msg">this board may be out of date &mdash; reconnecting&hellip;</span>
         </div>
         <div class="offline unsaved" id="unsaved" hidden>
           <span class="k">not being saved</span>
-          <span id="unsavedwhy"></span>
+          <span class="msg" id="unsavedwhy"></span>
         </div>
       </div>
       <div class="caption" id="caption" hidden></div>
