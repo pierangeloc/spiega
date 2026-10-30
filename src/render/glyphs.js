@@ -260,37 +260,64 @@ function gBlob(box, n, m, seed) {
   const cx = x + w / 2, cy = y + h / 2, r = rng(seed);
   const pts = Array.from({ length: 10 }, (_, i) => {
     const a = (i / 10) * Math.PI * 2;
-    const kx = 0.88 + r() * 0.12, ky = 0.72 + r() * 0.28;
-    return [cx + Math.cos(a) * w * 0.42 * kx, cy + Math.sin(a) * h * 0.38 * ky];
+    const kx = 0.93 + r() * 0.07, ky = 0.78 + r() * 0.22;
+    return [cx + Math.cos(a) * w * 0.46 * kx, cy + Math.sin(a) * h * 0.4 * ky];
   });
   const body = roughPoly(pts, { seed, amp: 1.1, step: 24 });
   const under = roughPoly(pts.map(([px, py]) => [px, py + 6]), { seed: seed + 2, amp: 1.1, step: 24 });
+
+  /* The blob is narrower than its box, so the label has to fit the drawing,
+     not the box. Wrap it at the width the mass actually has, and shrink a
+     single long word rather than letting it spill over the outline. */
+  const source = n.label || '';
+  const innerW = w * 0.78;
+  const longest = Math.max(1, ...String(source).split(/\s+/).map(s => s.length));
+  const titleSize = Math.max(9.5, Math.min(12.5, innerW / (longest * 0.72)));
+  const maxChars = Math.max(6, Math.floor(innerW / (titleSize * 0.72)));
+  const lines = source ? wrapText(source, maxChars, 3) : [];
+  const lh = 15, subGap = 13;
+  const blockH = (lines.length - 1) * lh + (n.sub ? subGap : 0);
+  const y0 = cy - blockH / 2 + 4.5;
+  let lab = '';
+  lines.forEach((ln, i) => {
+    lab += text(cx, y0 + i * lh, ln, { size: titleSize, upper: true, spacing: 0.06 });
+  });
+  if (n.sub) {
+    lab += text(cx, y0 + (lines.length - 1) * lh + subGap, n.sub,
+      { size: 10, color: MUTED, weight: 500, spacing: 0.04 });
+  }
   return castShadow(body) + fill(under, m.m) + fill(body, m.l) +
-    stroke(body, { w: 2 }) + labelBlock(cx, cy, n.label, n.sub);
+    stroke(body, { w: 2 }) + lab;
 }
 
-/* A vessel holds something: an open mouth, a tapered body, a level line. The
-   dark rim and the narrowing sides keep it from reading as the datastore
+/* A vessel holds something. In the wide, short box the layout hands a node, a
+   jar would stretch into a tray, so this is a bowl: a rim clearly narrower
+   than the belly, sides that bell out below the rim and gather in at the base.
+   The dark mouth and the base band are what keep it off the datastore
    cylinder, whose top is a closed, lit face. */
 function gVessel(box, n, m, seed) {
   const { x, y, w, h } = box;
-  const cx = x + w / 2, top = y + 14, bottom = y + h - 10;
-  const lipRX = (w - 34) / 2, lipRY = Math.min(8, h * 0.11);
+  const cx = x + w / 2;
+  const top = y + 13, bottom = y + h - 7;
+  const rimRX = Math.min(w * 0.29, 50);
+  const bellyRX = Math.min(w * 0.4, 66);
+  const baseRX = Math.min(w * 0.24, 40);
+  const bellyY = y + h * 0.56;
   const body = roughPoly([
-    [x + 16, top], [x + 10, y + h * 0.48], [x + 16, bottom],
-    [x + w - 16, bottom], [x + w - 10, y + h * 0.48], [x + w - 16, top],
-  ], { seed, amp: 1.0, step: 24 });
-  const lip = roughEllipse(cx, top, lipRX, lipRY, { seed: seed + 3, amp: 0.8 });
+    [cx - rimRX, top], [cx - bellyRX, bellyY], [cx - baseRX, bottom],
+    [cx + baseRX, bottom], [cx + bellyRX, bellyY], [cx + rimRX, top],
+  ], { seed, amp: 1.0, step: 22 });
+  const lip = roughEllipse(cx, top, rimRX, Math.min(7, h * 0.1), { seed: seed + 3, amp: 0.7 });
   const base = roughPoly([
-    [x + 16, bottom], [x + w - 16, bottom],
-    [x + w - 13, bottom + 5], [x + 13, bottom + 5],
+    [cx - baseRX, bottom], [cx + baseRX, bottom],
+    [cx + baseRX - 4, bottom + 5], [cx - baseRX + 4, bottom + 5],
   ], { seed: seed + 4, amp: 0.6 });
-  const level = roughLine([x + 24, y + h * 0.8], [x + w - 24, y + h * 0.8],
-    { seed: seed + 7, amp: 0.8, step: 18 });
+  const level = roughLine([cx - baseRX * 0.8, y + h * 0.84], [cx + baseRX * 0.8, y + h * 0.84],
+    { seed: seed + 7, amp: 0.7, step: 14 });
   return castShadow(body) + fill(body, m.l) + fill(base, m.m) + fill(lip, m.m) +
     stroke(body, { w: 2 }) + stroke(lip, { w: 2 }) +
     stroke(level, { w: 1.2, color: m.d, opacity: 0.55 }) +
-    labelBlock(cx, y + h * 0.55, n.label, n.sub);
+    labelBlock(cx, y + h * 0.54, n.label, n.sub);
 }
 
 /* A particle is one small thing, with two neighbours to say it is a particle
