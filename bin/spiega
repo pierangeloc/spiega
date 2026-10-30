@@ -1,0 +1,112 @@
+#!/bin/sh
+# spiega — a launcher, not a node script.
+#
+# `#!/usr/bin/env node` is a lottery on a machine with nvm: the shebang resolves
+# `node` from the caller's PATH, and an agent's non-interactive shell may find a
+# brew node missing its dylibs or a node from 2016. So this resolves a node that
+# is new enough for the engines floor, preferring nvm's default, and execs the
+# real CLI with it. It is /bin/sh so it runs before any node does.
+#
+# The one thing it must never do is guess silently: if no usable node is found,
+# it says so in one sentence and exits non-zero.
+
+set -u
+
+# Resolve this script through any symlinks. npm and `spiega install` both link
+# to it, so $0 is usually the link and not the file next to src/.
+target=$0
+while [ -h "$target" ]; do
+  dir=$(CDPATH= cd -- "$(dirname -- "$target")" && pwd -P)
+  link=$(readlink "$target")
+  case $link in
+    /*) target=$link ;;
+    *) target=$dir/$link ;;
+  esac
+done
+root=$(CDPATH= cd -- "$(dirname -- "$target")/.." && pwd -P)
+cli=$root/src/cli.js
+
+# The floor lives in package.json; this only repeats it if the read fails.
+floor=$(sed -n 's/.*"node"[[:space:]]*:[[:space:]]*">=[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
+  "$root/package.json" 2>/dev/null | head -n 1)
+[ -n "${floor:-}" ] || floor=20
+
+# A node is usable only if it actually runs and clears the floor. A binary that
+# exists but cannot load its libraries fails here rather than inside the CLI.
+usable() {
+  [ -n "${1:-}" ] && [ -x "$1" ] || return 1
+  v=$("$1" -p 'process.versions.node' 2>/dev/null) || return 1
+  [ -n "$v" ] || return 1
+  major=${v%%.*}
+  case $major in ''|*[!0-9]*) return 1 ;; esac
+  [ "$major" -ge "$floor" ]
+}
+
+nvm=${NVM_DIR:-$HOME/.nvm}
+
+# nvm's default alias, followed through links like lts/* and node. The alias
+# file may name a version (`26.10.0`, `v26.10.0`) or another alias.
+from_alias() {
+  a=$1
+  i=0
+  while [ "$i" -lt 5 ] && [ -f "$nvm/alias/$a" ]; do
+    a=$(cat "$nvm/alias/$a" 2>/dev/null) || return 1
+    i=$((i + 1))
+  done
+  case $a in
+    v[0-9]*) printf '%s\n' "$nvm/versions/node/$a/bin/node" ;;
+    [0-9]*) printf '%s\n' "$nvm/versions/node/v$a/bin/node" ;;
+  esac
+}
+
+node=''
+
+# 1. An explicit choice, for a machine whose right node is not nvm's default.
+if [ -n "${SPIEGA_NODE:-}" ] && usable "$SPIEGA_NODE"; then
+  node=$SPIEGA_NODE
+fi
+
+# 2. What nvm calls the default — the node someone actually uses in a terminal.
+if [ -z "$node" ]; then
+  alias_node=$(from_alias default 2>/dev/null) || alias_node=''
+  if [ -n "$alias_node" ] && usable "$alias_node"; then
+    node=$alias_node
+  fi
+fi
+
+# 3. Any installed nvm version that clears the floor, newest first.
+if [ -z "$node" ] && [ -d "$nvm/versions/node" ]; then
+  while IFS= read -r candidate; do
+    if usable "$candidate"; then node=$candidate; break; fi
+  done <<EOF
+$(ls -1d "$nvm"/versions/node/*/bin/node 2>/dev/null | sort -r)
+EOF
+fi
+
+# 4. Whatever the PATH has, if it is usable.
+if [ -z "$node" ]; then
+  candidate=$(command -v node 2>/dev/null) || candidate=''
+  if [ -n "$candidate" ] && usable "$candidate"; then node=$candidate; fi
+fi
+
+# 5. The usual places, for a shell whose PATH is as bare as an agent's.
+if [ -z "$node" ]; then
+  for candidate in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do
+    if usable "$candidate"; then node=$candidate; break; fi
+  done
+fi
+
+if [ -z "$node" ]; then
+  echo "spiega needs Node $floor or newer and found no node on this machine that can run it; install one with nvm (nvm install --lts) or point SPIEGA_NODE at it." >&2
+  exit 1
+fi
+
+# `spiega doctor` asks the launcher which node an agent would really get,
+# because the node on PATH and the node nvm calls default are not the same
+# thing, and only the second one runs this.
+if [ "${SPIEGA_NODE_VERSION:-}" = "1" ]; then
+  printf '%s %s\n' "$node" "$("$node" -p 'process.versions.node')"
+  exit 0
+fi
+
+exec "$node" "$cli" "$@"

@@ -72,20 +72,81 @@ function checkout(rows) {
   return when;
 }
 
-/* ---------- the CLI on PATH ---------- */
+/* ---------- can an agent actually invoke me? ---------- */
 
-function cli(rows) {
-  const which = sh('sh', ['-c', 'command -v spiega']);
-  if (!which) {
-    return rows.push(bad('spiega on PATH', 'not found', `cd ${tilde(ROOT)} && npm link`));
+/* A terminal that finds spiega proves nothing. An agent's tool call is a
+   non-interactive shell with its own environment; on a machine with nvm that
+   shell never sources nvm's init, so the bin npm installed is invisible. That
+   is the failure this whole check exists for, and it is why these probes run
+   under `env -i` rather than inheriting the PATH of whoever typed `doctor`. */
+const AGENT_SHELL = ['/bin/zsh', '/usr/bin/zsh', '/bin/bash', '/bin/sh']
+  .find(f => fs.existsSync(f)) || '/bin/sh';
+
+const agentShell = script => {
+  try {
+    return execFileSync('env', ['-i', `HOME=${HOME}`, AGENT_SHELL, '-c', script],
+      { encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch { return null; }
+};
+
+const nodeFloor = () => {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+    return Number(String(pkg.engines?.node || '').match(/\d+/)?.[0]) || 20;
+  } catch { return 20; }
+};
+
+/* Which node would run it? The launcher answers this itself, because the node
+   on PATH and the node nvm calls default are not the same thing and only the
+   second one actually runs spiega. An install that predates the launcher has
+   `#!/usr/bin/env node`, so fall back to whatever node the clean shell finds. */
+const nodeFor = which => {
+  try {
+    const out = execFileSync(which, [], {
+      encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'],
+      env: { HOME, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', SPIEGA_NODE_VERSION: '1' },
+    }).trim();
+    const m = out.match(/^(.*) (\d+\.\d+\.\d+)$/);
+    if (m) return { node: m[1], version: m[2], via: 'the launcher' };
+  } catch { /* not the launcher, or it could not run */ }
+  const v = agentShell('node -p "process.versions.node"');
+  if (/^\d+\.\d+\.\d+$/.test(v || '')) {
+    return { version: v, via: 'the node on PATH, with no launcher' };
   }
+  return null;
+};
+
+function invocation(rows) {
+  const shell = path.basename(AGENT_SHELL);
+  const which = agentShell('command -v spiega');
+  if (!which) {
+    return rows.push(bad('agent can run spiega',
+      `not found from a non-interactive ${shell} \u2014 an agent's tool call gets no nvm init`,
+      'spiega install'));
+  }
+
   let real = which;
   try { real = fs.realpathSync(which); } catch { /* leave as-is */ }
-  const mine = path.resolve(ROOT, 'src', 'cli.js');
-  rows.push(real === mine
-    ? ok('spiega on PATH', `${tilde(which)} → this checkout`)
-    : bad('spiega on PATH', `${tilde(which)} → ${tilde(real)}, which is NOT this checkout`,
-        `cd ${tilde(ROOT)} && npm link`));
+  rows.push(ok('agent can run spiega', `${tilde(which)} from a non-interactive ${shell}`));
+
+  const mine = [path.resolve(ROOT, 'bin', 'spiega'), path.resolve(ROOT, 'src', 'cli.js')];
+  rows.push(mine.includes(real)
+    ? ok('spiega is this checkout', `${tilde(which)} → ${tilde(real)}`)
+    : bad('spiega is this checkout', `${tilde(which)} → ${tilde(real)}, which is NOT this checkout`,
+        'spiega install'));
+
+  const floor = nodeFloor();
+  const probe = nodeFor(which);
+  if (!probe) {
+    rows.push(warn('node for spiega', 'could not work out which node it would use'));
+  } else if (Number(probe.version.split('.')[0]) < floor) {
+    rows.push(bad('node for spiega',
+      `v${probe.version} (${probe.via}) is below the engines floor of ${floor}`,
+      `install Node ${floor} or newer, or let the launcher pick one with \`spiega install\``));
+  } else {
+    const at = probe.node ? ` at ${tilde(probe.node)}` : '';
+    rows.push(ok('node for spiega', `v${probe.version} via ${probe.via}${at}`));
+  }
 }
 
 /* ---------- skills ---------- */
@@ -334,7 +395,7 @@ function legacy(rows) {
 export function doctor() {
   const rows = [];
   const headTime = checkout(rows);
-  cli(rows);
+  invocation(rows);
   skills(rows);
   blocks(rows);
   registrations(rows);

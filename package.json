@@ -4,12 +4,13 @@
   "description": "A hand-drawn board an AI agent draws on while it explains software architecture.",
   "type": "module",
   "bin": {
-    "spiega": "./src/cli.js"
+    "spiega": "./bin/spiega"
   },
   "exports": {
     ".": "./src/index.js"
   },
   "files": [
+    "bin",
     "src",
     "integrations",
     "examples",
