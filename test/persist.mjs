@@ -14,8 +14,8 @@ process.env.HOME = HOME;
 process.env.USERPROFILE = HOME;
 
 const { createServer, boardFile } = await import('../src/board/server.js');
-const { emptyBoard, applyOps, createLog, restoreBoard, boardOps, LOG_CAP } =
-  await import('../src/board/state.js');
+const { emptyBoard, applyOps, boardOps, LOG_CAP } = await import('../src/board/state.js');
+const { createLog, restoreBoard } = await import('../src/board/log.js');
 
 let n = 0;
 const test = async (name, fn) => {

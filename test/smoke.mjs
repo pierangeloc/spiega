@@ -1634,4 +1634,40 @@ await atest('boards persist across a restart, and POST /op keeps its latency bud
   process.stdout.write(stdout);
 });
 
+/* The browser loads these modules off disk, unbundled, so anything they import
+   must exist in a browser. A `node:` builtin anywhere in that graph does not
+   fail a test or a lint — it fails silently at runtime, the module graph never
+   evaluates, and every board renders empty with nothing in the terminal to say
+   why. That is exactly what happened once persistence put `node:fs` into
+   state.js, which board.html imports. Hence this. */
+await atest('nothing the browser imports reaches for a node builtin', async () => {
+  const entry = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
+  const seen = new Set();
+  const bad = [];
+
+  const walk = spec => {
+    const file = path.join(ROOT, spec.replace(/^\//, ''));
+    if (seen.has(file)) return;
+    seen.add(file);
+    let src;
+    try { src = fs.readFileSync(file, 'utf8'); }
+    catch { bad.push(`${spec} is imported by the board page but does not exist`); return; }
+    for (const m of src.matchAll(/^\s*(?:import|export)[^'"\n]*from\s*['"]([^'"]+)['"]/gm)) {
+      const dep = m[1];
+      if (dep.startsWith('node:') || !/^[./]/.test(dep)) {
+        bad.push(`${path.relative(ROOT, file)} imports "${dep}", which a browser cannot resolve`);
+        continue;
+      }
+      walk(dep.startsWith('/') ? dep : path.join(path.dirname(spec), dep));
+    }
+  };
+
+  const roots = [...entry.matchAll(/^import[^'"\n]*from\s*['"](\/[^'"]+)['"]/gm)].map(m => m[1]);
+  assert.ok(roots.length >= 5, 'the board page should import the renderer modules off disk');
+  roots.forEach(walk);
+
+  assert.deepEqual(bad, [], 'the board page would fail to load:\n  ' + bad.join('\n  '));
+  assert.ok(seen.size >= 8, 'the walk should reach the whole renderer, not stop at the first file');
+});
+
 console.log(`\n${n} passed`);

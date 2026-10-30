@@ -24,7 +24,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { emptyBoard, applyOps, restoreBoard, boardOps, createLog, boardLogFile } from './state.js';
+import { emptyBoard, applyOps, boardOps } from './state.js';
+import { restoreBoard, createLog, boardLogFile } from './log.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
