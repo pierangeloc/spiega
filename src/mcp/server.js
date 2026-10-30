@@ -10,7 +10,7 @@
 import path from 'node:path';
 import { resolveBoard } from '../board/server.js';
 
-const KINDS = 'client, gateway, service, compute, datastore, cache, queue, external, note';
+const KINDS = 'client, gateway, service, compute, datastore, cache, queue, external, note, formula, blob, vessel, particle, source';
 
 /* The board for this session, started if need be. One server holds every
    board, so this is usually a file read and nothing more. */

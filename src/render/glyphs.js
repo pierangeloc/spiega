@@ -9,7 +9,7 @@
 import { INK, MUTED, SHADOW, ACCENT, bodyOf, mix } from './theme.js';
 import {
   roughRect, roughLine, roughEllipse, roughArc, roughPoly, roundedPts,
-  stroke, fill, text, hashSeed, wrapText, lettering } from './ink.js';
+  stroke, fill, text, hashSeed, rng, wrapText, lettering } from './ink.js';
 import { measureMath, drawMath } from './math.js';
 
 const SH_DX = 5, SH_DY = 6;          // the cast shadow sits down and to the left-ish
@@ -243,10 +243,99 @@ function gFormula(box, n, m, seed) {
     `</g>`;
 }
 
+/* ---------- the neutral glyphs ----------
+
+   The ten above are software's furniture, and each says something specific:
+   a cylinder is durable storage, a row of slots is a queue. Asked to draw a
+   plant, those meanings are a lie — H2O is not a database. These four carry no
+   infrastructure reading at all, so a figure that is not about software can
+   use the same board without its shapes contradicting its words. */
+
+/* A blob is a body with no orientation: one closed, uneven mass. It is the
+   glyph for a region, an organism or a substance whose outline is the
+   information. Deliberately not a cloud: a cloud is a union of lobes sitting
+   on a flat base; this has no flat edge and no inside worth separating. */
+function gBlob(box, n, m, seed) {
+  const { x, y, w, h } = box;
+  const cx = x + w / 2, cy = y + h / 2, r = rng(seed);
+  const pts = Array.from({ length: 10 }, (_, i) => {
+    const a = (i / 10) * Math.PI * 2;
+    const kx = 0.88 + r() * 0.12, ky = 0.72 + r() * 0.28;
+    return [cx + Math.cos(a) * w * 0.42 * kx, cy + Math.sin(a) * h * 0.38 * ky];
+  });
+  const body = roughPoly(pts, { seed, amp: 1.1, step: 24 });
+  const under = roughPoly(pts.map(([px, py]) => [px, py + 6]), { seed: seed + 2, amp: 1.1, step: 24 });
+  return castShadow(body) + fill(under, m.m) + fill(body, m.l) +
+    stroke(body, { w: 2 }) + labelBlock(cx, cy, n.label, n.sub);
+}
+
+/* A vessel holds something: an open mouth, a tapered body, a level line. The
+   dark rim and the narrowing sides keep it from reading as the datastore
+   cylinder, whose top is a closed, lit face. */
+function gVessel(box, n, m, seed) {
+  const { x, y, w, h } = box;
+  const cx = x + w / 2, top = y + 14, bottom = y + h - 10;
+  const lipRX = (w - 34) / 2, lipRY = Math.min(8, h * 0.11);
+  const body = roughPoly([
+    [x + 16, top], [x + 10, y + h * 0.48], [x + 16, bottom],
+    [x + w - 16, bottom], [x + w - 10, y + h * 0.48], [x + w - 16, top],
+  ], { seed, amp: 1.0, step: 24 });
+  const lip = roughEllipse(cx, top, lipRX, lipRY, { seed: seed + 3, amp: 0.8 });
+  const base = roughPoly([
+    [x + 16, bottom], [x + w - 16, bottom],
+    [x + w - 13, bottom + 5], [x + 13, bottom + 5],
+  ], { seed: seed + 4, amp: 0.6 });
+  const level = roughLine([x + 24, y + h * 0.8], [x + w - 24, y + h * 0.8],
+    { seed: seed + 7, amp: 0.8, step: 18 });
+  return castShadow(body) + fill(body, m.l) + fill(base, m.m) + fill(lip, m.m) +
+    stroke(body, { w: 2 }) + stroke(lip, { w: 2 }) +
+    stroke(level, { w: 1.2, color: m.d, opacity: 0.55 }) +
+    labelBlock(cx, y + h * 0.55, n.label, n.sub);
+}
+
+/* A particle is one small thing, with two neighbours to say it is a particle
+   and not a status light. It has no slot, box or mouth to imply storage or
+   passage — only a body, a highlight, and a couple of specks. */
+function gParticle(box, n, m, seed) {
+  const { x, y, w, h } = box;
+  const cx = x + w / 2, cy = y + Math.min(20, h * 0.27), r = Math.min(15, h * 0.22);
+  const orb = roughEllipse(cx, cy, r, r * 0.94, { seed });
+  const shine = roughEllipse(cx - r * 0.3, cy - r * 0.32, r * 0.34, r * 0.24,
+    { seed: seed + 4, amp: 0.5 });
+  const a = roughEllipse(cx + r * 1.8, cy - r * 0.6, 2.6, 2.3, { seed: seed + 5, amp: 0.4 });
+  const b = roughEllipse(cx - r * 1.7, cy + r * 0.8, 2.1, 1.9, { seed: seed + 6, amp: 0.4 });
+  return castShadow(orb) + fill(orb, m.l) + fill(shine, mix(m.l, '#ffffff', 0.5)) +
+    fill(a, m.m) + fill(b, m.m) + stroke(orb, { w: 2 }) +
+    stroke(a, { w: 0.9, color: m.d, opacity: 0.45 }) +
+    stroke(b, { w: 0.9, color: m.d, opacity: 0.45 }) +
+    labelBlock(cx, y + h - 18, n.label, n.sub);
+}
+
+/* A source emits: a filled disc with rays thrown off it. It is the sun, a
+   spring, a supply — the thing at the start, not a shape that stores or
+   carries what it gives. Rays stay off the bottom so the label has a clear
+   line to sit on. */
+function gSource(box, n, m, seed) {
+  const { x, y, w, h } = box;
+  const cx = x + w / 2, cy = y + 21, r = Math.min(13, h * 0.19);
+  const disc = roughEllipse(cx, cy, r, r * 0.95, { seed });
+  let rays = '';
+  for (let i = 0; i < 7; i++) {
+    const a = (195 + i * 25) * Math.PI / 180;
+    const inner = r + 4, outer = inner + 7 + ((seed + i * 13) % 5);
+    rays += stroke(roughLine(
+      [cx + Math.cos(a) * inner, cy + Math.sin(a) * inner],
+      [cx + Math.cos(a) * outer, cy + Math.sin(a) * outer],
+      { seed: seed + 10 + i, amp: 0.5, step: 7 }), { w: 1.6, color: m.d });
+  }
+  return castShadow(disc) + fill(disc, m.l) + stroke(disc, { w: 2 }) + rays +
+    labelBlock(cx, y + h - 20, n.label, n.sub);
+}
+
 const GLYPHS = {
   service: gService, gateway: gGateway, datastore: gDatastore, queue: gQueue,
   cache: gCache, client: gClient, external: gExternal, compute: gCompute, note: gNote,
-  formula: gFormula,
+  formula: gFormula, blob: gBlob, vessel: gVessel, particle: gParticle, source: gSource,
 };
 
 export const KINDS = Object.keys(GLYPHS);
