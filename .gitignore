@@ -6,3 +6,6 @@ node_modules/
 /board.html
 /bench/
 examples/*.html
+
+# IntelliJ project files: local to one machine, not to the project.
+.idea/
