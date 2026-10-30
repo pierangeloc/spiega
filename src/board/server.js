@@ -24,7 +24,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { emptyBoard, applyOps } from './state.js';
+import { emptyBoard, applyOps, restoreBoard, boardOps, createLog, boardLogFile } from './state.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
@@ -43,6 +43,9 @@ const envVar = name => process.env[`SPIEGA_${name}`] ?? process.env[`HANDWAVE_${
    serves; reading it still finds a board started before any of that, which is
    the only reason it existed. */
 export const SESSION_FILE = path.join(SESSION_DIR, 'session.json');
+/* The boards themselves: one append-only JSONL op log each. */
+export const BOARDS_DIR = path.join(SESSION_DIR, 'boards');
+export const boardFile = name => boardLogFile(BOARDS_DIR, name);
 
 /* The canonical port, and the lock on being the server — see `listen`. */
 export const PORT = Number(envVar('PORT')) || 4777;
@@ -64,24 +67,44 @@ const readBody = req => new Promise((resolve, reject) => {
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-export function createServer({ board = emptyBoard(), name = DEFAULT_BOARD } = {}) {
-  /* name -> { name, board, clients }. Nothing else in the process is per
-     board: the renderer, the port and the HTTP server are shared. */
+export function createServer({ board = null, name = DEFAULT_BOARD, persist = false, debounce = 100 } = {}) {
+  /* name -> { name, board, clients, log }. Nothing else in the process is per
+     board: the renderer, the port and the HTTP server are shared. Tests and
+     one-off renders stay in memory; `startBoard` turns persistence on. */
   const boards = new Map();
 
-  const hold = (nm, b = emptyBoard()) => {
+  const load = nm => {
+    if (!persist) return { board: emptyBoard(), lines: 0, tail: true };
+    try { return restoreBoard(boardFile(nm)); }
+    catch { return { board: emptyBoard(), lines: 0, tail: true }; }
+  };
+
+  const hold = (nm, b = null) => {
     const held = boards.get(nm);
     if (held) return held;
-    const entry = { name: nm, board: b, clients: new Set(), started: Date.now() };
+    const loaded = b ? { board: b, lines: 0, tail: true } : load(nm);
+    const entry = { name: nm, board: loaded.board, clients: new Set(), started: Date.now(), log: null };
     boards.set(nm, entry);
+    if (persist) {
+      try {
+        entry.log = createLog(boardFile(nm), {
+          lines: loaded.lines, tail: loaded.tail, debounce,
+          snapshot: () => boardOps(entry.board),
+        });
+      } catch (e) {
+        // An unwritable state directory must not stop the board being drawn on.
+        console.error(`spiega: could not open the log for "${nm}": ${e.message}`);
+      }
+    }
     return entry;
   };
 
-  const drop = nm => {
+  const drop = async nm => {
     const entry = boards.get(nm);
     if (!entry) return false;
     boards.delete(nm);
     for (const c of entry.clients) { try { c.end(); } catch { /* already gone */ } }
+    await entry.log?.close();
     return true;
   };
 
@@ -192,7 +215,11 @@ export function createServer({ board = emptyBoard(), name = DEFAULT_BOARD } = {}
       let ops;
       try { ops = JSON.parse(await readBody(req)); }
       catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + e.message }); }
-      const { fresh, errors } = applyOps(board, ops.ops || ops);
+      const { fresh, errors, applied } = applyOps(board, ops.ops || ops);
+      /* No file I/O and no await here: the ops go into the log writer's buffer
+         and the flush happens on its own timer. This route is on the critical
+         path of somebody talking. */
+      if (applied.length) entry.log?.push(applied);
       broadcast(entry, 'patch', { board, fresh });
       return json(res, errors.length ? 207 : 200, {
         ok: !errors.length, errors, rev: board.rev,
@@ -213,7 +240,7 @@ export function createServer({ board = emptyBoard(), name = DEFAULT_BOARD } = {}
     /* Let this board go, and leave the other seven drawing. One process holds
        all of them, so stopping one is a map deletion, not a kill. */
     if (rest === '/close' && req.method === 'POST') {
-      drop(nm);
+      await drop(nm);
       unregisterBoard(nm);
       return json(res, 200, { ok: true, name: nm, left: boards.size });
     }
@@ -236,10 +263,17 @@ export function createServer({ board = emptyBoard(), name = DEFAULT_BOARD } = {}
   });
 
   server.on('close', () => {
-    for (const e of boards.values()) for (const c of e.clients) { try { c.end(); } catch {} }
+    for (const e of boards.values()) {
+      for (const c of e.clients) { try { c.end(); } catch {} }
+      e.log?.close();
+    }
   });
 
-  const app = { server, boards, hold, drop, broadcast, name, url: null, board: first.board };
+  const app = {
+    server, boards, hold, drop, broadcast, name, url: null, board: first.board,
+    // lets a test (or a shutdown path) wait for the buffer to reach the file
+    flush: () => Promise.all([...boards.values()].map(e => e.log?.flush())),
+  };
   return app;
 }
 
@@ -503,13 +537,20 @@ export async function startBoard({ name = boardName(), port = PORT, solo = false
       if (url) return { url, serving: false };
     }
   }
-  const app = createServer({ name });
+  const app = createServer({ name, persist: true });
   const r = await listen(app, { port, solo });
   if (!r.mine) {
+    await Promise.all([...app.boards.values()].map(e => e.log?.close()));
     const url = await createBoardOn(r.url, name);
     if (url) return { url, serving: false };
     throw new Error(`a spiega server answered on ${r.url} but would not take a board`);
   }
+  /* `spiega stop --server` is a signal, not a request. Flush the last tick of
+     ops on the way out so the common shutdown is not the hard crash that the
+     budget allows us to lose. */
+  const goodbye = () => { app.flush().finally(() => process.exit(0)); };
+  process.once('SIGTERM', goodbye);
+  process.once('SIGINT', goodbye);
   return { url: `${r.url}/b/${name}`, serving: true, app };
 }
 

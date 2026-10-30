@@ -1622,4 +1622,16 @@ test('capitals, except where the spelling is the information', () => {
   assert.equal(lettering(''), '');
 });
 
+/* Boards on disk, and the p99 budget on POST /op, live in their own file and
+   their own process: the state directory is read from HOME at import, and a
+   test must never write into the real ~/.spiega. */
+await atest('boards persist across a restart, and POST /op keeps its latency budget', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { stdout } = await promisify(execFile)(
+    process.execPath, [path.join(ROOT, 'test/persist.mjs')],
+    { env: { ...process.env }, maxBuffer: 4 << 20 });
+  process.stdout.write(stdout);
+});
+
 console.log(`\n${n} passed`);
