@@ -129,10 +129,24 @@
   .caption[hidden]{display:none}
   .caption.on{opacity:1}
   .caption b{color:var(--accent)}
-  .offline{position:absolute;left:0;right:0;top:0;z-index:6;display:flex;gap:10px;align-items:baseline;
-    justify-content:center;padding:7px 14px;background:#b3402a;color:var(--paper);font-size:11.5px}
+  .warnings{position:absolute;left:0;right:0;top:0;z-index:6}
+  /* flex-wrap, because a board is often a narrow split pane and the sentence
+     that matters is the second half of this one. Without it the warning reads
+     "nothing drawn h" and the reader loses the only part worth printing. */
+  .offline{display:flex;gap:4px 10px;align-items:baseline;flex-wrap:wrap;
+    justify-content:center;text-align:center;padding:7px 14px;background:#b3402a;
+    color:var(--paper);font-size:11.5px}
   .offline[hidden]{display:none}
-  .offline .k{text-transform:uppercase;letter-spacing:.12em;font-weight:700}
+  .offline .k{text-transform:uppercase;letter-spacing:.12em;font-weight:700;flex:none}
+  /* min-width:0 is the whole fix. A flex item defaults to min-width:auto, so
+     the sentence refused to shrink below its own length and ran off the edge
+     instead of breaking — flex-wrap alone does nothing, because there is only
+     one item to wrap. */
+  .offline .msg{min-width:0;flex:0 1 auto;overflow-wrap:anywhere}
+  /* Not red: being disconnected means this board may be stale, which a
+     reconnect fixes. Not being saved means the session is going to be lost,
+     which nothing here fixes. Two different alarms deserve two colours. */
+  .unsaved{background:#9a6a15}
   .zoom{position:absolute;right:14px;top:12px;display:flex;gap:6px}
 </style>
 </head>
@@ -159,9 +173,15 @@
         <div class="k">the board is empty</div>
         <div><code>spiega draw '{"op":"node","label":"API Gateway","kind":"gateway"}'</code></div>
       </div>
-      <div class="offline" id="offline" hidden>
-        <span class="k">not connected</span>
-        <span>this board may be out of date &mdash; reconnecting&hellip;</span>
+      <div class="warnings">
+        <div class="offline" id="offline" hidden>
+          <span class="k">not connected</span>
+          <span class="msg">this board may be out of date &mdash; reconnecting&hellip;</span>
+        </div>
+        <div class="offline unsaved" id="unsaved" hidden>
+          <span class="k">not being saved</span>
+          <span class="msg" id="unsavedwhy"></span>
+        </div>
       </div>
       <div class="caption" id="caption" hidden></div>
       <div class="steps" id="steps" hidden>
@@ -712,6 +732,18 @@ function setLink(state) {           // 'live' | 'idle' | 'down'
   $('offline').hidden = state !== 'down';
 }
 
+/* A board nobody is writing down looks exactly like one that is, so it has to
+   say so itself. The CLI cannot: by the time anyone notices, the explanation is
+   already gone. */
+function setSaving(s) {
+  const why = s && s.saving === false && s.why !== 'memory' ? s.why : null;
+  $('unsaved').hidden = !why;
+  if (!why) return;
+  $('unsavedwhy').textContent = why === 'other-server'
+    ? 'another spiega owns this board\u2019s file \u2014 nothing drawn here will survive a restart'
+    : 'this board\u2019s file could not be opened \u2014 nothing drawn here will survive a restart';
+}
+
 function connect() {
   clearTimeout(retryTimer);
   if (es) { try { es.close(); } catch {} }
@@ -725,6 +757,7 @@ function connect() {
     onState(JSON.parse(e.data));
   });
   es.addEventListener('patch', e => { const d = JSON.parse(e.data); onState(d.board, d.fresh); });
+  es.addEventListener('saving', e => setSaving(JSON.parse(e.data)));
   // `spiega replay` — or the agent's own tool — asking for the movie again.
   // Always a start, never a toggle: a remote caller cannot see the button.
   es.addEventListener('replay', () => { if (replaying) stopReplay(); replay(); });
