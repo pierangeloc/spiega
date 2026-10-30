@@ -100,6 +100,20 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     return entry;
   };
 
+  /* Whether what is drawn here is reaching the file, and if not, why.
+
+     A board that is not being saved still draws perfectly, which is the whole
+     problem: it looks exactly like one that is. The lock is taken when the
+     board is first held, so this does not change under us — a second server
+     never becomes the owner while the first is alive. `memory` is not a
+     warning: tests and one-off renders are meant to be in memory. */
+  const saving = entry => {
+    if (!persist) return { saving: false, why: 'memory' };
+    if (!entry.log) return { saving: false, why: 'unwritable', file: boardFile(entry.name) };
+    if (!entry.log.owner) return { saving: false, why: 'other-server', file: entry.log.file };
+    return { saving: true, file: entry.log.file };
+  };
+
   const drop = async nm => {
     const entry = boards.get(nm);
     if (!entry) return false;
@@ -198,7 +212,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     if (rest === '/') return serveFile(res, path.join(HERE, 'board.html'));
     if (rest === '/state') return json(res, 200, board);
     // who this board is, for the window title and for `spiega boards`
-    if (rest === '/whoami') return json(res, 200, { name: entry.name, pid: process.pid });
+    if (rest === '/whoami') return json(res, 200, { name: entry.name, pid: process.pid, ...saving(entry) });
 
     if (rest === '/events') {
       res.writeHead(200, {
@@ -206,6 +220,9 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
         'x-accel-buffering': 'no',
       });
       res.write(`event: state\ndata: ${JSON.stringify(board)}\n\n`);
+      /* Said on connect rather than only when it goes wrong: the board is
+         already not being saved by the time anyone opens it. */
+      res.write(`event: saving\ndata: ${JSON.stringify(saving(entry))}\n\n`);
       entry.clients.add(res);
       const ka = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 25000);
       req.on('close', () => { clearInterval(ka); entry.clients.delete(res); });

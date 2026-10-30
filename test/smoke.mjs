@@ -1670,4 +1670,13 @@ await atest('nothing the browser imports reaches for a node builtin', async () =
   assert.ok(seen.size >= 8, 'the walk should reach the whole renderer, not stop at the first file');
 });
 
+await atest('a board that is not being saved says so', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { stdout } = await promisify(execFile)(
+    process.execPath, [path.join(ROOT, 'test/saving.mjs')],
+    { env: { ...process.env }, maxBuffer: 4 << 20 });
+  process.stdout.write(stdout);
+});
+
 console.log(`\n${n} passed`);
