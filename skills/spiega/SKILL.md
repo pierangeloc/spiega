@@ -75,6 +75,14 @@ spiega say  "The gateway does **authn** and rate limiting, then hands off."
 | `external` | a third party, drawn as a cloud |
 | `note` | your own handwriting: a keyword, a caveat, a number |
 | `formula` | an equation that *is* the explanation |
+| `blob` | a body, a region, a mass with no fixed form |
+| `vessel` | a container: a cell, a tank, a reservoir |
+| `particle` | a molecule, a drop, one unit of a substance |
+| `source` | the sun, a spring, wherever something comes from |
+
+The last four carry no software meaning. Use them when a figure is not about
+software — `source` for the sun, `vessel` for water, `particle` for a gas,
+`blob` for an organism — so the shapes do not say database or topic.
 
 Other ops:
 

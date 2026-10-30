@@ -39,6 +39,12 @@ export const BODY_FOR_KIND = {
   cache:     'blush',
   compute:   'cobalt',
   note:      'paper',
+  // The neutral vocabulary keeps its own readings: green for an organism,
+  // blue for a vessel, pink for a particle, yellow for a source.
+  blob:      'mint',
+  vessel:    'cobalt',
+  particle:  'blush',
+  source:    'mustard',
   boundary:  'slate',
 };
 

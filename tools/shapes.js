@@ -42,6 +42,12 @@ const SAMPLES = [
   ['note', [{ op: 'node', id: 'n', kind: 'note', label: 'at most once\nper tenant' }]],
   ['formula', [{ op: 'node', id: 'f', kind: 'formula', label: '\\nabla \\times E = -\\frac{\\partial B}{\\partial t}' }]],
 
+  // the neutral kinds, shown on a figure that is not about software at all
+  ['blob', [{ op: 'node', id: 'b', kind: 'blob', label: 'Chloroplast', sub: 'organelle' }]],
+  ['vessel', [{ op: 'node', id: 'v', kind: 'vessel', label: 'Water', sub: 'H2O' }]],
+  ['particle', [{ op: 'node', id: 'p', kind: 'particle', label: 'CO2', sub: 'gas' }]],
+  ['source', [{ op: 'node', id: 's', kind: 'source', label: 'Sun', sub: 'light' }]],
+
   // the things between and around them
   ['edge', [
     { op: 'node', id: 'orders', label: 'Orders' },
