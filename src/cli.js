@@ -11,6 +11,27 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/* The first thing that runs, before any of the modules below are imported.
+
+   Those modules use syntax a Node older than the engines floor will refuse to
+   parse, so without this check an old node fails several modules deep with a
+   SyntaxError that names a file nobody typed and never mentions the version.
+   The floor is read from package.json rather than repeated, so there is one
+   place to change it. */
+{
+  let floor = 20;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    const found = String((pkg.engines && pkg.engines.node) || '').match(/\d+/);
+    floor = Number(found && found[0]) || floor;
+  } catch { /* a checkout without package.json keeps the known floor */ }
+  const major = Number(process.versions.node.split('.')[0]);
+  if (major < floor) {
+    console.error(`spiega needs Node ${floor} or newer, but the node running it is ${process.versions.node} (${process.execPath}), so run it with a newer node or reinstall spiega under one.`);
+    process.exit(1);
+  }
+}
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 let argv = process.argv.slice(2);
 
