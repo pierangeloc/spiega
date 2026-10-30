@@ -1,5 +1,9 @@
 # Working on spiega
 
+This is the one instructions file. `CLAUDE.md` is a stub that imports it, and
+`spiega install project` appends its own marker block below — put instructions
+here, not in either of those.
+
 Read this before changing anything. It is short on purpose: it holds the things
 that have actually gone wrong here, not general advice.
 
