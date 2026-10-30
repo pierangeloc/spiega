@@ -14,10 +14,14 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { upsertBlock } from './agents-block.js';
 import { upsertTable } from './toml.js';
+import { c, sym, pad, shortPath } from './term.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const MCP_ENTRY = path.join(ROOT, 'src', 'mcp', 'server.js');
+/* The sh launcher, not cli.js: it resolves a node that clears the engines
+   floor instead of trusting whatever `env node` happens to be. */
+const LAUNCHER = path.join(ROOT, 'bin', 'spiega');
 const HOME = os.homedir();
 
 /* The XDG config root, honoured rather than assumed.
@@ -93,6 +97,104 @@ const backupDir = d => {
   fs.mkdirSync(path.dirname(b), { recursive: true });
   fs.cpSync(d, b, { recursive: true });
   return b;
+};
+
+/* ---------- the command itself ---------- */
+
+/* npm puts `spiega` in the active node version's bin, which joins PATH only
+   when nvm's init runs in an interactive shell. An agent's tool call does not
+   get that shell, so it cannot find the command at all — and falls back to
+   prose without saying so. The MCP server does not care, but the binary is the
+   fallback when MCP is unavailable, so the fallback has to exist.
+
+   This puts a link to the sh launcher in a directory every shell sees. It
+   prefers a writable directory that is already on a non-interactive PATH
+   (/usr/local/bin on many machines); when there is none, it uses ~/.local/bin
+   and makes non-interactive zsh find it, since zsh reads ~/.zshenv even when
+   it is neither interactive nor a login shell. */
+const AGENT_SHELL = ['/bin/zsh', '/usr/bin/zsh', '/bin/bash', '/bin/sh']
+  .find(f => fs.existsSync(f)) || '/bin/sh';
+
+/* The PATH an agent's tool call gets, not this shell's. `env -i` is the point:
+   nvm is not sourced, so a bin that only an interactive shell knows about is
+   correctly reported as missing. */
+const agentPath = () => {
+  try {
+    return execFileSync('env', ['-i', `HOME=${HOME}`, AGENT_SHELL, '-c', 'printf %s "$PATH"'],
+      { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch { return process.env.PATH || ''; }
+};
+
+const writableDir = d => {
+  try { return fs.statSync(d).isDirectory() && (fs.accessSync(d, fs.constants.W_OK), true); }
+  catch { return false; }
+};
+
+const DOT_LOCAL = path.join(HOME, '.local', 'bin');
+const RC_MARKER = '# spiega: the launcher, for the non-interactive shells agents get';
+
+/* zsh sources ~/.zshenv for every invocation, so one guarded line there is
+   enough to put ~/.local/bin on an agent's PATH, and it does nothing if the
+   person already put it there themselves. */
+const addToZshEnv = () => {
+  const rc = path.join(HOME, '.zshenv');
+  let text = '';
+  try { text = fs.readFileSync(rc, 'utf8'); } catch { /* absent */ }
+  if (text.includes(RC_MARKER)) return false;
+  backup(rc);
+  const block = `${RC_MARKER}\n`
+    + 'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH"; export PATH ;; esac\n';
+  fs.appendFileSync(rc, (text && !text.endsWith('\n') ? '\n' : '\n') + block);
+  return true;
+};
+
+export function ensureBin() {
+  const pathDirs = agentPath().split(':').filter(Boolean);
+  let dir = pathDirs.find(d => d.startsWith('/') && writableDir(d));
+  if (!dir) dir = DOT_LOCAL;
+  fs.mkdirSync(dir, { recursive: true });
+
+  const link = path.join(dir, 'spiega');
+  let changed = false;
+  let same = false;
+  try { same = fs.existsSync(link) && fs.realpathSync(link) === fs.realpathSync(LAUNCHER); } catch { /* broken link */ }
+  if (!same) {
+    // a symlink has no contents to lose; a real file might, so it is backed up
+    try {
+      const st = fs.lstatSync(link);
+      if (st.isFile() && !st.isSymbolicLink()) backup(link);
+    } catch { /* absent */ }
+    fs.rmSync(link, { force: true });
+    fs.symlinkSync(LAUNCHER, link);
+    changed = true;
+  }
+
+  let onPath = agentPath().split(':').includes(dir);
+  let addedToRc = false;
+  if (!onPath && dir === DOT_LOCAL) {
+    addedToRc = addToZshEnv();
+    onPath = agentPath().split(':').includes(dir);
+  }
+
+  return { dir, link, onPath, addedToRc, changed };
+}
+
+/* The install list is a table of harness targets, and the command itself is not
+   one of them; but where it landed is the thing this issue is about, so it is
+   said first and in the same shape. */
+const reportBin = info => {
+  const g = sym();
+  const where = shortPath(info.link, 46);
+  // the same column the target rows below use, so the command lines up with them
+  const width = Math.max(...Object.keys(TARGETS).map(n => n.length)) + 2;
+  if (!info.onPath) {
+    console.log(`  ${c.accent(g.bad)} ${c.bold(pad('bin', width))}${c.dim(where)}  `
+      + c.accent(`NOT on the PATH a non-interactive ${path.basename(AGENT_SHELL)} gets`));
+    return;
+  }
+  const made = info.addedToRc ? ' \u2014 added ~/.local/bin to ~/.zshenv, so open a new shell' : '';
+  console.log(`  ${c.good(g.ok)} ${c.bold(pad('bin', width))}${c.dim(where)}  `
+    + c.dim('on the PATH a non-interactive shell gets') + c.dim(made));
 };
 
 /* One MCP registration, written into whatever shape a harness expects. The
@@ -361,6 +463,11 @@ export function detect() {
 export const TARGET_NAMES = Object.keys(TARGETS);
 
 export function install(names) {
+  try { reportBin(ensureBin()); }
+  catch (e) {
+    const g = sym();
+    console.log(`  ${c.accent(g.bad)} ${c.bold(pad('bin', 12))}${c.accent(`could not link the command: ${e.message}`)}`);
+  }
   const want = names?.length ? names : detect();
   const out = [];
   for (const n of want) {
