@@ -1740,8 +1740,13 @@ await atest('install never edits a shell file without being told yes', async () 
   assert.match(out, /\$HOME\/\.local\/bin/, 'including the line to add by hand');
 
   const no = home();
-  await run(['--no-path'], no);
+  const declined = await run(['--no-path'], no);
   assert.ok(!wrote(no), '--no-path must leave the shell alone');
+  /* Declining withholds nothing else, so the output has to say what is
+     missing — a quiet "left alone" reads as fine, and the thing it costs is
+     silent by nature. */
+  assert.match(declined, /NOT on the PATH/, 'a refusal must say what it cost');
+  assert.match(declined, /MCP still works/, 'and what still works, or it reads as a failed install');
 
   const yes = home();
   await run(['--path'], yes);

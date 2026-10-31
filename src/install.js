@@ -268,13 +268,20 @@ const reportBin = (info, rec) => {
     /* Asked not to touch the shell, so this is a statement rather than a
        failure — but the line to add has to be here, or --no-path just means
        the agent silently cannot find spiega. */
-    console.log(`  ${c.good(g.ok)} ${c.bold(pad('bin', width))}${c.dim(where)}  `
-      + c.dim(info.rcAsked ? 'linked \u2014 your shell was left alone' : 'linked \u2014 shell left alone (--no-path)'));
-    // the asking already printed the line and the file; do not say it twice
-    if (!info.rcAsked) {
-      console.log(`    ${c.dim(`add this to ${shortPath(RC_FILE, 30)} so an agent can find it:`)}`);
-      console.log(`      ${c.dim(RC_LINE)}`);
-    }
+    /* Declining is allowed and nothing else is withheld for it: the skills
+       and the MCP entries below still install, and MCP reaches spiega by
+       absolute path, so the thing works. What is missing is the fallback for
+       when a harness loses its MCP child — exactly the failure in #9, which
+       is silent. So say what it costs rather than only that nothing was
+       written, and say it in the bad colour: this is unfinished, not fine. */
+    console.log(`  ${c.warn(g.warn)} ${c.bold(pad('bin', width))}${c.dim(where)}  `
+      + c.accent('linked, but NOT on the PATH an agent gets'));
+    console.log(`    ${c.dim('MCP still works \u2014 it runs spiega by its full path. What is missing is')}`);
+    console.log(`    ${c.dim('the fallback: an agent whose MCP server dies cannot find the command,')}`);
+    console.log(`    ${c.dim('and writes prose instead of drawing, with nothing on screen to say so.')}`);
+    console.log(`    ${c.dim(`To fix it later, add this to ${shortPath(RC_FILE, 30)}:`)}`);
+    console.log(`      ${c.dim(RC_LINE)}`);
+    console.log(`    ${c.dim('or re-run')} ${c.dim('spiega install --path')}`);
   } else if (!info.onPath) {
     console.log(`  ${c.accent(g.bad)} ${c.bold(pad('bin', width))}${c.dim(where)}  `
       + c.accent(`NOT on the PATH a non-interactive ${path.basename(AGENT_SHELL)} gets`));

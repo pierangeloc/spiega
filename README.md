@@ -95,9 +95,11 @@ own tool call — the answer is no and the line is printed instead, so an instal
 never hangs on a prompt and never edits a shell file unattended. `--path` and
 `--no-path` answer in advance.
 
-Worth saying yes to: an agent's tool call gets no nvm init, so with `spiega`
-off that `PATH`, an agent whose MCP server has died writes prose instead of
-drawing, and nothing on screen says it meant to draw.
+**Saying no withholds nothing else.** The skills and the MCP entries still
+install, and MCP runs spiega by its full path, so it works. What you lose is
+the fallback: an agent whose MCP server has died cannot find the command, and
+writes prose instead of drawing with nothing on screen to say it meant to.
+Install says so when you decline, and `spiega doctor` keeps saying so.
 
 | target | what it gets |
 |---|---|
