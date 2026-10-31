@@ -4,7 +4,7 @@
   "description": "A hand-drawn board an AI agent draws on while it explains software architecture.",
   "type": "module",
   "bin": {
-    "spiega": "./bin/spiega"
+    "spiega": "bin/spiega"
   },
   "exports": {
     ".": "./src/index.js"
@@ -12,9 +12,12 @@
   "files": [
     "bin",
     "src",
+    "skills",
     "integrations",
     "examples",
-    "test"
+    "test",
+    "docs/logo/*.svg",
+    "docs/*.md"
   ],
   "engines": {
     "node": ">=20"
@@ -22,6 +25,7 @@
   "license": "MIT",
   "scripts": {
     "test": "node test/smoke.mjs",
+    "prepublishOnly": "npm test && npm run typecheck",
     "typecheck": "tsc --noEmit",
     "serve": "node src/cli.js serve --open",
     "mcp": "node src/mcp/server.js",
@@ -40,5 +44,17 @@
   ],
   "devDependencies": {
     "typescript": "^5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pierangeloc/spiega.git"
+  },
+  "bugs": {
+    "url": "https://github.com/pierangeloc/spiega/issues"
+  },
+  "homepage": "https://github.com/pierangeloc/spiega#readme",
+  "author": "Pierangelo Cecchetto - TulipLogic",
+  "publishConfig": {
+    "access": "public"
   }
 }
