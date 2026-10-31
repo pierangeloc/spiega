@@ -206,10 +206,15 @@ import { frame, unionBox, litKeys } from '/src/board/camera.js';
 const $ = id => document.getElementById(id);
 
 /* One server holds every board, each under /b/<name>/, so this page's own path
-   is its api root. Taken from the location rather than from a name baked into
-   the html, because the same file serves every board. The renderer above is
-   imported from /src/ instead: one copy, shared by all of them. */
-const API = location.pathname.replace(/[^/]*$/, '');
+   is its api root. Normalise the trailing slash first: /b/demo and /b/demo/ are
+   the same board, and the page must read both the same rather than depending on
+   the server to redirect one into the other. A url without the slash would
+   otherwise have its board name stripped too, and every fetch would quietly go
+   to /b/ — a board that is not this one, and no error to show for it. Taken from
+   the location rather than from a name baked into the html, because the same
+   file serves every board. The renderer above is imported from /src/ instead:
+   one copy, shared by all of them. */
+const API = location.pathname.replace(/\/?$/, '/');
 
 // which board this page is, as the server knows it — shown in the window title
 let boardTag = '';
