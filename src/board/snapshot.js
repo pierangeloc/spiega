@@ -20,14 +20,21 @@ const mdish = s => esc(s)
 /* The icon, inlined rather than linked: a snapshot is one file you can mail,
    and a <link> to the server would make it stop being that the moment the
    server goes away. There is a test for standalone, so keep it that way. */
-function favicon() {
+let ICON;
+function iconURI() {
+  if (ICON !== undefined) return ICON;
   try {
     const file = new URL('../../docs/logo/spiega-mark.svg', import.meta.url);
-    const svg = fs.readFileSync(file, 'utf8').trim();
-    return `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(svg)}">`;
+    ICON = 'data:image/svg+xml,' + encodeURIComponent(fs.readFileSync(file, 'utf8').trim());
   } catch {
-    return '';   // a checkout without docs/ still snapshots fine
+    ICON = '';   // a checkout without docs/ still snapshots fine
   }
+  return ICON;
+}
+
+function favicon() {
+  const uri = iconURI();
+  return uri ? `<link rel="icon" type="image/svg+xml" href="${uri}">` : '';
 }
 
 export function snapshotHTML(board, { active = null, title = null } = {}) {
@@ -85,7 +92,9 @@ ${favicon()}
   li.on .tag{color:${ACCENT}}
   li.off{opacity:.45}
   code{background:${SOFT};padding:1px 4px;border-radius:4px}
-  footer{margin-top:30px;color:${MUTED};font-size:11px;letter-spacing:.06em}
+  footer{margin-top:30px;color:${MUTED};font-size:11px;letter-spacing:.06em;
+    display:flex;align-items:center;gap:7px}
+  footer img{display:block;opacity:.85}
 </style></head>
 <body><div class="wrap">
   <header><span class="dot"></span><h1>${esc(heading)}</h1></header>
@@ -94,6 +103,6 @@ ${favicon()}
     ${flow ? `<section><h2>The flow</h2><ol>${flow}</ol></section>` : ''}
     ${said ? `<section><h2>What was said</h2><ul>${said}</ul></section>` : ''}
   </div>
-  <footer>drawn with spiega</footer>
+  <footer>${iconURI() ? `<img src="${iconURI()}" alt="" width="15" height="15">` : ''}drawn with spiega</footer>
 </div></body></html>`;
 }
