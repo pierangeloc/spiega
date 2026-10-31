@@ -295,6 +295,9 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     server, boards, hold, drop, broadcast, name, url: null, board: first.board,
     // lets a test (or a shutdown path) wait for the buffer to reach the file
     flush: () => Promise.all([...boards.values()].map(e => e.log?.flush())),
+    /* Flush and let go of the lock files. `flush` alone leaves them behind
+       holding a pid that is gone, so every tidy shutdown left a stale lock. */
+    close: () => Promise.all([...boards.values()].map(e => e.log?.close())),
   };
   return app;
 }
@@ -567,10 +570,11 @@ export async function startBoard({ name = boardName(), port = PORT, solo = false
     if (url) return { url, serving: false };
     throw new Error(`a spiega server answered on ${r.url} but would not take a board`);
   }
-  /* `spiega stop --server` is a signal, not a request. Flush the last tick of
-     ops on the way out so the common shutdown is not the hard crash that the
-     budget allows us to lose. */
-  const goodbye = () => { app.flush().finally(() => process.exit(0)); };
+  /* `spiega stop --server` is a signal, not a request. Close on the way out:
+     that flushes the last tick of ops, so the common shutdown is not the hard
+     crash the budget allows us to lose, and it releases the lock, so the next
+     start does not have to reclaim one left by a pid that is gone. */
+  const goodbye = () => { app.close().finally(() => process.exit(0)); };
   process.once('SIGTERM', goodbye);
   process.once('SIGINT', goodbye);
   return { url: `${r.url}/b/${name}`, serving: true, app };

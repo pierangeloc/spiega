@@ -293,6 +293,39 @@ await test('restore of a typical session and of a capped one stay quick', async 
 
 // a failed assertion can leave a server listening; close the stragglers so the
 // file exits with its status instead of hanging on a socket
+await test('a tidy shutdown leaves no lock behind', async () => {
+  const file = boardFile('tidy');
+  const log = createLog(file, {});
+  assert.equal(log.owner, true, 'the first writer owns the board');
+  assert.ok(fs.existsSync(file + '.lock'), 'and holds a lock while it does');
+  log.push([{ op: 'node', id: 'a', kind: 'service', label: 'A' }]);
+  await log.close();
+  assert.ok(!fs.existsSync(file + '.lock'),
+    'close must release the lock; flush alone left one holding a dead pid');
+  assert.ok(fs.readFileSync(file, 'utf8').includes('"a"'), 'and it still flushed');
+});
+
+await test('removes, then updates and additions, still land correctly', async () => {
+  /* Plain behaviour, not a guard: `upsert` validates any slot the index hands
+     it and falls back to a scan, so dropping the index on remove is a pure
+     optimisation and cannot corrupt anything. This just holds the behaviour
+     steady while that optimisation changes shape. */
+  const board = emptyBoard();
+  applyOps(board, Array.from({ length: 40 }, (_, i) =>
+    ({ op: 'node', id: `n${i}`, kind: 'service', label: `N${i}` })));
+  applyOps(board, Array.from({ length: 20 }, (_, i) => ({ op: 'remove', id: `n${i * 2}` })));
+
+  applyOps(board, [{ op: 'node', id: 'n7', label: 'RENAMED' }]);
+  assert.equal(board.nodes.filter(n => n.id === 'n7').length, 1, 'no duplicate');
+  assert.equal(board.nodes.find(n => n.id === 'n7').label, 'RENAMED');
+  assert.ok(!board.nodes.some(n => n.id !== 'n7' && n.label === 'RENAMED'),
+    'the update must not land on a neighbour through a stale index');
+
+  applyOps(board, [{ op: 'node', id: 'fresh', kind: 'service', label: 'Fresh' }]);
+  assert.equal(board.nodes.filter(n => n.id === 'fresh').length, 1);
+  assert.equal(board.nodes.length, 21, '20 survivors plus the new one');
+});
+
 for (const server of SERVERS) { server.close(); server.closeAllConnections?.(); }
 
 process.env.HOME = OLD_HOME;
