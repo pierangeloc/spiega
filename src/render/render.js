@@ -1,3 +1,4 @@
+// @ts-check
 /* ============================================================
    spiega render — a spec becomes one SVG.
 
@@ -13,10 +14,19 @@ import { drawEdge, planEdges, edgeKey } from './edges.js';
 import { planCallouts, drawCallout } from './callout.js';
 import { assign, layout, boundaryBox } from './layout.js';
 
+/** @typedef {import('../board/state.js').Board} Board */
+/** @typedef {import('../board/state.js').FlowStep} FlowStep */
+/** @typedef {import('./layout.js').Placed} Placed */
+
 /* Flow steps may name an edge ("gw>orders") and/or nodes to light. Numbering
    runs over the steps that name an edge, so the badges on the board match the
    numbers in the step list beside it. */
+/**
+ * @param {{flow?: FlowStep[]}} spec
+ * @returns {{stepOf: Record<string, number>, steps: FlowStep[]}}
+ */
 export function indexFlow(spec) {
+  /** @type {Record<string, number>} */
   const stepOf = {};        // edge key -> step number
   const steps = spec.flow || [];
   let n = 0;
@@ -29,10 +39,18 @@ export function indexFlow(spec) {
 }
 
 /* What is lit, what is dimmed, at a given step. null = everything plain. */
+/**
+ * @param {Board} spec
+ * @param {FlowStep[]} steps
+ * @param {number|null} active
+ * @returns {{nodes: Set<string>, edges: Set<string>}|null}
+ */
 function focusAt(spec, steps, active) {
   if (active == null || !steps[active]) return null;
   const s = steps[active];
+  /** @type {Set<string>} */
   const nodes = new Set(s.lights || []);
+  /** @type {Set<string>} */
   const edges = new Set();
   if (s.edge) {
     edges.add(s.edge);
@@ -42,6 +60,15 @@ function focusAt(spec, steps, active) {
   return { nodes, edges };
 }
 
+/**
+ * @param {Board} spec
+ * @param {{
+ *   active?: number|null,
+ *   placed?: Placed|null,
+ *   margin?: number,
+ *   hand?: boolean
+ * }} [options]
+ */
 export function renderSVG(spec, { active, placed = null, margin = 0, hand = true } = {}) {
   // A board carries its own highlighted step, so renderSVG(board) does the
   // right thing; pass `active` only to override it (null clears it).

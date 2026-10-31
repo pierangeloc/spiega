@@ -22,6 +22,7 @@
   "license": "MIT",
   "scripts": {
     "test": "node test/smoke.mjs",
+    "typecheck": "tsc --noEmit",
     "serve": "node src/cli.js serve --open",
     "mcp": "node src/mcp/server.js",
     "shapes": "node tools/shapes.js"
@@ -36,5 +37,8 @@
     "cursor",
     "svg",
     "hand-drawn"
-  ]
+  ],
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
 }

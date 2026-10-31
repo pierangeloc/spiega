@@ -1,3 +1,4 @@
+// @ts-check
 /* ============================================================
    spiega layout — where things land on the board.
 
@@ -17,6 +18,37 @@
    way people read — client on the left, storage on the right.
    ============================================================ */
 
+/* A node's slot on the board. `placed` is this map, keyed by node id, and
+   assign() mutates it in place — passing the same one across renders pins the
+   layout, which is exactly the trap the comment below assign() warns about. */
+/** @typedef {{col: number, row: number}} Placement */
+/** @typedef {Record<string, Placement>} Placed */
+
+/* The fields layout actually reads. A Board's Node carries more (drawing hints),
+   and structural typing lets it through without layout knowing about them. */
+/**
+ * @typedef {Object} LayoutNode
+ * @property {string} id
+ * @property {string} [label]
+ * @property {string} [sub]
+ * @property {string} [kind]
+ * @property {number} [col]
+ * @property {number} [row]
+ * @property {string} [place]
+ * @property {number} [w]
+ * @property {number} [h]
+ * @property {string[]} [lines]
+ */
+
+/** @typedef {{from: string, to: string}} LayoutEdge */
+
+/** @typedef {{w: number, h: number, labelBelow?: number}} Size */
+
+/** @typedef {{
+ *   x: number, y: number, w: number, h: number,
+ *   labelBelow?: number, col?: number, row?: number
+ * }} Box */
+
 const COL_GAP = 132;
 const ROW_GAP = 54;
 const PAD = 64;
@@ -24,6 +56,7 @@ const PAD = 64;
 import { wrapText } from './ink.js';
 import { measureMath } from './math.js';
 
+/** @type {Record<string, (n: LayoutNode, tw: number) => Size>} */
 const SIZES = {
   service:   (n, tw) => ({ w: Math.max(156, tw + 52), h: 70 }),
   gateway:   (n, tw) => ({ w: Math.max(166, tw + 72), h: 70 }),
@@ -47,10 +80,19 @@ const SIZES = {
   },
 };
 
+/**
+ * @param {string} [s]
+ * @param {number} [size]
+ * @returns {number}
+ */
 const textWidth = (s, size = 13.5) => String(s || '').length * size * 0.66;
 
+/**
+ * @param {LayoutNode} n
+ * @returns {{w: number, h: number, labelBelow: number}}
+ */
 export function sizeOf(n) {
-  const fn = SIZES[n.kind] || SIZES.service;
+  const fn = SIZES[n.kind || ''] || SIZES.service;
   const tw = Math.max(textWidth(n.label), textWidth(n.sub, 10));
   const s = fn(n, tw);
   return { w: n.w || s.w, h: n.h || s.h, labelBelow: s.labelBelow || 0 };
@@ -79,12 +121,21 @@ export function sizeOf(n) {
    column computed *from the feedback edge* — so the junction landed after the
    sensor, at the far right, and the loop read as a straight line with a long
    arrow home. */
+/**
+ * @param {LayoutNode[]} [nodes]
+ * @param {LayoutEdge[]} [edges]
+ * @returns {Set<string>}
+ */
 export function backEdges(nodes, edges) {
+  /** @type {Record<string, LayoutEdge[]>} */
   const out = {};
   for (const e of edges || []) (out[e.from] ||= []).push(e);
+  /** @type {Record<string, number|undefined>} */
   const state = {};                       // undefined | 1 visiting | 2 done
+  /** @type {Set<string>} */
   const back = new Set();
 
+  /** @param {string} id */
   const visit = id => {
     state[id] = 1;
     for (const e of out[id] || []) {
@@ -97,9 +148,15 @@ export function backEdges(nodes, edges) {
   return back;
 }
 
+/**
+ * @param {{nodes: LayoutNode[], edges?: LayoutEdge[]}} spec
+ * @param {Placed} [placed]
+ * @returns {Placed}
+ */
 export function assign(spec, placed = {}) {
   const byId = Object.fromEntries(spec.nodes.map(n => [n.id, n]));
   const back = backEdges(spec.nodes, spec.edges);
+  /** @type {Record<string, string[]>} */
   const incoming = {};
   // a back edge says nothing about which column its target belongs in
   for (const e of spec.edges || []) {
@@ -108,6 +165,11 @@ export function assign(spec, placed = {}) {
   }
 
   // Explicit placement wins, then "right of X" / "below X", then the flow.
+  /**
+   * @param {LayoutNode} n
+   * @param {Set<string>} [guard]
+   * @returns {Placement}
+   */
   const resolve = (n, guard = new Set()) => {
     if (placed[n.id]) return placed[n.id];
     if (guard.has(n.id)) return (placed[n.id] = { col: 0, row: nextRow(0) });
@@ -136,8 +198,10 @@ export function assign(spec, placed = {}) {
     return (placed[n.id] = { col, row: nextRow(col) });
   };
 
+  /** @type {Record<string, Set<number>>} */
   const used = {};
   for (const p of Object.values(placed)) (used[p.col] ||= new Set()).add(p.row);
+  /** @param {number} col @returns {number} */
   function nextRow(col) {
     const set = (used[col] ||= new Set());
     let r = 0;
@@ -146,6 +210,7 @@ export function assign(spec, placed = {}) {
     return r;
   }
   // keep `used` honest for explicitly placed nodes too
+  /** @param {Placement} p */
   const claim = p => (used[p.col] ||= new Set()).add(p.row);
 
   for (const n of spec.nodes) claim(resolve(n));
@@ -153,7 +218,13 @@ export function assign(spec, placed = {}) {
 }
 
 /* Turn column/row assignments into pixel boxes. */
+/**
+ * @param {{nodes: LayoutNode[], edges?: LayoutEdge[]}} spec
+ * @param {Placed} placed
+ * @returns {{boxes: Record<string, Box>, width: number, height: number}}
+ */
 export function layout(spec, placed) {
+  /** @type {Record<string, {n: LayoutNode, p: Placement, s: {w: number, h: number, labelBelow: number}}[]>} */
   const cols = {};
   for (const n of spec.nodes) {
     const p = placed[n.id];
@@ -163,7 +234,10 @@ export function layout(spec, placed) {
   }
 
   const colKeys = Object.keys(cols).map(Number).sort((a, b) => a - b);
-  const colW = {}, colH = {};
+  /** @type {Record<string, number>} */
+  const colW = {};
+  /** @type {Record<string, number>} */
+  const colH = {};
   for (const c of colKeys) {
     colW[c] = Math.max(...cols[c].map(e => e.s.w));
     cols[c].sort((a, b) => a.p.row - b.p.row);
@@ -171,6 +245,7 @@ export function layout(spec, placed) {
   }
   const tallest = Math.max(0, ...Object.values(colH));
 
+  /** @type {Record<string, Box>} */
   const boxes = {};
   let x = PAD;
   for (const c of colKeys) {
@@ -192,6 +267,12 @@ export function layout(spec, placed) {
 }
 
 /* A boundary is the bounding box of its members, loosened. */
+/**
+ * @param {string[]} members
+ * @param {Record<string, Box>} boxes
+ * @param {number} [pad]
+ * @returns {Box|null}
+ */
 export function boundaryBox(members, boxes, pad = 26) {
   const bs = members.map(id => boxes[id]).filter(Boolean);
   if (!bs.length) return null;
