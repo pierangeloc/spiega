@@ -1,3 +1,5 @@
+<img src="docs/logo/spiega-mark.svg" alt="" width="72" align="left" hspace="12">
+
 # spiega
 
 A hand-drawn board an AI agent draws on **while it explains**.

@@ -7,7 +7,20 @@ drew them. Generated with an image model (Gemini 3 Pro Image, via OpenRouter)
 at 1024×1024, flat, three colours: ink `#231e16`, accent `#ef6a4c`, paper
 `#f2efe7`.
 
-## There is no icon yet
+## The icon
+
+`spiega-mark.svg`, and `spiega-mark-on-dark.svg` for dark backgrounds. An arc
+drawn two-thirds of the way round with the nib still on it: the gap is what
+says it is being drawn rather than finished, which is the whole idea. Checked
+at 16, 24, 32, 64 and 160px — the ring holds, the gap stays open and the nib
+survives as an accent rather than a smudge.
+
+It is served at `/icon.svg` and linked from the board page; a standalone
+snapshot inlines it as a data URI so it stays one file.
+
+Copyright (c) 2026 Pierangelo Cecchetto - TulipLogic.
+
+## What came before it
 
 The logo is nine shapes. That is right for a README, a page header or a social
 card, and too much for a favicon: at 48px the boxes become specks and at 16px

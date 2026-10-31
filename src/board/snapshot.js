@@ -6,6 +6,8 @@
    steps, with no server, no scripts and no outside requests.
    ============================================================ */
 
+import fs from 'node:fs';
+
 import { renderSVG } from '../render/render.js';
 import { lineStates } from './script.js';
 import { PAPER, PANEL, INK, MUTED, RULE, SOFT, ACCENT, MONO, paperTexture } from '../render/theme.js';
@@ -14,6 +16,19 @@ const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').re
 const mdish = s => esc(s)
   .replace(/`([^`]+)`/g, '<code>$1</code>')
   .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+
+/* The mark, inlined rather than linked: a snapshot is one file you can mail,
+   and a <link> to the server would make it stop being that the moment the
+   server goes away. There is a test for standalone, so keep it that way. */
+function favicon() {
+  try {
+    const file = new URL('../../docs/logo/spiega-mark.svg', import.meta.url);
+    const svg = fs.readFileSync(file, 'utf8').trim();
+    return `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,${encodeURIComponent(svg)}">`;
+  } catch {
+    return '';   // a checkout without docs/ still snapshots fine
+  }
+}
 
 export function snapshotHTML(board, { active = null, title = null } = {}) {
   const step = active == null || active === '' ? board.active : Number(active);
@@ -42,6 +57,7 @@ export function snapshotHTML(board, { active = null, title = null } = {}) {
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(heading)}</title>
+${favicon()}
 <style>
   :root{--paper:${PAPER};--panel:${PANEL};--ink:${INK};--muted:${MUTED};--rule:${RULE};--soft:${SOFT};--accent:${ACCENT}}
   *{box-sizing:border-box}
