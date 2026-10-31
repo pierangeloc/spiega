@@ -158,6 +158,34 @@ const writableDir = d => {
 
 const DOT_LOCAL = path.join(HOME, '.local', 'bin');
 const RC_MARKER = '# spiega: the launcher, for the non-interactive shells agents get';
+const RC_FILE = path.join(HOME, '.zshenv');
+const RC_LINE = 'export PATH="$HOME/.local/bin:$PATH"';
+
+/* Ask, and mean it: anything that is not a yes is a no.
+
+   `process.stdin.isTTY` is the test for whether there is a person there at
+   all. An agent's tool call, a CI step, a `curl | sh` and a pipe all fail it,
+   and all of them must get "no" rather than a prompt nobody will answer. */
+const askYesNo = (file, dir) => {
+  const g = sym();
+  console.log(`\n  ${c.bold('spiega needs to be where an agent can find it.')}`);
+  console.log(`  ${c.dim(`${shortPath(dir, 46)} is not on the PATH a non-interactive shell gets.`)}`);
+  console.log(`\n  ${c.dim('This would add one line to')} ${c.bold(shortPath(file, 46))}${c.dim(', after backing it up:')}`);
+  console.log(`      ${c.dim(RC_LINE)}`);
+  if (!process.stdin.isTTY) {
+    console.log(`\n  ${c.dim('Nothing here to ask, so: not done.')} ${c.dim(`${g.arrow} spiega install --path`)}\n`);
+    return false;
+  }
+  let answer = '';
+  try {
+    const buf = Buffer.alloc(8);
+    process.stdout.write(`\n  ${c.bold('Add it?')} ${c.dim('[y/N] ')}`);
+    const n = fs.readSync(0, buf, 0, 8, null);
+    answer = buf.slice(0, n).toString('utf8').trim().toLowerCase();
+  } catch { answer = ''; }   // no readable stdin is also a no
+  console.log('');
+  return answer === 'y' || answer === 'yes';
+};
 
 /* zsh sources ~/.zshenv for every invocation, so one guarded line there is
    enough to put ~/.local/bin on an agent's PATH, and it does nothing if the
@@ -174,14 +202,19 @@ const addToZshEnv = () => {
   return true;
 };
 
-/* `--no-path` leaves the shell alone.
+/* Say what it is about to do to your shell, and wait to be told yes.
 
-   Editing somebody's ~/.zshenv is the most invasive thing install does, and a
-   tool a stranger just installed should be able to not do it. The link is
-   still made — that part writes only inside a bin directory — and the caller
-   is told the directory is not on an agent's PATH, so it can say what to add
-   by hand. */
-export function ensureBin({ touchShell = true } = {}) {
+   Editing somebody's ~/.zshenv is the most invasive thing install does, and
+   the only write that lands outside a config file this tool owns. Doing it
+   silently is the kind of thing a stranger finds out about afterwards, so:
+   explain it and ask. Where there is nobody to ask — a script, CI, an agent's
+   tool call, a pipe — the answer is no, and the line to add is printed
+   instead. Never editing it without a yes is the whole point; forgetting to
+   say what to do instead is how that becomes issue #9 again.
+
+   `touchShell`: 'ask' (default), true to go ahead, false to leave it alone.
+   `--path` and `--no-path` are the two overrides. */
+export function ensureBin({ touchShell = 'ask', confirm = askYesNo } = {}) {
   const pathDirs = agentPath().split(':').filter(Boolean);
   let dir = pathDirs.find(d => d.startsWith('/') && writableDir(d));
   if (!dir) dir = DOT_LOCAL;
@@ -205,8 +238,14 @@ export function ensureBin({ touchShell = true } = {}) {
   let onPath = agentPath().split(':').includes(dir);
   let addedToRc = false;
   let rcDeclined = false;
+  let rcAsked = false;
   if (!onPath && dir === DOT_LOCAL) {
-    if (touchShell) {
+    let go = touchShell === true;
+    if (touchShell === 'ask') {
+      rcAsked = true;
+      go = confirm(RC_FILE, dir);
+    }
+    if (go) {
       addedToRc = addToZshEnv();
       onPath = agentPath().split(':').includes(dir);
     } else {
@@ -214,7 +253,7 @@ export function ensureBin({ touchShell = true } = {}) {
     }
   }
 
-  return { dir, link, onPath, addedToRc, rcDeclined, changed };
+  return { dir, link, onPath, addedToRc, rcDeclined, rcAsked, changed };
 }
 
 /* The install list is a table of harness targets, and the command itself is not
@@ -230,9 +269,12 @@ const reportBin = (info, rec) => {
        failure — but the line to add has to be here, or --no-path just means
        the agent silently cannot find spiega. */
     console.log(`  ${c.good(g.ok)} ${c.bold(pad('bin', width))}${c.dim(where)}  `
-      + c.dim('linked \u2014 shell left alone (--no-path)'));
-    console.log(`    ${c.dim('add this to ~/.zshenv so an agent can find it:')}`);
-    console.log(`    ${c.dim('export PATH="$HOME/.local/bin:$PATH"')}`);
+      + c.dim(info.rcAsked ? 'linked \u2014 your shell was left alone' : 'linked \u2014 shell left alone (--no-path)'));
+    // the asking already printed the line and the file; do not say it twice
+    if (!info.rcAsked) {
+      console.log(`    ${c.dim(`add this to ${shortPath(RC_FILE, 30)} so an agent can find it:`)}`);
+      console.log(`      ${c.dim(RC_LINE)}`);
+    }
   } else if (!info.onPath) {
     console.log(`  ${c.accent(g.bad)} ${c.bold(pad('bin', width))}${c.dim(where)}  `
       + c.accent(`NOT on the PATH a non-interactive ${path.basename(AGENT_SHELL)} gets`));
@@ -516,7 +558,7 @@ export function detect() {
 
 export const TARGET_NAMES = Object.keys(TARGETS);
 
-export function install(names, { touchShell = true } = {}) {
+export function install(names, { touchShell = 'ask' } = {}) {
   let rec = null;
   try { rec = recordNode(); }
   catch (e) {

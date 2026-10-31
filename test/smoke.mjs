@@ -1717,6 +1717,40 @@ await atest('boards persist across a restart, and POST /op keeps its latency bud
    evaluates, and every board renders empty with nothing in the terminal to say
    why. That is exactly what happened once persistence put `node:fs` into
    state.js, which board.html imports. Hence this. */
+await atest('install never edits a shell file without being told yes', async () => {
+  /* The only write install makes outside a config file it owns. A stranger who
+     just installed this should not find their ~/.zshenv changed because they
+     ran a command; and an agent, a CI step or a pipe has nobody to ask, so the
+     answer there has to be no rather than a prompt nobody answers. */
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = async (args, home) => {
+    const { stdout } = await promisify(execFile)(
+      process.execPath, [path.join(ROOT, 'src/cli.js'), 'install', ...args],
+      { env: { ...process.env, HOME: home, USERPROFILE: home }, maxBuffer: 4 << 20 });
+    return stdout;
+  };
+  const home = () => fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-consent-'));
+  const wrote = h => fs.existsSync(path.join(h, '.zshenv'));
+
+  const asked = home();
+  const out = await run([], asked);                 // stdio is a pipe: not a tty
+  assert.ok(!wrote(asked), 'no tty means no, not a prompt nobody can answer');
+  assert.match(out, /zshenv/, 'and it has to say what it would have done');
+  assert.match(out, /\$HOME\/\.local\/bin/, 'including the line to add by hand');
+
+  const no = home();
+  await run(['--no-path'], no);
+  assert.ok(!wrote(no), '--no-path must leave the shell alone');
+
+  const yes = home();
+  await run(['--path'], yes);
+  assert.ok(wrote(yes), '--path is the explicit yes, and must still work');
+  assert.match(fs.readFileSync(path.join(yes, '.zshenv'), 'utf8'), /local\/bin/);
+
+  for (const h of [asked, no, yes]) fs.rmSync(h, { recursive: true, force: true });
+});
+
 await atest('nothing the browser imports reaches for a node builtin', async () => {
   const entry = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
   const seen = new Set();

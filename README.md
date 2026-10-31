@@ -75,13 +75,29 @@ spiega install              # do it
 writing a config for a harness you do not use is how you end up with a file you
 never asked for. `--list` shows every target and what it writes.
 
-It also links the command into a directory an agent's shell can see, and that
-is the one thing it does outside a config file: when `~/.local/bin` is not
-already on a non-interactive `PATH`, it adds one guarded line to `~/.zshenv`,
-backing the file up first. **`spiega install --no-path` skips that** and prints
-the line to add yourself. An agent's tool call gets no nvm init, so without it
-on `PATH` somewhere, the fallback when MCP is unavailable is an agent writing
-prose instead of drawing.
+It also links the command into a directory an agent's shell can see. That link
+is the one write it makes outside a config file of its own, and when
+`~/.local/bin` is not already on a non-interactive `PATH` it **asks** before
+adding a line to your `~/.zshenv`:
+
+```
+  spiega needs to be where an agent can find it.
+  ~/.local/bin is not on the PATH a non-interactive shell gets.
+
+  This would add one line to ~/.zshenv, after backing it up:
+      export PATH="$HOME/.local/bin:$PATH"
+
+  Add it? [y/N]
+```
+
+Anything but yes is no. Where there is nobody to ask — a script, CI, an agent's
+own tool call — the answer is no and the line is printed instead, so an install
+never hangs on a prompt and never edits a shell file unattended. `--path` and
+`--no-path` answer in advance.
+
+Worth saying yes to: an agent's tool call gets no nvm init, so with `spiega`
+off that `PATH`, an agent whose MCP server has died writes prose instead of
+drawing, and nothing on screen says it meant to draw.
 
 | target | what it gets |
 |---|---|
