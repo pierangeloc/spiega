@@ -206,14 +206,61 @@ const indexesFor = board => {
 
 /* Throw the index away rather than rebuild it here.
 
-   `remove` filters the lists, so every index above the removed slot is wrong.
-   Rebuilding on the spot is O(n), which made removing n nodes O(n²) again —
-   the very cost the index was added to remove. Dropping it is O(1), and the
-   next op that actually needs an index pays for one rebuild. A run of removes
-   now costs one rebuild in total instead of one per op, and only if something
-   is drawn afterwards. */
+   A sweep removes entries from the middle of every list, so every index above
+   a removed slot is wrong. Rebuilding on the spot is O(n), which would put the
+   cost back on the remove; dropping it is O(1), and the next op that actually
+   needs an index pays for one rebuild. A run of removes now costs one rebuild
+   in total instead of one per op, and only if something is drawn afterwards. */
 /** @param {Board} board */
 const dropIndexes = board => { INDEXES.delete(board); };
+
+/* Removes are collected and swept, not applied one at a time.
+
+   Filtering four lists per remove made a run of n removes O(n²): every remove
+   walked every list whether or not it touched anything. The ids of a run are
+   collected instead, and the lists are swept once when the run ends.
+
+   A run ends as soon as an op that can see those lists arrives. Anything else
+   — a line said, a step lit, a title — commutes with removal and can stay
+   behind it. That is what keeps the interleaving exact: a node drawn after
+   its own removal is a new node, not a survivor of the sweep, and a callout
+   added after the removal is not swept away with the thing it points at. */
+/** @typedef {{ids: (string|undefined)[]}} Sweep */
+/** @returns {Sweep} */
+const newSweep = () => ({ ids: [] });
+
+/** @param {Board} board @param {Sweep} sweep */
+const sweepRemoved = (board, sweep) => {
+  const ids = sweep.ids;
+  if (!ids.length) return;
+  if (ids.length === 1) {
+    /* One remove per POST is the common shape, and a Set lookup per entry is
+       three hash lookups per edge where a comparison used to do. Four lists of
+       a few thousand entries is enough for that to show, so a single id keeps
+       the direct comparisons. */
+    const id = ids[0];
+    board.nodes = board.nodes.filter(n => n.id !== id);
+    board.edges = board.edges.filter(e => e.from !== id && e.to !== id && edgeId(e) !== id);
+    board.boundaries = board.boundaries.filter(b => b.id !== id);
+    // a callout pointing at something that is gone has nothing to say
+    board.callouts = board.callouts.filter(c => c.id !== id && c.at !== id
+      && !String(c.at || '').split('>').includes(/** @type {string} */ (id)));
+  } else {
+    const gone = new Set(ids);
+    board.nodes = board.nodes.filter(n => !gone.has(n.id));
+    board.edges = board.edges.filter(e => !gone.has(e.from) && !gone.has(e.to) && !gone.has(edgeId(e)));
+    board.boundaries = board.boundaries.filter(b => !gone.has(b.id));
+    board.callouts = board.callouts.filter(c => !gone.has(c.id) && !gone.has(c.at)
+      && !String(c.at || '').split('>').some(seg => gone.has(seg)));
+  }
+  dropIndexes(board);
+  ids.length = 0;
+};
+
+/* The ops that read or write the four lists a sweep touches. `clear` is not
+   here because it replaces the lists wholesale — it resets the sweep instead
+   of paying for a sweep nobody will see. */
+const TOUCHES_LISTS = new Set(['node', 'note', 'edge', 'callout', 'boundary']);
 
 /**
  * @template T
@@ -243,9 +290,10 @@ const edgeId = e => `${e.from}>${e.to}`;
 /**
  * @param {Board} board
  * @param {Op} op
+ * @param {Sweep} sweep
  * @returns {ApplyResult}
  */
-export function applyOp(board, op) {
+function applyOne(board, op, sweep) {
   /** @type {Fresh} */
   const fresh = { nodes: [], edges: [], boundaries: [] };
   // recorded before the switch, so a `clear` wipes the log with everything else
@@ -258,6 +306,7 @@ export function applyOp(board, op) {
       const t = op.keepTitle ? board.title : '';
       Object.assign(board, emptyBoard(), { title: t });
       dropIndexes(board);
+      sweep.ids.length = 0;
       break;
     }
     case 'title':
@@ -362,15 +411,10 @@ export function applyOp(board, op) {
       break;
 
     case 'remove': {
-      const id = op.id;
-      board.nodes = board.nodes.filter(n => n.id !== id);
-      board.edges = board.edges.filter(e => e.from !== id && e.to !== id && edgeId(e) !== id);
-      board.boundaries = board.boundaries.filter(b => b.id !== id);
-      // a callout pointing at something that is gone has nothing to say
-      board.callouts = board.callouts.filter(c => c.id !== id && c.at !== id
-        && !String(c.at || '').split('>').includes(id));
-      delete board.placed[id];
-      dropIndexes(board);
+      // Collected, not filtered: see sweepRemoved. The placement goes now, so
+      // a node re-drawn later in the same run still starts unplaced.
+      sweep.ids.push(op.id);
+      delete board.placed[op.id];
       break;
     }
 
@@ -388,6 +432,18 @@ export function applyOp(board, op) {
 
 /**
  * @param {Board} board
+ * @param {Op} op
+ * @returns {ApplyResult}
+ */
+export function applyOp(board, op) {
+  const sweep = newSweep();
+  const result = applyOne(board, op, sweep);
+  sweepRemoved(board, sweep);
+  return result;
+}
+
+/**
+ * @param {Board} board
  * @param {Op|Op[]} ops
  * @returns {ApplyOpsResult}
  */
@@ -399,12 +455,17 @@ export function applyOps(board, ops) {
   /** @type {Op[]} */
   const applied = [];
   const list = Array.isArray(ops) ? ops : [ops];
+  const sweep = newSweep();
   for (const op of list) {
-    const r = applyOp(board, op);
+    // End the run of removes before anything that can see the lists, so the
+    // op is applied to the board as if each remove had landed on its own.
+    if (sweep.ids.length && TOUCHES_LISTS.has(op.op)) sweepRemoved(board, sweep);
+    const r = applyOne(board, op, sweep);
     if (!r.ok) errors.push(r.error);
     else applied.push(op);
     for (const k of /** @type {(keyof Fresh)[]} */ (Object.keys(all))) all[k].push(...r.fresh[k]);
   }
+  sweepRemoved(board, sweep);
   return { fresh: all, errors, applied };
 }
 

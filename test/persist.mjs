@@ -326,6 +326,34 @@ await test('removes, then updates and additions, still land correctly', async ()
   assert.equal(board.nodes.length, 21, '20 survivors plus the new one');
 });
 
+await test('a batch of removes costs about what the batch is worth', async () => {
+  /* A ratio, not a wall-clock budget: an absolute threshold only measures the
+     machine. Four times the nodes should be about four times the work, not
+     sixteen. The log is emptied before the timed run because past LOG_CAP
+     every op also pays a splice of the log, which is a separate cost and
+     would drown the one being measured. */
+  const time = n => {
+    const board = emptyBoard();
+    applyOps(board, Array.from({ length: n }, (_, i) =>
+      ({ op: 'node', id: `n${i}`, kind: 'service', label: `N${i}` })));
+    applyOps(board, Array.from({ length: n - 1 }, (_, i) =>
+      ({ op: 'edge', from: `n${i}`, to: `n${i + 1}` })));
+    board.log = [];
+    const t0 = process.hrtime.bigint();
+    applyOps(board, Array.from({ length: n }, (_, i) => ({ op: 'remove', id: `n${i}` })));
+    const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+    assert.equal(board.nodes.length, 0);
+    assert.equal(board.edges.length, 0);
+    return ms;
+  };
+  time(200);                                     // let the JIT see the shape once
+  const small = Math.min(...[0, 1, 2].map(() => time(1000)));
+  const large = Math.min(...[0, 1, 2].map(() => time(4000)));
+  const ratio = large / small;
+  assert.ok(ratio < 9, `4x the nodes cost ${ratio.toFixed(1)}x the time ` +
+    `(${small.toFixed(2)}ms -> ${large.toFixed(2)}ms); a quadratic remove would be about 16x`);
+});
+
 for (const server of SERVERS) { server.close(); server.closeAllConnections?.(); }
 
 process.env.HOME = OLD_HOME;
