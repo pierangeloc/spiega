@@ -1,4 +1,4 @@
-<img src="docs/logo/spiega-mark.svg" alt="" width="72" align="left" hspace="12">
+<img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/logo/spiega-mark.svg" alt="" width="72" align="left" hspace="12">
 
 # spiega
 
@@ -19,7 +19,7 @@ walks the request through, one numbered hop at a time.
 It is meant for the thing a terminal is bad at: holding six nouns and the
 arrows between them in your head while you read a paragraph about them.
 
-![a finished board, saved as a snapshot, with step 3 lit](docs/board.png)
+![a finished board, saved as a snapshot, with step 3 lit](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/board.png)
 
 ## Why not Miro, or Mermaid
 
