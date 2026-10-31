@@ -17,7 +17,7 @@ const mdish = s => esc(s)
   .replace(/`([^`]+)`/g, '<code>$1</code>')
   .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
 
-/* The mark, inlined rather than linked: a snapshot is one file you can mail,
+/* The icon, inlined rather than linked: a snapshot is one file you can mail,
    and a <link> to the server would make it stop being that the moment the
    server goes away. There is a test for standalone, so keep it that way. */
 function favicon() {
