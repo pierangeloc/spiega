@@ -1719,9 +1719,14 @@ await atest('boards persist across a restart, and POST /op keeps its latency bud
    state.js, which board.html imports. Hence this. */
 await atest('install never edits a shell file without being told yes', async () => {
   /* The only write install makes outside a config file it owns. A stranger who
-     just installed this should not find their ~/.zshenv changed because they
-     ran a command; and an agent, a CI step or a pipe has nobody to ask, so the
-     answer there has to be no rather than a prompt nobody answers. */
+     just ran a command should not find their ~/.zshenv changed; and an agent,
+     a CI step or a pipe has nobody to ask, so the answer there is no rather
+     than a prompt nobody answers.
+
+     Which branch runs depends on the machine: where a directory on the agent's
+     PATH is already writable — /usr/local/bin on a CI runner — the link goes
+     there and the question never arises. So the invariant is asserted always,
+     and the wording only where the question was actually reached. */
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');
   const run = async (args, home) => {
@@ -1732,28 +1737,40 @@ await atest('install never edits a shell file without being told yes', async () 
   };
   const home = () => fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-consent-'));
   const wrote = h => fs.existsSync(path.join(h, '.zshenv'));
+  const homes = [];
+  const fresh = () => { const h = home(); homes.push(h); return h; };
 
-  const asked = home();
+  const asked = fresh();
   const out = await run([], asked);                 // stdio is a pipe: not a tty
   assert.ok(!wrote(asked), 'no tty means no, not a prompt nobody can answer');
-  assert.match(out, /zshenv/, 'and it has to say what it would have done');
-  assert.match(out, /\$HOME\/\.local\/bin/, 'including the line to add by hand');
+  const wasAsked = /zshenv/.test(out);
+  if (wasAsked) {
+    assert.match(out, /\$HOME\/\.local\/bin/, 'it has to print the line to add by hand');
+  } else {
+    assert.match(out, /on the PATH a non-interactive shell gets/,
+      'if it did not ask, it is because the link already landed somewhere an agent looks');
+  }
 
-  const no = home();
+  const no = fresh();
   const declined = await run(['--no-path'], no);
   assert.ok(!wrote(no), '--no-path must leave the shell alone');
-  /* Declining withholds nothing else, so the output has to say what is
-     missing — a quiet "left alone" reads as fine, and the thing it costs is
-     silent by nature. */
-  assert.match(declined, /NOT on the PATH/, 'a refusal must say what it cost');
-  assert.match(declined, /MCP still works/, 'and what still works, or it reads as a failed install');
+  if (/zshenv/.test(declined)) {
+    /* Declining withholds nothing else, so the output has to say what is
+       missing — a quiet "left alone" reads as fine, and the thing it costs is
+       silent by nature. */
+    assert.match(declined, /NOT on the PATH/, 'a refusal must say what it cost');
+    assert.match(declined, /MCP still works/, 'and what still works, or it reads as a failed install');
+  }
 
-  const yes = home();
-  await run(['--path'], yes);
-  assert.ok(wrote(yes), '--path is the explicit yes, and must still work');
-  assert.match(fs.readFileSync(path.join(yes, '.zshenv'), 'utf8'), /local\/bin/);
+  const yes = fresh();
+  const accepted = await run(['--path'], yes);
+  assert.match(accepted, /on the PATH a non-interactive shell gets/,
+    '--path is the explicit yes, and must end with the command reachable');
+  if (/zshenv/.test(accepted)) {
+    assert.ok(wrote(yes), '--path should have written the file it said it would');
+  }
 
-  for (const h of [asked, no, yes]) fs.rmSync(h, { recursive: true, force: true });
+  for (const h of homes) fs.rmSync(h, { recursive: true, force: true });
 });
 
 await atest('nothing the browser imports reaches for a node builtin', async () => {
