@@ -85,6 +85,27 @@ async function boardURL({ autostart = false } = {}) {
 
 const alive = async url => (await import('./board/server.js')).alive(url);
 
+/* What a person needs to see before a command changes a board: the name it
+   resolved to, the title on it, and the url. Two boards can have the same
+   name-shaped answer to "which one?", and only the title tells them apart. */
+async function boardIdentity(url) {
+  const read = async p => {
+    try {
+      return await (await fetch(url + p, { signal: AbortSignal.timeout(900) })).json();
+    } catch { return {}; }
+  };
+  const [who, state] = await Promise.all([read('/whoami'), read('/state')]);
+  const fromUrl = (String(url).match(/\/b\/([^/]+)\/?$/) || [])[1];
+  return {
+    name: who.name || (fromUrl ? decodeURIComponent(fromUrl) : 'board'),
+    title: state.title || null,
+    url,
+  };
+}
+
+const describeBoard = b =>
+  `"${b.name}"${b.title ? ` \u2014 "${b.title}"` : ' \u2014 untitled'}  ${b.url}`;
+
 async function send(ops, { quiet = false } = {}) {
   const url = await boardURL({ autostart: true });
   const res = await fetch(url + '/op', {
@@ -457,8 +478,29 @@ const main = async () => {
       return void (await send([{ op: 'focus', step }]));
     }
 
-    case 'clear':
+    /* clear is the one command that undoes work rather than adding to it. A
+       board picked by the session pointer is not the same as one the person
+       named, and the difference is invisible until the drawing is gone. So it
+       says which board it resolved to, and refuses to wipe one nobody asked
+       for by name unless --force says they meant it. */
+    case 'clear': {
+      const forced = !!flag('force');
+      const named = !!(boardFlag && boardFlag !== true)
+        || !!(process.env.SPIEGA_URL || process.env.HANDWAVE_URL);
+      // Do not start a board just to clear it. If none is running there is
+      // nothing to wipe, and creating one would be a surprising side effect.
+      const url = await boardURL({ autostart: named });
+      if (!url) die('spiega clear: no board is running');
+      const who = await boardIdentity(url);
+      if (!named && !forced) {
+        console.error(`spiega clear: ${describeBoard(who)}`);
+        die(`spiega clear: that board was not named explicitly, so nothing was cleared.\n`
+          + `  Name it \u2014 spiega clear --board ${who.name} \u2014 or pass --force.\n`
+          + `  Setting SPIEGA_URL to its url also counts as naming it.`);
+      }
+      console.log(`clearing ${describeBoard(who)}${!named ? '  (--force)' : ''}`);
       return void (await send([{ op: 'clear', keepTitle: !!flag('keep-title') }]));
+    }
 
     case 'render': {
       const file = positional()[0];
@@ -493,7 +535,7 @@ const main = async () => {
     }
 
     case 'stop': {
-      const { SESSION_FILE, SERVER_FILE, listBoards, unregisterBoard, boardName, readServer, DEFAULT_BOARD } =
+      const { SESSION_FILE, SERVER_FILE, listBoards, unregisterBoard, boardName, readServer, DEFAULT_BOARD, alive: up } =
         await import('./board/server.js');
       const all = listBoards();
       const srv = readServer();
@@ -505,18 +547,43 @@ const main = async () => {
       const killServer = !!(flag('all') || flag('server'));
       const names = flag('server') ? [] : flag('all') ? Object.keys(all) : [boardName()];
 
+      /* A close and a signal both take a moment to land. Give a board that
+         still answers a short grace period before declaring it stopped, so a
+         tidy shutdown is not mistaken for a failure and kept in the registry. */
+      const gone = async url => {
+        for (let i = 0; i < 8; i++) {
+          if (!(await up(url))) return true;
+          await new Promise(r => setTimeout(r, 50));
+        }
+        return false;
+      };
+
+      const stopped = new Set();      // urls we actually took down
       let n = 0;
       for (const name of names) {
         const b = all[name];
         if (!b) continue;
+        // Say which board before touching it: a stop is not undoable either.
+        const who = { ...(await boardIdentity(b.url)), name };
+        console.log(`stopping ${describeBoard(who)}`);
+
         // --all is about to end the process anyway; no point asking it politely
         if (shared(b) && !killServer) {
           try { await fetch(b.url + '/close', { method: 'POST' }); } catch { /* gone */ }
         } else if (!shared(b) && b.pid) {
           try { process.kill(b.pid); } catch { /* already gone */ }
         }
+
+        /* A failed close, or a signal a solo server ignored, must not leave a
+           board running with no registry entry: then nothing in the CLI can
+           name it again. Keep the entry and say it did not stop. */
+        if (!killServer && !(await gone(b.url))) {
+          console.error(`spiega: "${name}" is still running at ${b.url}; keeping it in the board list`);
+          continue;
+        }
+
         unregisterBoard(name);
-        if (name === DEFAULT_BOARD) { try { fs.unlinkSync(SESSION_FILE); } catch { /* none */ } }
+        stopped.add(b.url);
         console.log(`stopped ${name === DEFAULT_BOARD ? 'the board' : `"${name}"`}`);
         n++;
       }
@@ -532,11 +599,28 @@ const main = async () => {
       if (!n && !killServer) {
         try {
           const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
-          process.kill(sess.pid); fs.unlinkSync(SESSION_FILE);
-          return void console.log('stopped');
+          const who = await boardIdentity(sess.url);
+          console.log(`stopping "default"${who.title ? ` \u2014 "${who.title}"` : ''}  ${sess.url}`);
+          process.kill(sess.pid);
+          stopped.add(sess.url);
+          n++;
+          console.log('stopped');
         } catch { die('spiega: nothing to stop'); }
       }
       if (!n) die('spiega: nothing to stop');
+
+      /* session.json is the old single pointer. Deleting it while it still
+         names a board that is answering is how a stop used to strand the
+         other one: the board kept drawing, and the CLI had no name for it.
+         Only remove the pointer when the board it names is gone. */
+      try {
+        const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+        const stillThere = sess.url && !stopped.has(sess.url)
+          && (killServer ? !(await gone(sess.url)) : await up(sess.url));
+        if (!stillThere) {
+          try { fs.unlinkSync(SESSION_FILE); } catch { /* none */ }
+        }
+      } catch { /* no pointer, or already gone */ }
       return;
     }
 
