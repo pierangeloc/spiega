@@ -147,6 +147,10 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     res.setHeader('access-control-allow-origin', '*');
 
     // the renderer, served as plain modules for the browser — one copy, every board
+    /* The icon, for the browser tab. It lives in docs/ with the rest of the
+       brand and is served from there rather than copied into src/. */
+    if (p === '/icon.svg') return serveFile(res, path.join(ROOT, 'docs', 'logo', 'spiega-mark.svg'));
+
     if (p.startsWith('/src/') && !p.includes('..')) {
       return serveFile(res, path.join(ROOT, p.slice(1)));
     }

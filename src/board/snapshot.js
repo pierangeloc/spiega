@@ -6,6 +6,8 @@
    steps, with no server, no scripts and no outside requests.
    ============================================================ */
 
+import fs from 'node:fs';
+
 import { renderSVG } from '../render/render.js';
 import { lineStates } from './script.js';
 import { PAPER, PANEL, INK, MUTED, RULE, SOFT, ACCENT, MONO, paperTexture } from '../render/theme.js';
@@ -14,6 +16,26 @@ const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').re
 const mdish = s => esc(s)
   .replace(/`([^`]+)`/g, '<code>$1</code>')
   .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+
+/* The icon, inlined rather than linked: a snapshot is one file you can mail,
+   and a <link> to the server would make it stop being that the moment the
+   server goes away. There is a test for standalone, so keep it that way. */
+let ICON;
+function iconURI() {
+  if (ICON !== undefined) return ICON;
+  try {
+    const file = new URL('../../docs/logo/spiega-mark.svg', import.meta.url);
+    ICON = 'data:image/svg+xml,' + encodeURIComponent(fs.readFileSync(file, 'utf8').trim());
+  } catch {
+    ICON = '';   // a checkout without docs/ still snapshots fine
+  }
+  return ICON;
+}
+
+function favicon() {
+  const uri = iconURI();
+  return uri ? `<link rel="icon" type="image/svg+xml" href="${uri}">` : '';
+}
 
 export function snapshotHTML(board, { active = null, title = null } = {}) {
   const step = active == null || active === '' ? board.active : Number(active);
@@ -42,6 +64,7 @@ export function snapshotHTML(board, { active = null, title = null } = {}) {
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(heading)}</title>
+${favicon()}
 <style>
   :root{--paper:${PAPER};--panel:${PANEL};--ink:${INK};--muted:${MUTED};--rule:${RULE};--soft:${SOFT};--accent:${ACCENT}}
   *{box-sizing:border-box}
@@ -69,7 +92,9 @@ export function snapshotHTML(board, { active = null, title = null } = {}) {
   li.on .tag{color:${ACCENT}}
   li.off{opacity:.45}
   code{background:${SOFT};padding:1px 4px;border-radius:4px}
-  footer{margin-top:30px;color:${MUTED};font-size:11px;letter-spacing:.06em}
+  footer{margin-top:30px;color:${MUTED};font-size:11px;letter-spacing:.06em;
+    display:flex;align-items:center;gap:7px}
+  footer img{display:block;opacity:.85}
 </style></head>
 <body><div class="wrap">
   <header><span class="dot"></span><h1>${esc(heading)}</h1></header>
@@ -78,6 +103,6 @@ export function snapshotHTML(board, { active = null, title = null } = {}) {
     ${flow ? `<section><h2>The flow</h2><ol>${flow}</ol></section>` : ''}
     ${said ? `<section><h2>What was said</h2><ul>${said}</ul></section>` : ''}
   </div>
-  <footer>drawn with spiega</footer>
+  <footer>${iconURI() ? `<img src="${iconURI()}" alt="" width="15" height="15">` : ''}drawn with spiega</footer>
 </div></body></html>`;
 }
