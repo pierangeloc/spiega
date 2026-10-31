@@ -174,7 +174,14 @@ const addToZshEnv = () => {
   return true;
 };
 
-export function ensureBin() {
+/* `--no-path` leaves the shell alone.
+
+   Editing somebody's ~/.zshenv is the most invasive thing install does, and a
+   tool a stranger just installed should be able to not do it. The link is
+   still made — that part writes only inside a bin directory — and the caller
+   is told the directory is not on an agent's PATH, so it can say what to add
+   by hand. */
+export function ensureBin({ touchShell = true } = {}) {
   const pathDirs = agentPath().split(':').filter(Boolean);
   let dir = pathDirs.find(d => d.startsWith('/') && writableDir(d));
   if (!dir) dir = DOT_LOCAL;
@@ -197,12 +204,17 @@ export function ensureBin() {
 
   let onPath = agentPath().split(':').includes(dir);
   let addedToRc = false;
+  let rcDeclined = false;
   if (!onPath && dir === DOT_LOCAL) {
-    addedToRc = addToZshEnv();
-    onPath = agentPath().split(':').includes(dir);
+    if (touchShell) {
+      addedToRc = addToZshEnv();
+      onPath = agentPath().split(':').includes(dir);
+    } else {
+      rcDeclined = true;
+    }
   }
 
-  return { dir, link, onPath, addedToRc, changed };
+  return { dir, link, onPath, addedToRc, rcDeclined, changed };
 }
 
 /* The install list is a table of harness targets, and the command itself is not
@@ -213,7 +225,15 @@ const reportBin = (info, rec) => {
   const where = shortPath(info.link, 46);
   // the same column the target rows below use, so the command lines up with them
   const width = Math.max(...Object.keys(TARGETS).map(n => n.length)) + 2;
-  if (!info.onPath) {
+  if (info.rcDeclined) {
+    /* Asked not to touch the shell, so this is a statement rather than a
+       failure — but the line to add has to be here, or --no-path just means
+       the agent silently cannot find spiega. */
+    console.log(`  ${c.good(g.ok)} ${c.bold(pad('bin', width))}${c.dim(where)}  `
+      + c.dim('linked \u2014 shell left alone (--no-path)'));
+    console.log(`    ${c.dim('add this to ~/.zshenv so an agent can find it:')}`);
+    console.log(`    ${c.dim('export PATH="$HOME/.local/bin:$PATH"')}`);
+  } else if (!info.onPath) {
     console.log(`  ${c.accent(g.bad)} ${c.bold(pad('bin', width))}${c.dim(where)}  `
       + c.accent(`NOT on the PATH a non-interactive ${path.basename(AGENT_SHELL)} gets`));
   } else {
@@ -496,14 +516,14 @@ export function detect() {
 
 export const TARGET_NAMES = Object.keys(TARGETS);
 
-export function install(names) {
+export function install(names, { touchShell = true } = {}) {
   let rec = null;
   try { rec = recordNode(); }
   catch (e) {
     const g = sym();
     console.log(`  ${c.accent(g.bad)} ${c.bold(pad('node', 12))}${c.accent(`could not record the node for the launcher: ${e.message}`)}`);
   }
-  try { reportBin(ensureBin(), rec); }
+  try { reportBin(ensureBin({ touchShell }), rec); }
   catch (e) {
     const g = sym();
     console.log(`  ${c.accent(g.bad)} ${c.bold(pad('bin', 12))}${c.accent(`could not link the command: ${e.message}`)}`);

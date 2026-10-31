@@ -1,0 +1,44 @@
+name: test
+
+# The suite is the only gate, and it has to run somewhere that is not the
+# author's laptop — macOS because that is where this is developed, Linux
+# because that is where most people will first try it, and the floor from
+# package.json because claiming `engines: node >= 20` without running it there
+# is a guess.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  suite:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [20, 22, 24]
+    name: ${{ matrix.os }} · node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # No `npm ci`: the suite itself has no dependencies, and running it on a
+      # bare checkout is the promise in AGENTS.md — a clone must pass with
+      # nothing installed. If that ever stops being true, this job says so.
+      - run: npm test
+
+  types:
+    runs-on: ubuntu-latest
+    name: typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # tsc is the one dependency, and it is deliberately not part of `npm
+      # test` so a fresh clone still passes. CI is where both get run.
+      - run: npm ci
+      - run: npm run typecheck

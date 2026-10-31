@@ -164,6 +164,7 @@ const HELP = `spiega — a hand-drawn board an agent draws on while it explains
   doctor                        check that agents are reading the current version
   migrate                       move everything over from the old handwave name
   install [targets...]          wire it into your agents (--detect to see what it would do)
+                                --no-path leaves your shell startup files alone
   mcp-config [--shape S]        print the MCP entry to paste into any other harness
   bench <prompt> --models a,b   draw the same explanation with several models
   draw <json|file|->            add to the board (one op, or a list, or a whole spec)
@@ -317,7 +318,7 @@ const main = async () => {
       }
 
       console.log(heading('spiega install'));
-      const results = install(want);
+      const results = install(want, { touchShell: !flag('no-path') });
       for (const r of results) {
         const mark = !r.ok ? c.accent(g.bad) : r.state === 'unchanged' ? c.dim(g.idle) : c.good(g.ok);
         const gets = r.gets ? pad(c.muted(r.gets), getsW + 10) : pad('', getsW + 10);

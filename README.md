@@ -35,17 +35,28 @@ drawn, not generated, so it reads as somebody thinking rather than a document.
 Node 20 or newer. No dependencies and no build step, so there is nothing to
 compile and nothing to wait for.
 
+Developed and used on **macOS**, and tested on macOS and Linux across Node 20,
+22 and 24. Windows paths are in the code and nobody has run them in anger — if
+you are on Windows, expect to file the first issue, and say so and it will get
+fixed.
+
 ### 1. Get it on your PATH
 
 ```bash
-gh repo clone pierangeloc/spiega
-cd spiega
-npm link                  # puts `spiega` on your PATH, pointing at this checkout
+npm install -g spiega
 ```
 
-`npm link` rather than a copy on purpose: everything below — the CLI, the MCP
-server, the agent skill — resolves to this directory, so `git pull` updates all
-of it at once. (Not on npm yet, hence the clone.)
+Or from a clone, if you want to change it:
+
+```bash
+git clone https://github.com/pierangeloc/spiega.git
+cd spiega
+npm link                  # `spiega` now points at this checkout
+```
+
+`npm link` rather than a copy on purpose: the CLI, the MCP server and the agent
+skill all resolve to that directory, so `git pull` updates every one of them at
+once.
 
 Check it:
 
@@ -63,6 +74,14 @@ spiega install              # do it
 `install` with no arguments does only what it finds on this machine, because
 writing a config for a harness you do not use is how you end up with a file you
 never asked for. `--list` shows every target and what it writes.
+
+It also links the command into a directory an agent's shell can see, and that
+is the one thing it does outside a config file: when `~/.local/bin` is not
+already on a non-interactive `PATH`, it adds one guarded line to `~/.zshenv`,
+backing the file up first. **`spiega install --no-path` skips that** and prints
+the line to add yourself. An agent's tool call gets no nvm init, so without it
+on `PATH` somewhere, the fallback when MCP is unavailable is an agent writing
+prose instead of drawing.
 
 | target | what it gets |
 |---|---|
