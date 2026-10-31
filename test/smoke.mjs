@@ -1346,6 +1346,83 @@ test('removing a node takes its callouts with it', () => {
     'a callout pointing at something gone has nothing to say');
 });
 
+/* A run of removes is collected and swept once. The sweep must leave exactly
+   what removing them one at a time would have left, in the same order — and it
+   must not swallow something drawn after the removal it should survive. */
+test('a run of removes sweeps once and keeps what survived in order', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'node', id: 'a', label: 'A' }, { op: 'node', id: 'b', label: 'B' },
+    { op: 'node', id: 'c', label: 'C' }, { op: 'node', id: 'd', label: 'D' },
+    { op: 'edge', from: 'a', to: 'b' }, { op: 'edge', from: 'b', to: 'c' },
+    { op: 'edge', from: 'c', to: 'd' },
+    { op: 'boundary', id: 'grp', label: 'Group', members: ['a', 'b'] },
+    { op: 'boundary', id: 'a', label: 'Named like the node' },
+    { op: 'callout', at: 'a', label: 'about A' },
+    { op: 'callout', at: 'a>b', label: 'about the hop' },
+    { op: 'callout', at: 'b', label: 'about B' },
+    { op: 'callout', at: 'c>d', label: 'about the last hop' },
+  ]);
+  b.placed.a = { col: 0, row: 0 };
+  b.placed.b = { col: 1, row: 0 };
+  b.placed.d = { col: 3, row: 0 };
+
+  // a line said in the middle does not end the run, and does not resurrect
+  applyOps(b, [
+    { op: 'remove', id: 'a' },
+    { op: 'say', text: 'a is gone' },
+    { op: 'remove', id: 'd' },
+  ]);
+
+  assert.deepEqual(b.nodes.map(n => n.id), ['b', 'c'], 'survivors keep their order');
+  assert.deepEqual(b.edges.map(e => `${e.from}>${e.to}`), ['b>c'],
+    'only the edge between survivors is left');
+  assert.deepEqual(b.boundaries.map(x => x.id), ['grp'],
+    'a boundary named like the node goes with it');
+  assert.deepEqual(b.callouts.map(c => c.label), ['about B'],
+    'callouts on the nodes and hops that went are gone, the rest stay');
+  assert.deepEqual(Object.keys(b.placed).sort(), ['b'],
+    'placement goes with the node, and stays with the survivors');
+
+  /* And the same board comes back from its own log. Callout ops are left out
+     of the replay here: a callout's `at` is its target, and `record` overwrites
+     `at` with the arrival time, so a callout cannot be replayed at all. That
+     predates this change and is not the removal's business; the nodes, edges
+     and boundaries are enough to show a removed node stays removed. */
+  const replay = emptyBoard();
+  applyOps(replay, b.log.filter(e => e.op !== 'callout'));
+  assert.deepEqual(replay.nodes.map(n => n.id), ['b', 'c']);
+  assert.deepEqual(replay.edges.map(e => `${e.from}>${e.to}`), ['b>c']);
+  assert.deepEqual(replay.boundaries.map(x => x.id), ['grp']);
+});
+
+test('anything drawn after a removal is new, not a survivor of the sweep', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'node', id: 'a', label: 'A' }, { op: 'node', id: 'b', label: 'B' },
+    { op: 'edge', from: 'a', to: 'b' },
+  ]);
+
+  // the node op ends the run, so a is drawn again rather than updated in place
+  applyOps(b, [
+    { op: 'remove', id: 'a' },
+    { op: 'node', id: 'a', label: 'A again' },
+    { op: 'edge', from: 'a', to: 'b' },
+  ]);
+  assert.deepEqual(b.nodes.map(n => n.id), ['b', 'a'], 'the redrawn node lands at the end');
+  assert.equal(b.nodes.find(n => n.id === 'a').label, 'A again');
+  assert.deepEqual(b.edges.map(e => `${e.from}>${e.to}`), ['a>b'],
+    'the old edge went with a; the one drawn after the removal is a new edge');
+
+  // a callout added after the removal is not swept away with what it names
+  applyOps(b, [
+    { op: 'remove', id: 'b' },
+    { op: 'callout', at: 'b', label: 'said after it went' },
+  ]);
+  assert.deepEqual(b.callouts.map(c => c.label), ['said after it went'],
+    'the sweep already ran; the callout is newer than the removal');
+});
+
 /* Editing one TOML table without eating the rest of the file.
    `[^[]*` stops at the bracket in `args = [...]` on the table's own second
    line, orphaning everything after it. That corrupted a real config on this
