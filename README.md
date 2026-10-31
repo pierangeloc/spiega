@@ -7,6 +7,10 @@ A hand-drawn board an AI agent draws on **while it explains**.
 *spiega* is Italian for *explain* — and for *unfold*, which is what this does
 to a long document: spreads it out until you can see the whole shape at once.
 
+Say it **SPYEH-ga** (/ˈspjɛɡa/): two syllables, stress on the first, and the
+`i` is a glide rather than a vowel — *spyeh*, not *spee-eh*. It is the sound
+English keeps missing in *piano*, which Italian says the same way.
+
 You ask how something works. The agent answers in the terminal, as usual — and
 beside it, a board fills in: boxes for the services, labelled arrows for the
 calls, a dashed enclosure round the VPC, a note where the gotcha is. Then it
