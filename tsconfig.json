@@ -1,4 +1,8 @@
 {
+  // Types are opt-in and off the critical path: `npm test` does NOT run this,
+  // so a fresh clone still passes with no install, which is the promise in
+  // AGENTS.md. Run `npm install && npm run typecheck` to check types.
+  //
   // checkJs is off on purpose. The four modules below opt in with `// @ts-check`
   // instead, which is the standard way to adopt types one file at a time.
   // Turning checkJs on would also check the six render modules they import —

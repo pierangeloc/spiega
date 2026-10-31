@@ -21,7 +21,7 @@
   },
   "license": "MIT",
   "scripts": {
-    "test": "npm run typecheck && node test/smoke.mjs",
+    "test": "node test/smoke.mjs",
     "typecheck": "tsc --noEmit",
     "serve": "node src/cli.js serve --open",
     "mcp": "node src/mcp/server.js",

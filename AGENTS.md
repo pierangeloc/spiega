@@ -76,6 +76,18 @@ Check the narrow width. A board is often a split pane, and a message that fits
 in a full window loses its second half in one — which is the half that carries
 the consequence.
 
+## Types are opt-in, and not in `npm test`
+
+Four modules carry `// @ts-check` with JSDoc — `board/state.js`,
+`board/script.js`, `render/render.js`, `render/layout.js` — checked by
+`npm install && npm run typecheck`.
+
+It is deliberately **not** part of `npm test`, because `tsc` is the repo's only
+dependency and a fresh clone must still pass its suite with nothing installed.
+Keep it that way. If you add types to another module, add `// @ts-check` to it
+and list it in `tsconfig.json`; never buy a green check with `any`,
+`@ts-ignore` or a loosened flag, which is the whole reason the four are strict.
+
 ## POST /op is on the critical path of somebody talking
 
 An agent draws mid-sentence. `POST /op` pushes ops into an in-process buffer
