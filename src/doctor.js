@@ -96,6 +96,19 @@ const nodeFloor = () => {
   } catch { return 20; }
 };
 
+/* Which rung of the launcher's ladder produced the node, in words. The path
+   alone says where the node is, not why it was picked — and the difference
+   between "the one install recorded" and "whatever nvm had" is exactly what
+   the record is for, so a fallback has to read as one. */
+const VIA = {
+  override: 'SPIEGA_NODE in the environment',
+  recorded: 'the node `spiega install` recorded',
+  'nvm-default': "nvm's default alias",
+  'nvm-any': 'an installed nvm version',
+  path: 'the node on PATH',
+  known: 'a well-known install location',
+};
+
 /* Which node would run it? The launcher answers this itself, because the node
    on PATH and the node nvm calls default are not the same thing and only the
    second one actually runs spiega. An install that predates the launcher has
@@ -106,12 +119,27 @@ const nodeFor = which => {
       encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'],
       env: { HOME, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', SPIEGA_NODE_VERSION: '1' },
     }).trim();
-    const m = out.match(/^(.*) (\d+\.\d+\.\d+)$/);
-    if (m) return { node: m[1], version: m[2], via: 'the launcher' };
+    const [first, ...rest] = out.split('\n');
+    // the third field is newer than this check; an old launcher prints two
+    const m = first.match(/^(.*) (\d+\.\d+\.\d+)(?: ([a-z-]+))?$/);
+    if (m) {
+      /* The recorded node is a second answer to a second question, and the
+         launcher reports it on its own line because it can be stale while the
+         run is fine. No such line at all means there is no record — which is
+         not the same state as a record that has gone bad. */
+      const rec = rest.map(l => l.match(/^recorded (.+) (ok|stale)$/)).find(Boolean);
+      return {
+        node: m[1],
+        version: m[2],
+        via: m[3] ? (VIA[m[3]] || m[3]) : 'the launcher',
+        record: rec ? { path: rec[1], ok: rec[2] === 'ok' } : null,
+        launcher: true,
+      };
+    }
   } catch { /* not the launcher, or it could not run */ }
   const v = agentShell('node -p "process.versions.node"');
   if (/^\d+\.\d+\.\d+$/.test(v || '')) {
-    return { version: v, via: 'the node on PATH, with no launcher' };
+    return { version: v, via: 'the node on PATH, with no launcher', record: null, launcher: false };
   }
   return null;
 };
@@ -146,6 +174,22 @@ function invocation(rows) {
   } else {
     const at = probe.node ? ` at ${tilde(probe.node)}` : '';
     rows.push(ok('node for spiega', `v${probe.version} via ${probe.via}${at}`));
+  }
+
+  /* The record is worth its own line: a stale one does not stop spiega (the
+     launcher falls back), so nothing else here would ever mention it, and
+     nobody re-runs install after upgrading node without being told to. */
+  if (probe?.launcher) {
+    if (!probe.record) {
+      rows.push(warn('node recorded', 'none — the launcher has to guess at a node on every run',
+        'run `spiega install` under the node you want it to use'));
+    } else if (probe.record.ok) {
+      rows.push(ok('node recorded', `${tilde(probe.record.path)} — tried before it starts guessing, and it still runs`));
+    } else {
+      rows.push(warn('node recorded',
+        `${tilde(probe.record.path)} is gone or below the floor — the launcher is falling back to discovery`,
+        'run `spiega install` under the node you want it to use'));
+    }
   }
 }
 

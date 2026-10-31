@@ -23,6 +23,9 @@ const MCP_ENTRY = path.join(ROOT, 'src', 'mcp', 'server.js');
    floor instead of trusting whatever `env node` happens to be. */
 const LAUNCHER = path.join(ROOT, 'bin', 'spiega');
 const HOME = os.homedir();
+/* The node the launcher should try before it starts guessing, written by
+   recordNode() below and read by bin/spiega. */
+const NODE_FILE = path.join(HOME, '.spiega', 'node');
 
 /* The XDG config root, honoured rather than assumed.
 
@@ -97,6 +100,29 @@ const backupDir = d => {
   fs.mkdirSync(path.dirname(b), { recursive: true });
   fs.cpSync(d, b, { recursive: true });
   return b;
+};
+
+/* Which node installed this, remembered for the launcher.
+
+   install only reaches this line on a node the guard at the top of cli.js has
+   already checked against the engines floor, so `process.execPath` is a node
+   known to be good. Without the record the launcher has to re-derive one on
+   every run, and its guesses are nvm-shaped: a node from brew, asdf, volta,
+   mise or a system package installed cleanly and then could not run.
+
+   A file, not a line in bin/spiega. That launcher is tracked, so an install
+   that wrote into it would dirty the checkout and the next `git pull` would
+   either revert the record or refuse to move. This file is also per HOME, so
+   one checkout shared between two machines keeps one answer each, which is
+   the only version of the path that is true on both. */
+const recordNode = () => {
+  const node = process.execPath;
+  let before = '';
+  try { before = fs.readFileSync(NODE_FILE, 'utf8').trim(); } catch { /* first install */ }
+  if (before === node) return { node, file: NODE_FILE, changed: false };
+  fs.mkdirSync(path.dirname(NODE_FILE), { recursive: true });
+  fs.writeFileSync(NODE_FILE, node + '\n');
+  return { node, file: NODE_FILE, changed: true };
 };
 
 /* ---------- the command itself ---------- */
@@ -182,7 +208,7 @@ export function ensureBin() {
 /* The install list is a table of harness targets, and the command itself is not
    one of them; but where it landed is the thing this issue is about, so it is
    said first and in the same shape. */
-const reportBin = info => {
+const reportBin = (info, rec) => {
   const g = sym();
   const where = shortPath(info.link, 46);
   // the same column the target rows below use, so the command lines up with them
@@ -190,11 +216,19 @@ const reportBin = info => {
   if (!info.onPath) {
     console.log(`  ${c.accent(g.bad)} ${c.bold(pad('bin', width))}${c.dim(where)}  `
       + c.accent(`NOT on the PATH a non-interactive ${path.basename(AGENT_SHELL)} gets`));
-    return;
+  } else {
+    const made = info.addedToRc ? ' \u2014 added ~/.local/bin to ~/.zshenv, so open a new shell' : '';
+    console.log(`  ${c.good(g.ok)} ${c.bold(pad('bin', width))}${c.dim(where)}  `
+      + c.dim('on the PATH a non-interactive shell gets') + c.dim(made));
   }
-  const made = info.addedToRc ? ' \u2014 added ~/.local/bin to ~/.zshenv, so open a new shell' : '';
-  console.log(`  ${c.good(g.ok)} ${c.bold(pad('bin', width))}${c.dim(where)}  `
-    + c.dim('on the PATH a non-interactive shell gets') + c.dim(made));
+  /* The link being findable is only half of "it runs": the launcher still
+     needs a node, and on a machine whose node is not nvm's this recording is
+     what makes the command work at all. Saying which one it is means nobody
+     has to run doctor to find out why an agent got further than the terminal. */
+  if (rec) {
+    console.log(`  ${c.good(g.ok)} ${c.bold(pad('node', width))}${c.dim(shortPath(rec.node, 46))}  `
+      + c.dim(rec.changed ? 'recorded for the launcher' : 'already recorded for the launcher'));
+  }
 };
 
 /* One MCP registration, written into whatever shape a harness expects. The
@@ -463,7 +497,13 @@ export function detect() {
 export const TARGET_NAMES = Object.keys(TARGETS);
 
 export function install(names) {
-  try { reportBin(ensureBin()); }
+  let rec = null;
+  try { rec = recordNode(); }
+  catch (e) {
+    const g = sym();
+    console.log(`  ${c.accent(g.bad)} ${c.bold(pad('node', 12))}${c.accent(`could not record the node for the launcher: ${e.message}`)}`);
+  }
+  try { reportBin(ensureBin(), rec); }
   catch (e) {
     const g = sym();
     console.log(`  ${c.accent(g.bad)} ${c.bold(pad('bin', 12))}${c.accent(`could not link the command: ${e.message}`)}`);

@@ -4,8 +4,13 @@
 # `#!/usr/bin/env node` is a lottery on a machine with nvm: the shebang resolves
 # `node` from the caller's PATH, and an agent's non-interactive shell may find a
 # brew node missing its dylibs or a node from 2016. So this resolves a node that
-# is new enough for the engines floor, preferring nvm's default, and execs the
-# real CLI with it. It is /bin/sh so it runs before any node does.
+# is new enough for the engines floor, preferring the one `spiega install` ran
+# under, and execs the real CLI with it. It is /bin/sh so it runs before any
+# node does.
+#
+# The guesses below are nvm-shaped, which is no use to a node from brew, asdf,
+# volta or mise. The record is what makes the first run after install work
+# there: install only gets that far on a node the engines guard has accepted.
 #
 # The one thing it must never do is guess silently: if no usable node is found,
 # it says so in one sentence and exits non-zero.
@@ -44,6 +49,21 @@ usable() {
 
 nvm=${NVM_DIR:-$HOME/.nvm}
 
+# The node `spiega install` was running under when it wrote this install. It
+# lives in the state directory rather than in this file, because this is a
+# tracked file: an install that wrote into it would dirty the checkout, and a
+# `git pull` would either revert it or refuse. It is per HOME, so a checkout
+# shared between machines keeps one answer each.
+#
+# A recorded path can be gone — a deleted nvm version, an upgraded brew. It is
+# a candidate like any other and goes through usable() below, so staleness
+# costs a shell call, not the run.
+record_file=$HOME/.spiega/node
+recorded=''
+if [ -f "$record_file" ]; then
+  IFS= read -r recorded < "$record_file" 2>/dev/null || true
+fi
+
 # nvm's default alias, followed through links like lts/* and node. The alias
 # file may name a version (`26.10.0`, `v26.10.0`) or another alias.
 from_alias() {
@@ -60,39 +80,51 @@ from_alias() {
 }
 
 node=''
+# Which rung answered, so `spiega doctor` can say why rather than only which.
+via=''
 
 # 1. An explicit choice, for a machine whose right node is not nvm's default.
 if [ -n "${SPIEGA_NODE:-}" ] && usable "$SPIEGA_NODE"; then
   node=$SPIEGA_NODE
+  via=override
 fi
 
-# 2. What nvm calls the default — the node someone actually uses in a terminal.
+# 2. The node that installed this, remembered because install ran under a node
+#    it had already checked against the floor. This is the rung that works
+#    when the node came from somewhere the guesses below have never heard of.
+if [ -z "$node" ] && [ -n "$recorded" ] && usable "$recorded"; then
+  node=$recorded
+  via=recorded
+fi
+
+# 3. What nvm calls the default — the node someone actually uses in a terminal.
 if [ -z "$node" ]; then
   alias_node=$(from_alias default 2>/dev/null) || alias_node=''
   if [ -n "$alias_node" ] && usable "$alias_node"; then
     node=$alias_node
+    via=nvm-default
   fi
 fi
 
-# 3. Any installed nvm version that clears the floor, newest first.
+# 4. Any installed nvm version that clears the floor, newest first.
 if [ -z "$node" ] && [ -d "$nvm/versions/node" ]; then
   while IFS= read -r candidate; do
-    if usable "$candidate"; then node=$candidate; break; fi
+    if usable "$candidate"; then node=$candidate; via=nvm-any; break; fi
   done <<EOF
 $(ls -1d "$nvm"/versions/node/*/bin/node 2>/dev/null | sort -r)
 EOF
 fi
 
-# 4. Whatever the PATH has, if it is usable.
+# 5. Whatever the PATH has, if it is usable.
 if [ -z "$node" ]; then
   candidate=$(command -v node 2>/dev/null) || candidate=''
-  if [ -n "$candidate" ] && usable "$candidate"; then node=$candidate; fi
+  if [ -n "$candidate" ] && usable "$candidate"; then node=$candidate; via=path; fi
 fi
 
-# 5. The usual places, for a shell whose PATH is as bare as an agent's.
+# 6. The usual places, for a shell whose PATH is as bare as an agent's.
 if [ -z "$node" ]; then
   for candidate in /opt/homebrew/bin/node /usr/local/bin/node /usr/bin/node; do
-    if usable "$candidate"; then node=$candidate; break; fi
+    if usable "$candidate"; then node=$candidate; via=known; break; fi
   done
 fi
 
@@ -105,7 +137,18 @@ fi
 # because the node on PATH and the node nvm calls default are not the same
 # thing, and only the second one runs this.
 if [ "${SPIEGA_NODE_VERSION:-}" = "1" ]; then
-  printf '%s %s\n' "$node" "$("$node" -p 'process.versions.node')"
+  printf '%s %s %s\n' "$node" "$("$node" -p 'process.versions.node')" "$via"
+  # The record is a second answer to a second question: which node was
+  # installed against, and is it still there? It can be stale while the
+  # launcher is fine, so doctor cannot infer it from the node above. No line
+  # at all means there is no record; that is not the same as a broken one.
+  if [ -n "$recorded" ]; then
+    if usable "$recorded"; then
+      printf 'recorded %s ok\n' "$recorded"
+    else
+      printf 'recorded %s stale\n' "$recorded"
+    fi
+  fi
   exit 0
 fi
 
