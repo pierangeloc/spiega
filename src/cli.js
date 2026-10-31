@@ -63,12 +63,16 @@ const positional = () => argv.slice(1).filter((a, i, all) =>
 
 const die = (msg, code = 1) => { console.error(msg); process.exit(code); };
 
-/* `--board NAME` picks which board this command talks to. It is set into the
+/* `--board NAME` picks which board this command talks to. `--name NAME` means
+   the same thing, because that is what people type at `spiega serve` when they
+   want a board called beta. Ignoring it there registered the board under the
+   session's name instead, so the `stop --board beta` that followed was asked
+   to stop something that had never been created. It is set into the
    environment rather than threaded through every call site, because that is
    also how a harness selects one: the MCP registration sets SPIEGA_BOARD,
    and a Claude session and an opencode session then draw on different boards
    without either knowing the other exists. */
-const boardFlag = flag('board');
+const boardFlag = flag('board') ?? flag('name');
 if (boardFlag && boardFlag !== true) process.env.SPIEGA_BOARD = String(boardFlag);
 
 /* ---------- talking to a running board ---------- */
@@ -176,11 +180,11 @@ const HELP = `spiega — a hand-drawn board an agent draws on while it explains
   url                           print the running board's URL
   stop [--all|--server]         stop this shell's board, every one, or the server
 
-Every command takes --board NAME (or the SPIEGA_BOARD environment variable)
-and talks to that board, starting it if it is not running. One board per
-conversation: a Claude session and an opencode session drawing on the same
-board interleave two explanations into one picture. "spiega install" gives
-each harness its own name, so this happens without anyone thinking about it.
+Every command takes --board NAME (or --name, or SPIEGA_BOARD) and talks to
+that board, starting it if it is not running. One board per conversation: a
+Claude session and an opencode session drawing on the same board interleave
+two explanations into one picture. "spiega install" gives each harness its own
+name, so this happens without anyone thinking about it.
 
 One process serves them all, on port 4777, each board under /b/<name>. Eight
 boards cost one Node runtime rather than eight, and all of them run the code
