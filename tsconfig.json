@@ -1,0 +1,25 @@
+{
+  // checkJs is off on purpose. The four modules below opt in with `// @ts-check`
+  // instead, which is the standard way to adopt types one file at a time.
+  // Turning checkJs on would also check the six render modules they import —
+  // theme.js, ink.js, glyphs.js, edges.js, callout.js and math.js — which
+  // together carry ~234 strict errors today. Annotating those is the next step,
+  // not this one.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "strict": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "skipLibCheck": true,
+    "types": []
+  },
+  "include": [
+    "src/board/state.js",
+    "src/board/script.js",
+    "src/render/render.js",
+    "src/render/layout.js"
+  ]
+}

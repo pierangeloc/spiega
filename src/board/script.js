@@ -1,3 +1,4 @@
+// @ts-check
 /* ============================================================
    Which line of the script belongs to which step.
 
@@ -24,20 +25,37 @@
    dim either: an opening sentence is about the whole board, not about step 4.
    ============================================================ */
 
+/** @typedef {import('./state.js').Board} Board */
+
+/** @typedef {{step: number|null, state: 'on'|'off'|'free'|'idle'}} LineState */
+/** @typedef {{line: number, step: number, after: number}} BackwardsTag */
+/** @typedef {{
+ *   lines: number, tagged: number, steps: number,
+ *   backwards: BackwardsTag[], ordered: boolean
+ * }} TagReport */
+
 /* Per transcript entry, the step index it belongs to, or null.
    Returns a plain array, parallel to board.transcript. */
+/**
+ * @param {Board} [board]
+ * @returns {(number|null)[]}
+ */
 export function scriptSteps(board) {
   const t = board?.transcript || [];
   if (!t.length) return [];
   const flow = board?.flow || [];
+  /** @type {Map<string, number>} */
   const byEdge = new Map();
   flow.forEach((s, i) => { if (s.edge && !byEdge.has(s.edge)) byEdge.set(s.edge, i); });
 
-  const clamp = i => (Number.isInteger(i) && i >= 0 && i < flow.length ? i : null);
+  /** @param {number|null} i @returns {number|null} */
+  const clamp = i => (typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < flow.length ? i : null);
 
   // What was lit when each line was said, in log order. The log holds `say`
   // ops in the same order as the transcript, so the two line up by counting.
+  /** @type {(number|null)[]} */
   const whileLit = [];
+  /** @type {number|null} */
   let lit = null;
   for (const e of board?.log || []) {
     if (e.op === 'focus') lit = e.step == null ? null : Number(e.step);
@@ -46,12 +64,17 @@ export function scriptSteps(board) {
 
   return t.map((e, i) => {
     if (e.step != null) return clamp(Number(e.step));
-    if (e.edge != null && byEdge.has(e.edge)) return byEdge.get(e.edge);
+    if (e.edge != null && byEdge.has(e.edge)) return byEdge.get(e.edge) ?? null;
     return clamp(whileLit[i]);
   });
 }
 
 /* The lines belonging to a step, as indices into board.transcript. */
+/**
+ * @param {Board|undefined} board
+ * @param {number|null} step
+ * @returns {number[]}
+ */
 export function linesFor(board, step) {
   if (step == null) return [];
   const at = scriptSteps(board);
@@ -68,14 +91,19 @@ export function linesFor(board, step) {
 
    Kept here rather than in the page so it can be tested without a DOM, and so
    the live rail and a snapshot cannot drift apart. */
+/**
+ * @param {Board} [board]
+ * @returns {LineState[]}
+ */
 export function lineStates(board) {
   const at = scriptSteps(board);
   const active = board?.active;
   const anyHere = active != null && at.some(s => s === active);
-  return at.map(step => ({
-    step,
-    state: !anyHere ? 'idle' : step === active ? 'on' : step == null ? 'free' : 'off',
-  }));
+  return at.map(step => {
+    /** @type {'on'|'off'|'free'|'idle'} */
+    const state = !anyHere ? 'idle' : step === active ? 'on' : step == null ? 'free' : 'off';
+    return { step, state };
+  });
 }
 
 /* Clicking a line of the script walks the step it explains.
@@ -86,6 +114,11 @@ export function lineStates(board) {
 
    Returns the step to focus, or null to clear. Lives here, with the rest of
    the script-to-step reasoning, so it can be tested without a DOM. */
+/**
+ * @param {Board|undefined} board
+ * @param {number} step
+ * @returns {number|null|undefined}
+ */
 export function clickStep(board, step) {
   if (!Number.isInteger(step) || step < 0 || step >= (board?.flow?.length || 0)) return undefined;
   return board?.active === step ? null : step;
@@ -107,9 +140,16 @@ export function clickStep(board, step) {
    Reported, not corrected: reordering someone's transcript would be a lie
    about the session, and the untagged lines have no place in step order
    anyway. */
+/**
+ * @param {Board} [board]
+ * @returns {TagReport}
+ */
 export function tagReport(board) {
   const at = scriptSteps(board);
-  const tagged = at.map((step, line) => ({ step, line })).filter(x => x.step != null);
+  /** @type {{step: number, line: number}[]} */
+  const tagged = [];
+  at.forEach((step, line) => { if (step != null) tagged.push({ step, line }); });
+  /** @type {BackwardsTag[]} */
   const backwards = [];
   for (let k = 1; k < tagged.length; k++) {
     if (tagged[k].step < tagged[k - 1].step) {

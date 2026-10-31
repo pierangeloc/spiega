@@ -137,6 +137,13 @@ const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(
 
 /* Strokes carry class="s" so the board client can find them and draw them on,
    one after another, with stroke-dashoffset. */
+/**
+ * @param {string} d
+ * @param {{
+ *   w?: number, color?: string, dash?: string|null,
+ *   opacity?: number, cls?: string, extra?: string
+ * }} [opts]
+ */
 export function stroke(d, { w = 1.6, color = INK, dash = null, opacity = 1, cls = 's', extra = '' } = {}) {
   if (!d) return '';
   return `<path class="${cls}" d="${d}" fill="none" stroke="${color}" stroke-width="${w}"` +
