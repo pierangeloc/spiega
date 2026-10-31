@@ -61,15 +61,15 @@ const indexesFor = board => {
   return ix;
 };
 
-const rebuildIndexes = board => {
-  const ix = indexesFor(board);
-  for (const k of Object.keys(ix)) ix[k].clear();
-  const fill = (map, list, key) => list.forEach((x, i) => map.set(key(x), i));
-  fill(ix.nodes, board.nodes || [], x => x.id);
-  fill(ix.edges, board.edges || [], edgeId);
-  fill(ix.boundaries, board.boundaries || [], x => x.id);
-  fill(ix.callouts, board.callouts || [], x => x.id);
-};
+/* Throw the index away rather than rebuild it here.
+
+   `remove` filters the lists, so every index above the removed slot is wrong.
+   Rebuilding on the spot is O(n), which made removing n nodes O(n²) again —
+   the very cost the index was added to remove. Dropping it is O(1), and the
+   next op that actually needs an index pays for one rebuild. A run of removes
+   now costs one rebuild in total instead of one per op, and only if something
+   is drawn afterwards. */
+const dropIndexes = board => { INDEXES.delete(board); };
 
 const upsert = (list, item, keyOf = x => x.id, index = null) => {
   const id = keyOf(item);
@@ -89,7 +89,6 @@ const edgeId = e => `${e.from}>${e.to}`;
    accepted, which is exactly what the log writer buffers. */
 export function applyOp(board, op) {
   const fresh = { nodes: [], edges: [], boundaries: [] };
-  const ix = indexesFor(board);
   // recorded before the switch, so a `clear` wipes the log with everything else
   const record = () => {
     board.log.push({ ...op, at: Date.now() });
@@ -99,7 +98,7 @@ export function applyOp(board, op) {
     case 'clear': {
       const t = op.keepTitle ? board.title : '';
       Object.assign(board, emptyBoard(), { title: t });
-      rebuildIndexes(board);
+      dropIndexes(board);
       break;
     }
     case 'title':
@@ -152,14 +151,14 @@ export function applyOp(board, op) {
       delete n.op;
       n.kind = op.op === 'note' ? 'note' : (n.kind || 'service');
       n.id = n.id || (n.label || 'n').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-      if (upsert(board.nodes, n, x => x.id, ix.nodes)) fresh.nodes.push(n.id);
+      if (upsert(board.nodes, n, x => x.id, indexesFor(board).nodes)) fresh.nodes.push(n.id);
       break;
     }
 
     case 'edge': {
       const e = { ...op }; delete e.op;
       if (!e.from || !e.to) break;
-      if (upsert(board.edges, e, edgeId, ix.edges)) fresh.edges.push(edgeId(e));
+      if (upsert(board.edges, e, edgeId, indexesFor(board).edges)) fresh.edges.push(edgeId(e));
       break;
     }
 
@@ -170,14 +169,14 @@ export function applyOp(board, op) {
     case 'callout': {
       const c = { ...op }; delete c.op;
       c.id = c.id || `callout-${(c.at || '').replace(/[^a-z0-9]+/gi, '-')}-${board.callouts.length}`;
-      if (upsert(board.callouts, c, x => x.id, ix.callouts)) fresh.boundaries.push(c.id);
+      if (upsert(board.callouts, c, x => x.id, indexesFor(board).callouts)) fresh.boundaries.push(c.id);
       break;
     }
 
     case 'boundary': {
       const b = { ...op }; delete b.op;
       b.id = b.id || (b.label || 'b').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-      if (upsert(board.boundaries, b, x => x.id, ix.boundaries)) fresh.boundaries.push(b.id);
+      if (upsert(board.boundaries, b, x => x.id, indexesFor(board).boundaries)) fresh.boundaries.push(b.id);
       break;
     }
 
@@ -205,7 +204,7 @@ export function applyOp(board, op) {
       board.callouts = board.callouts.filter(c => c.id !== id && c.at !== id
         && !String(c.at || '').split('>').includes(id));
       delete board.placed[id];
-      rebuildIndexes(board);
+      dropIndexes(board);
       break;
     }
 
