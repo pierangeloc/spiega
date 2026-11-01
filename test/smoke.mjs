@@ -656,6 +656,42 @@ test('colour and glyphs stay out of piped output', async () => {
   assert.ok(short.endsWith('spiega'), 'the end is what names it');
 });
 
+/* `spiega render spec.json` and `spiega draw spec.json` are meant to be the
+   same picture by two routes — one straight to a file, one onto a live board.
+   specToOps dropped spec.callouts, so the drawn board lost exactly the
+   sentences explaining why the boxes mattered, and said nothing about it. The
+   invariant is that the two routes agree on what the spec contains. */
+test('drawing a spec keeps everything rendering it would show', async () => {
+  const { specToOps } = await import('../src/cli.js');
+
+  const spec = {
+    title: 'two routes',
+    nodes: [{ id: 'a', label: 'A' }, { id: 'b', label: 'B' }],
+    edges: [{ from: 'a', to: 'b', label: 'calls' }],
+    boundaries: [{ id: 'vpc', label: 'our vpc', members: ['a', 'b'] }],
+    callouts: [{ at: 'a', text: 'the thing worth saying' }],
+    flow: [{ edge: 'a>b', text: 'the hop' }],
+  };
+  const ops = specToOps(spec);
+  const kinds = {};
+  for (const o of ops) kinds[o.op] = (kinds[o.op] || 0) + 1;
+
+  for (const op of ['title', 'node', 'edge', 'boundary', 'callout', 'flow'])
+    assert.ok(kinds[op], `a spec with ${op}s produced no ${op} op: ${JSON.stringify(kinds)}`);
+
+  assert.equal(ops.find(o => o.op === 'callout').text, 'the thing worth saying',
+    'and it carries its text');
+
+  // any shipped example that uses callouts must survive being drawn
+  for (const f of fs.readdirSync(path.join(ROOT, 'examples')).filter(f => f.endsWith('.json'))) {
+    const shipped = JSON.parse(fs.readFileSync(path.join(ROOT, 'examples', f), 'utf8'));
+    const want = (shipped.callouts || []).length;
+    if (!want) continue;
+    assert.equal(specToOps(shipped).filter(o => o.op === 'callout').length, want,
+      `callouts in examples/${f} are dropped when it is drawn`);
+  }
+});
+
 /* `git -C <dir>` walks UP until it finds a repository. npm's global prefix
    under nvm sits inside nvm's own clone, so doctor answered about nvm:
    reporting its HEAD as "this checkout", its dirty file as uncommitted work,
