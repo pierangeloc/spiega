@@ -77,16 +77,14 @@ tour — all fourteen kinds, the title bar, and the code for each — is in
 
 ## Where it earns its keep
 
-Two explanations where the answer is mostly *relationships between named
-things* — the case a paragraph is worst at. Both prose answers below are the
-real thing a capable model gives, written out in full, not strawmen.
-
-Counts are ops **as drawn**: one per box, per arrow, per enclosure, per step,
-which is what an agent actually emits while it talks.
+Two questions whose answers are mostly *relationships between named things* —
+the case a paragraph is worst at. One is a production bug, one is not software
+at all. Each is shown twice: the answer a capable model gives in prose, written
+out in full and not a strawman, and the same answer as a board.
 
 ### Software: the webhooks that never update an order
 
-A developer asks:
+**The question.**
 
 > We take Stripe webhooks. The endpoint checks the signature, claims `event_id`
 > in Redis with `SETNX`, and only if the claim is new does it add the event to
@@ -95,11 +93,10 @@ A developer asks:
 > those events as delivered, and one customer was charged twice after a retry.
 > Stripe says it retried. Where do the events go?
 
-Here is a good prose answer, the kind a capable model gives without a board.
-It is not a strawman: it names the right bug, gives the right fixes, and would
-be enough to act on.
+**The answer a model gives without a board.** It names the right bug, gives the
+right fixes, and would be enough to act on.
 
-<!-- prose:start -->
+<!-- prose:webhook:start -->
 Both symptoms come from the same shape: this path writes to two stores that cannot commit together, and it acknowledges work before the work is durable.
 
 **The loss is between the claim and the enqueue.** `SETNX event_id` in Redis and `XADD` to `webhook-events` are two independent writes. If the process dies, the pod is evicted, or the produce times out after Redis has said "new", the event is marked seen and no message exists. Stripe sees the failure and retries — and the retry makes it worse: `SETNX` returns 0, the endpoint returns 202, and the second attempt is discarded *because the first one failed*. No error, no DLQ row, and Stripe correctly reports delivery.
@@ -111,79 +108,62 @@ Make the claim and the message durable together. The cheap fix: do not return 20
 **The third window is the DLQ.** An event that fails three times is parked, but the endpoint already returned 202 and the `event_id` is seen, so no retry brings it back. The DLQ needs an alarm and a replay command, or it is where events go to be forgotten.
 
 The rule that ties it together: the dedupe record must live in the same durability domain as the effect it guards, and the ack must come after the durable effect, not after the attempt.
-<!-- prose:end -->
+<!-- prose:webhook:end -->
 
 The same answer, on the board:
 
-![the webhook path, with its two commit points and the numbers of the walk-through](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/webhook-retry.svg)
+![the webhook path, its two commit points, and the numbers of the walk-through](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/webhook-retry.svg)
 
-The numbered badges are the order the explanation walks it; the whole spec,
-including the text of each hop, is
-[`examples/webhook-retry.json`](examples/webhook-retry.json), and the image
-is generated from it with
+Side by side, at the size each is actually read:
 
-```sh
-node tools/example.js examples/webhook-retry.json docs/examples/webhook-retry.svg
-```
+![the model's answer as a column of text beside the same answer as a board](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/webhook-retry-compare.svg)
 
-so the picture cannot drift from the spec. Open the
-[full-size SVG](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/webhook-retry.svg)
-if the labels are small at this width.
-
-**What the comparison actually costs.**
-
-Measured, not estimated. The prose answer, extracted from this file:
-
-```sh
-awk '/<!-- prose:start -->/{f=1;next} f && /<!-- prose:end -->/{exit} f' \
-  docs/_readme-example-architecture.md | wc -w
-```
-
-```
-384
-```
-
-The board, counted as the ops an agent sends to draw it — one per box, line,
-callout, and numbered hop, plus the title:
-
-```sh
-node --input-type=module -e '
-import fs from "node:fs";
-const s = JSON.parse(fs.readFileSync("examples/webhook-retry.json", "utf8"));
-const n = { title: 1, nodes: s.nodes.length, edges: s.edges.length,
-            callouts: s.callouts.length, steps: s.flow.length };
-console.log(n, "=", Object.values(n).reduce((a, b) => a + b, 0), "ops");
-'
-```
-
-```
-{ title: 1, nodes: 7, edges: 6, callouts: 3, steps: 6 } = 23 ops
-```
-
-23 ops is not 390 words any more than a word is an op, and the board was not
-free to make: somebody had to understand the system first. The saving is not in
-the count. It is in what the reader has to do with either one.
+384 words against 23 ops — one op per box, per line, per handwritten note, per
+numbered hop, which is what an agent emits while it talks. Neither number is
+the point on its own. The point is what you have to do with either column.
 
 The prose is serial. To agree with it you hold seven names — Stripe, the
 endpoint, Redis, the topic, the worker, Postgres, the DLQ — and the windows
-between the writes in your head at once, then reconstruct which store is written
-when, which store has the acknowledgement, and where a crash has to land to lose
-the event. The answer tells you all of it, and a careful reader can rebuild the
-picture. That rebuilding is the cost.
+between the writes in your head at once, then work out which store is written
+when, which one holds the acknowledgement, and where a crash has to land to
+lose the event. The answer tells you all of it, and a careful reader can
+rebuild the picture. That rebuilding is the cost.
 
-The board hands the picture over and then says three things on top of it: the
-two writes with no transaction sit as one callout on the endpoint; redelivery
-sits on the consume hop where it happens; the ack sits under the worker, after
-the commit. The shapes are not decoration either — the queue and the Redis
-cylinder are drawn differently because one is a log you replay and the other is
-a copy you can afford to lose, and the DLQ branch is visibly a dead end rather
-than one more hop.
+The board hands the picture over, and then says three things on top of it: the
+two writes with no transaction, written under the endpoint; redelivery, written
+on the consume hop where it happens; the ack, written under the worker. The
+shapes carry weight too — the queue and the Redis cylinder are drawn
+differently because one is a log you replay and the other is a copy you can
+afford to lose, and the DLQ branch is visibly a dead end rather than one more
+hop.
 
-The board is worse at things the prose is good at: you can grep a sentence,
-quote it in a postmortem, and paste it into a ticket. The honest claim is
-narrower than "a drawing beats a wall of text": for a system with several named
-parts and the arrows between them, the drawing removes the reconstruction, and
-the prose still carries the argument.
+The board is worse at what prose is good at: you can grep a sentence, quote it
+in a postmortem, paste it into a ticket. The honest claim is narrower than "a
+drawing beats a wall of text" — for a system with several named parts and the
+arrows between them, the drawing removes the reconstruction, and the prose
+still carries the argument. Which is why the agent does both.
+
+Both pictures are generated, so neither can drift from what it claims: the
+board from [`examples/webhook-retry.json`](examples/webhook-retry.json), and
+the comparison from that spec plus the very paragraphs printed above — the
+word count is a count of them.
+
+```console
+$ node tools/example.js examples/webhook-retry.json docs/examples/webhook-retry.svg
+docs/examples/webhook-retry.svg
+  1539 × 308  (5.00:1)
+  title 1 · nodes 7 · edges 6 · callouts 3 · steps 6
+  23 ops drawn one at a time · 18 ops as this one file
+$ node tools/compare.js webhook
+docs/examples/webhook-retry-compare.svg
+  1646 × 638
+  384 words (32 lines) · board 1539 × 308 · 23 ops
+```
+
+A board this wide is close to the limit of what a README column can show. Open
+the [full-size SVG](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/webhook-retry.svg)
+if the labels are small at this width — or just run it, where the board gets a
+whole pane and `spiega step 3` lights one hop at a time.
 
 ### Not software: why a cut keeps bleeding
 
@@ -197,7 +177,7 @@ cut, and the parts are proteins.
 
 **The answer a model gives without a board.**
 
-<!--prose-->
+<!-- prose:clot:start -->
 Three things stop a cut, and they run on different clocks.
 
 The vessel clamps down first. The torn wall releases endothelin, the smooth
@@ -243,56 +223,57 @@ disturb. Dabigatran blocks thrombin itself, one link further down; warfarin
 leaves you with less of factors II, VII, IX and X to begin with; heparin makes
 antithrombin far more effective at shutting down Xa and thrombin. All of them
 slow the same chain, each at a different link.
-<!--/prose-->
+<!-- prose:clot:end -->
 
 **The same answer, on the board.**
 
-<img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/blood-clot.svg" alt="a hand-drawn board: a damaged vessel branching to a platelet plug, tissue factor and the contact arm; tissue factor and the contact arm both feed factor Xa, which makes thrombin, which makes the fibrin clot; a line runs back from thrombin to the contact arm, and another back from plasmin into the clot">
+![a hand-drawn board: a damaged vessel branching to a platelet plug, tissue factor and the contact arm; both arms feed factor Xa, which makes thrombin, which makes the fibrin clot; a line runs back from thrombin to the contact arm, and another back from plasmin into the clot](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/blood-clot.svg)
 
-1586 × 475, a little over three and a third to one. That ratio is not a detail:
-at the 900px a README gives an image, three and a third to one leaves labels you
-can read, and six to one does not.
+Side by side, at the size each is actually read:
+
+![the model's answer as a column of text beside the same answer as a board](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/blood-clot-compare.svg)
 
 Eight boxes, ten lines. The damaged wall branches three ways, so three things
-sit side by side in one column instead of stretching the board sideways; tissue
-factor and the contact arm converge on one box; and there is a line running back
-from thrombin to the contact arm, under everything else. That back edge is the
-point: an ignition, then a loop that makes almost all of the rest of the
-thrombin, which is why a paragraph about clotting has to keep doubling back.
+sit side by side in one column instead of stretching the board sideways; both
+arms converge on one box; and a line runs back from thrombin to the contact
+arm, under everything else. That back edge is the whole point — an ignition,
+then a loop that makes almost all of the rest of the thrombin — and it is why a
+paragraph about clotting keeps doubling back on itself. On the board the loop
+is a line you can see closing.
 
-The facts that are words rather than structure stayed in the prose: the
-5% / 95% split, calcium on a membrane, which drug stops which factor. A margin
-note can carry one of those, but a note costs a whole column of width, and a
-board too wide to read explains nothing.
+What stayed in the prose is what was never structure: the 5% / 95% split,
+calcium on a membrane, which drug stops which factor. The board does not
+replace the answer and is not trying to. Nothing on it explains *why* tissue
+factor is exposed. What it buys is the shape — where the loop closes, which arm
+is amplification — held still while you read the words next to it.
 
-`examples/blood-clot.json` is the whole board: eight boxes, ten lines, one
-dashed enclosure, ten numbered steps. A step is one hop with a sentence on it,
-so `spiega step 4` lights the ignition alone and dims everything else, and
-`spiega step 8` lights the loop. Those sentences live in the spec and in the
-rail beside the drawing, not in the picture — the numbers on the lines are what
-you would walk.
-
-**The numbers.**
+The flow is the other half. Ten numbered steps, each one hop with a sentence on
+it, so `spiega step 4` lights the ignition alone and dims the rest, and
+`spiega step 8` lights the loop. Those sentences live beside the drawing rather
+than inside it, which is how the board stays narrow enough to read.
 
 ```console
-$ awk '/<!--prose-->/{if(!seen)on=1;next} /<!--\/prose-->/{on=0;seen=1} on' \
-    docs/_readme-example-process.md | wc -w
-452
 $ node tools/example.js examples/blood-clot.json docs/examples/blood-clot.svg
 docs/examples/blood-clot.svg
   1586 × 475  (3.34:1)
   title 1 · nodes 8 · edges 10 · boundaries 1 · steps 10
   30 ops drawn one at a time · 21 ops as this one file
+$ node tools/compare.js clot
+docs/examples/blood-clot-compare.svg
+  1646 × 773
+  452 words (41 lines) · board 1586 × 475 · 30 ops
 ```
 
-452 words, 30 ops. The 30 is the one that matters: an agent drawing this live
-sends one small object per box, per line, per enclosure, per step. The 21 is the
-same board sent as a single file, because a whole flow travels in one `flow` op.
+The 30 is the number that matters: an agent drawing this live sends one small
+object per box, per line, per enclosure, per step. The 21 is the same board
+sent as a single spec file, where a whole flow travels as one `flow` op.
 
-The prose is not wrong, and the board does not replace it: nothing on the board
-explains *why* tissue factor is exposed, and the 5% / 95% split only exists in
-the words. What the board buys is the shape — where the loop closes, which arm is
-amplification — held still while somebody reads the paragraph next to it.
+Width is worth watching while a board is drawn. Columns come from the edges, so
+a long chain with nothing branching off it grows sideways and nothing warns
+you; at some point the labels are too small to read at the width a page gives
+the picture, and a board nobody can read explains nothing. Both examples here
+are about 1,600px wide. That is near the limit, which is why `tools/example.js`
+prints the ratio, and why the drawings above branch instead of running straight.
 
 ## Install
 
@@ -602,6 +583,7 @@ instructions the agent itself reads are in [`docs/skill.md`](docs/skill.md).
 ```jsonc
 {"op":"node","id":"db","kind":"datastore","label":"Postgres","sub":"orders"}
 {"op":"edge","from":"orders","to":"bus","label":"publish","async":true}
+{"op":"callout","at":"orders","side":"below","label":"two writes, no transaction"}
 {"op":"note","label":"idempotency key\nlives 24h"}
 {"op":"boundary","label":"our VPC","members":["gw","orders","db"]}
 {"op":"step","edge":"gw>orders","step":"Gateway authenticates and forwards"}
@@ -698,7 +680,7 @@ See [`integrations/herdr/`](integrations/herdr/).
 ```bash
 spiega bench --list                     # models you can reach right now
 spiega bench "how a write-through cache works" \
-  --models github-copilot/claude-opus-5.5,github-copilot/gpt-6-sol
+  --models github-copilot/claude-opus-5,github-copilot/gpt-6-sol
 ```
 
 Runs the same brief through each model via `opencode run`, parses the ops out of
