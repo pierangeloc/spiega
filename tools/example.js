@@ -18,7 +18,7 @@ import { emptyBoard, applyOps } from '../src/board/state.js';
 import { specToOps, measure } from '../src/spec.js';
 import { renderSVG } from '../src/render/render.js';
 import { boundaryBox } from '../src/render/layout.js';
-import { PAPER } from '../src/render/theme.js';
+import { PAPER, MONO } from '../src/render/theme.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -56,10 +56,17 @@ function sheet(spec) {
   /* Generous padding: a boundary's dashed wall and its label sit outside its
      members, and the loop that closes a cycle is routed below every box. */
   const v = crop(spec, r, 30);
+  /* The renderer leaves the font to the page, because on a live board the page
+     supplies it. A file does not have a page: an SVG embedded with <img> is an
+     isolated document that inherits nothing, so without this the whole drawing
+     falls back to the browser's default serif and stops looking hand-written.
+     tools/gallery.js has always set it; this did not, and both worked examples
+     shipped in Times. */
   return r.svg
     .replace(/viewBox="[^"]*" width="[^"]*" height="[^"]*"/,
       `viewBox="${v.x.toFixed(1)} ${v.y.toFixed(1)} ${v.w.toFixed(1)} ${v.h.toFixed(1)}" ` +
-      `width="${Math.round(v.w)}" height="${Math.round(v.h)}"`)
+      `width="${Math.round(v.w)}" height="${Math.round(v.h)}" ` +
+      `font-family="${MONO.replace(/"/g, "'")}"`)
     .replace(/(<svg[^>]*>)/, `$1<rect x="${v.x.toFixed(1)}" y="${v.y.toFixed(1)}" ` +
       `width="${v.w.toFixed(1)}" height="${v.h.toFixed(1)}" fill="${PAPER}" rx="6"/>`);
 }
