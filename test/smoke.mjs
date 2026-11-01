@@ -756,6 +756,40 @@ test('the README counts the node kinds it actually has', () => {
     `the README says ${said[1]} node kinds; there are ${KINDS.length}: ${KINDS.join(', ')}`);
 });
 
+/* The link checker skips anchors, because they are not files. So the jump line
+   at the top of the README pointed at #where-it-earns-its-keep, and renaming
+   that heading would have left a link that scrolls nowhere — on GitHub it
+   fails by doing nothing at all, which is the hardest kind of broken to
+   notice. A heading is a target like any other. */
+test('every anchor the docs link to is a heading that exists', () => {
+  /* GitHub's rule: lowercase, strip anything that is not a word character,
+     space or hyphen, then spaces to hyphens. "### 1. Software: the webhooks"
+     becomes "1-software-the-webhooks". */
+  const slug = h => h.replace(/^#+\s*/, '').trim().toLowerCase()
+    .replace(/[^\w\s-]/g, '').replace(/\s/g, '-');
+
+  const docs = ['README.md', ...fs.readdirSync(path.join(ROOT, 'docs'))
+    .filter(f => f.endsWith('.md')).map(f => path.join('docs', f))];
+
+  const broken = [];
+  for (const rel of docs) {
+    const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    const headings = new Set();
+    let fenced = false;
+    for (const line of text.split('\n')) {
+      if (line.startsWith('```')) { fenced = !fenced; continue; }
+      if (!fenced && /^#{1,6}\s/.test(line)) headings.add(slug(line));
+    }
+    // links into this same file; a #anchor on another path is that file's business
+    for (const m of text.matchAll(/\]\((#[\w-]+)\)/g)) {
+      const target = m[1].slice(1);
+      if (!headings.has(target)) broken.push(`${rel} -> #${target}`);
+    }
+  }
+  assert.deepEqual(broken, [],
+    `docs link to anchors with no matching heading:\n  ${broken.join('\n  ')}`);
+});
+
 /* The link checker above reads markdown links. It does not read inside a code
    block, and that is where the README kept two `awk` commands pointed at files
    that were never committed — reproduction instructions that reproduced
