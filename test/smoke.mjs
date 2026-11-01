@@ -656,6 +656,53 @@ test('colour and glyphs stay out of piped output', async () => {
   assert.ok(short.endsWith('spiega'), 'the end is what names it');
 });
 
+/* A node that fans out sends several edges through the same gutter. Each tag
+   lifts itself clear of the same box, independently, and lands in the same
+   place — and nothing downstream notices, because each pill draws over the
+   last. The shipped example did exactly this: "4 CHARGE" sat under "5 INSERT",
+   which is the first picture anyone renders. Overlap is the assertion; a
+   screenshot is the only other way to see it, and tests do not look. */
+test('edge tags from the same box do not land on top of each other', async () => {
+  const { renderSVG } = await import('../src/render/render.js');
+
+  const tagRects = svg => [...svg.matchAll(/<g class="tag">([\s\S]*?)<\/g>/g)]
+    .map(m => {
+      const t = /<text[^>]*x="([-\d.]+)"[^>]*y="([-\d.]+)"[^>]*>([\s\S]*?)<\/text>/.exec(m[1]);
+      return t && { x: +t[1], y: +t[2], label: t[3], w: t[3].length * 6.51 + 20, h: 19 };
+    })
+    .filter(Boolean);
+
+  const overlaps = rs => {
+    const bad = [];
+    for (let i = 0; i < rs.length; i++)
+      for (let j = i + 1; j < rs.length; j++)
+        if (Math.abs(rs[i].x - rs[j].x) < (rs[i].w + rs[j].w) / 2 &&
+            Math.abs(rs[i].y - rs[j].y) < rs[i].h)
+          bad.push(`${rs[i].label} / ${rs[j].label}`);
+    return bad;
+  };
+
+  // the spec that ships, and the one that regressed
+  const example = JSON.parse(fs.readFileSync(path.join(ROOT, 'examples/order-flow.json'), 'utf8'));
+  const shipped = tagRects(renderSVG(example).svg);
+  assert.ok(shipped.length >= 7, `expected the example's tags, got ${shipped.length}`);
+  assert.deepEqual(overlaps(shipped), [], 'the example renders with its labels legible');
+
+  // a wider fan than the example has, so the resolver is tested past one clash
+  const fan = {
+    nodes: [{ id: 'hub', label: 'Hub' },
+      ...Array.from({ length: 6 }, (_, i) => ({ id: `n${i}`, label: `Target ${i}` }))],
+    edges: Array.from({ length: 6 }, (_, i) =>
+      ({ from: 'hub', to: `n${i}`, label: `a fairly long edge label ${i}` })),
+  };
+  const fanned = tagRects(renderSVG(fan).svg);
+  assert.equal(fanned.length, 6, 'every edge still gets its tag');
+  assert.deepEqual(overlaps(fanned), [], 'six tags out of one box all stay readable');
+
+  // and the resolver has to be stable: same spec, same answer
+  assert.equal(renderSVG(fan).svg, renderSVG(fan).svg, 'layout does not drift between renders');
+});
+
 test('the herdr plugin declares the actions it ships, and its scripts are runnable', () => {
   const dir = path.join(ROOT, 'integrations/herdr');
   const toml = fs.readFileSync(path.join(dir, 'herdr-plugin.toml'), 'utf8');
