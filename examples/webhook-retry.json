@@ -1,0 +1,33 @@
+{
+  "title": "Why a paid order never updates",
+  "nodes": [
+    { "id": "provider", "kind": "external",  "label": "Stripe",          "sub": "retries until 2xx" },
+    { "id": "hook",     "kind": "gateway",   "label": "Webhook endpoint", "sub": "HMAC, 202 in 80 ms" },
+    { "id": "redis",    "kind": "cache",     "label": "Redis",           "sub": "event_id seen · 24 h" },
+    { "id": "bus",      "kind": "queue",     "label": "webhook-events",  "sub": "at-least-once" },
+    { "id": "worker",   "kind": "compute",   "label": "Order updater",   "replicas": 3 },
+    { "id": "db",       "kind": "datastore", "label": "Postgres",        "sub": "orders" },
+    { "id": "dlq",      "kind": "queue",     "label": "webhook-dlq",     "sub": "poison only" }
+  ],
+  "edges": [
+    { "from": "provider", "to": "hook",   "label": "POST /hooks/payments" },
+    { "from": "hook",     "to": "redis",  "label": "SETNX event_id" },
+    { "from": "hook",     "to": "bus",    "label": "XADD" },
+    { "from": "bus",      "to": "worker", "label": "consume" },
+    { "from": "worker",   "to": "db",     "label": "UPDATE orders" },
+    { "from": "worker",   "to": "dlq",    "label": "poison" }
+  ],
+  "callouts": [
+    { "at": "hook",       "side": "below", "label": "two writes, no transaction: a crash loses the event" },
+    { "at": "bus>worker", "side": "below", "label": "redelivery after a slow commit is normal" },
+    { "at": "worker",     "side": "below", "label": "ack after the commit" }
+  ],
+  "flow": [
+    { "edge": "provider>hook", "step": "Stripe posts the event, signed" },
+    { "edge": "hook>redis",    "step": "Endpoint claims event_id in Redis" },
+    { "edge": "hook>bus",      "step": "Only a first sighting is enqueued" },
+    { "edge": "bus>worker",    "step": "A worker takes the message" },
+    { "edge": "worker>db",     "step": "Order row is updated" },
+    { "edge": "worker>dlq",    "step": "A poison event is parked" }
+  ]
+}
