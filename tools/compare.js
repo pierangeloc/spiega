@@ -33,8 +33,8 @@ const CASES = {
   webhook: { spec: 'examples/webhook-retry.json', marker: 'webhook',
              out: 'docs/examples/webhook-retry-compare.svg',
              says: 'what the model says', draws: 'what it draws' },
-  clot:    { spec: 'examples/blood-clot.json', marker: 'clot',
-             out: 'docs/examples/blood-clot-compare.svg',
+  kalman:  { spec: 'examples/kalman.json', marker: 'kalman',
+             out: 'docs/examples/kalman-compare.svg',
              says: 'what the model says', draws: 'what it draws' },
 };
 
@@ -48,7 +48,12 @@ function proseFromReadme(marker) {
   const a = md.indexOf(open);
   const b = md.indexOf(close);
   if (a < 0 || b < 0) throw new Error(`README.md has no ${open} … ${close} block`);
-  return md.slice(a + open.length, b).trim();
+  /* The block is printed as a blockquote, so the reader can see where the
+     model's answer starts and stops rather than reading it as this document's
+     own voice. The quote marker is markdown for the page, not part of what the
+     model said, so it comes off before anything is counted or drawn. */
+  return md.slice(a + open.length, b)
+    .split('\n').map(l => l.replace(/^>\s?/, '')).join('\n').trim();
 }
 
 /* Markdown emphasis is for the README's renderer, not for a drawing. Stripped

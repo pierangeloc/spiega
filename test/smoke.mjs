@@ -813,35 +813,31 @@ test('every file a README command names is actually there', () => {
   assert.deepEqual(missing, [], `README commands name files that do not exist:\n  ${missing.join('\n  ')}`);
 });
 
-/* The README prints the output of the tools that make its pictures, as the
-   evidence for the counts in the paragraphs around it — 384 words, 23 ops,
-   1539 × 308. Those were transcribed by hand, and one of them was already
-   wrong: the prose said 390 words where the block above it said 384. A number
-   nobody re-runs is a number that rots, so re-run them. */
-test('the numbers the README prints are the numbers the tools print', async () => {
+/* The README quotes numbers at the reader: 384 words against 23 ops, 452
+   against 30. They were transcribed by hand, and one was already wrong, the
+   prose saying 390 where the block above it said 384.
+
+   It used to print the tools' output in a console block as the evidence. That
+   block was for nobody: tools/ is not in the npm tarball, so the reader most
+   likely to see this README, the one on the package page, could not run the
+   command it showed. The evidence belongs here instead. Run the tools, and
+   check the sentences a reader actually reads. */
+test('the numbers the README quotes are the numbers the tools produce', async () => {
   const cp = await import('node:child_process');
   const md = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
 
-  let checked = 0;
-  for (const block of md.matchAll(/```console\n([\s\S]*?)```/g)) {
-    const lines = block[1].split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      const cmd = lines[i].match(/^\$ node (tools\/[\w.-]+\.js.*)$/);
-      if (!cmd) continue;
-      const quoted = [];
-      while (++i < lines.length && !lines[i].startsWith('$ ') && lines[i] !== '') quoted.push(lines[i]);
-      i--;
+  for (const which of ['webhook', 'kalman']) {
+    const out = cp.execFileSync(process.execPath,
+      [path.join(ROOT, 'tools', 'compare.js'), which], { cwd: ROOT, encoding: 'utf8' });
+    const m = out.match(/(\d+) words .*? (\d+) ops/);
+    assert.ok(m, `tools/compare.js ${which} printed nothing I can read:\n${out}`);
+    const [, words, ops] = m;
 
-      const args = cmd[1].split(/\s+/);
-      const got = cp.execFileSync(process.execPath, [path.join(ROOT, args[0]), ...args.slice(1)],
-        { cwd: ROOT, encoding: 'utf8' }).trimEnd().split('\n');
-      assert.deepEqual(got, quoted,
-        `README shows stale output for "node ${cmd[1]}"\n` +
-        `  it prints:\n    ${got.join('\n    ')}\n  README says:\n    ${quoted.join('\n    ')}`);
-      checked++;
-    }
+    assert.ok(md.includes(`${words} words`),
+      `the ${which} example is ${words} words; the README does not say so`);
+    assert.ok(new RegExp(`\\b${ops} ops\\b`).test(md),
+      `the ${which} board is ${ops} ops; the README does not say so`);
   }
-  assert.ok(checked >= 2, `expected the worked examples to be checked, did ${checked}`);
 });
 
 /* The renderer does not name a font, because on a live board the page's CSS
@@ -875,17 +871,29 @@ test('the generated pictures match the specs they come from', async () => {
   const gen = [
     ['tools/gallery.js', []],
     ['tools/example.js', ['examples/webhook-retry.json', 'docs/examples/webhook-retry.svg']],
-    ['tools/example.js', ['examples/blood-clot.json', 'docs/examples/blood-clot.svg']],
+    ['tools/example.js', ['examples/kalman.json', 'docs/examples/kalman.svg']],
     ['tools/compare.js', []],
   ];
+
+  /* Byte comparison rather than `git status`, which was the first version of
+     this and was wrong twice over: it reported a newly staged picture as "A "
+     and read that as drift, and it would have said nothing at all about a file
+     that git was not tracking. What is being asked is whether re-running the
+     tool changes the file, so read it, run the tool, read it again. */
+  const watched = ['docs/gallery', 'docs/examples']
+    .flatMap(d => fs.existsSync(path.join(ROOT, d))
+      ? fs.readdirSync(path.join(ROOT, d)).filter(f => f.endsWith('.svg')).map(f => path.join(d, f))
+      : []);
+  const before = new Map(watched.map(f => [f, fs.readFileSync(path.join(ROOT, f))]));
+
   for (const [tool, args] of gen)
     cp.execFileSync(process.execPath, [path.join(ROOT, tool), ...args],
       { cwd: ROOT, stdio: 'pipe' });
 
-  const dirty = cp.execFileSync('git', ['-C', ROOT, 'status', '--porcelain',
-    '--', 'docs/gallery', 'docs/examples'], { encoding: 'utf8' }).trim();
-  assert.equal(dirty, '',
-    `regenerating changed committed pictures — they had drifted:\n${dirty}`);
+  const drifted = watched.filter(f => !before.get(f).equals(fs.readFileSync(path.join(ROOT, f))));
+  assert.deepEqual(drifted, [],
+    `regenerating changed these pictures, so what is committed is not what the ` +
+    `tools produce:\n  ${drifted.join('\n  ')}`);
 });
 
 /* `spiega --version` answered "no such command", which is the one thing a

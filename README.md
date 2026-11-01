@@ -4,12 +4,9 @@
 
 A hand-drawn board an AI agent draws on **while it explains**.
 
-*spiega* is Italian for *explain* — and for *unfold*, which is what this does
-to a long document: spreads it out until you can see the whole shape at once.
-
-Say it **SPYEH-ga** (/ˈspjɛɡa/): two syllables, stress on the first, and the
-`i` is a glide rather than a vowel — *spyeh*, not *spee-eh*. It is the sound
-English keeps missing in *piano*, which Italian says the same way.
+> *spiega* is Italian for *explain* — and for *unfold*, which is what this does to a long document: spreads it out until you can see the whole shape at once.
+> 
+> Say it **SPYEH-ga** (/ˈspjɛɡa/): two syllables, stress on the first. It is the sound English keeps missing in *piano*, which Italian says the same way.
 
 You ask how something works. The agent answers in the terminal, as usual — and
 beside it, a board fills in: boxes for the services, labelled arrows for the
@@ -21,11 +18,11 @@ arrows between them in your head while you read a paragraph about them.
 
 ![a finished board, saved as a snapshot, with step 3 lit](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/board.png)
 
-**[Install](#install)** · **[What it can draw](#what-it-can-draw)** · **[Examples](#where-it-earns-its-keep)**
+**[Install](#install)** · **[What it can draw](#what-it-can-draw)** · **[Examples](#two-examples)**
 
 ## Why not Miro, or Mermaid
 
-Miro is a place you go. This is a pane beside the conversation the agent is
+Miro is an external platform. This is a pane beside the conversation the agent is
 already having. The board is kept — its log lives at
 `~/.spiega/boards/<name>.jsonl` and comes back the next time that board is
 opened, so you can close the window and pick the explanation up later.
@@ -33,11 +30,11 @@ opened, so you can close the window and pick the explanation up later.
 
 Mermaid renders a finished diagram. This is drawn incrementally, in the order
 the explanation goes, which is most of what makes it followable — and it looks
-drawn, not generated, so it reads as somebody thinking rather than a document.
+drawn, not generated. The notes are synchronized with the elements being put in evidence, so it reads as somebody thinking along with you.
 
 ## What it can draw
 
-Fourteen node kinds, each with its own drawing. Eight are software's furniture —
+Fourteen node kinds, each with its own drawing. Eight are classic software UML-ish boxes —
 a browser, a gateway, a service, a replica set, a database, a cache, a queue,
 and something you do not own. Two are writing on the board: a note and a
 formula. Four carry no infrastructure meaning, so a figure about a cell or a
@@ -49,12 +46,16 @@ gas does not have to borrow software's nouns.
 
 <img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/kinds-writing.svg" width="510" alt="a note and a formula written on the board">
 
+<p/>
+
 An arrow can be plain, carry a label, be dashed because the caller does not
 wait for it, or carry the number of a flow step:
 
 <img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/edges.svg" width="520" alt="a plain edge and a labelled edge">
 
 <img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/edges-async.svg" width="520" alt="an async dashed edge and an edge carrying a numbered flow step">
+
+<p/>
 
 A `boundary` groups boxes, a `callout` points at something without crowding it,
 and a `note` sits in the margin:
@@ -65,24 +66,30 @@ and a `note` sits in the margin:
 
 <img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/note.svg" width="700" alt="a note in the left margin beside a path from Orders to Postgres">
 
+<p/>
+
 A flow numbers the hops, lights one at a time, and dims the rest — with the
 numbered hops also laid out as a list beside the drawing:
 
 <img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/flow.svg" width="760" alt="a three-step flow with step one lit, and the numbered list beside the drawing">
+
+<p/>
 
 Every picture is rendered by the board's own renderer and regenerated with
 `node tools/gallery.js`, so it cannot drift from what you will see. The full
 tour — all fourteen kinds, the title bar, and the code for each — is in
 [the gallery](https://github.com/pierangeloc/spiega/blob/main/docs/gallery.md).
 
-## Where it earns its keep
+## Two examples
 
-Two questions whose answers are mostly *relationships between named things* —
-the case a paragraph is worst at. One is a production bug, one is not software
-at all. Each is shown twice: the answer a capable model gives in prose, written
-out in full and not a strawman, and the same answer as a board.
+Let's show 2 practical examples of what Spiega can give us when we ask a model for an explanation. Both answers are mostly *relationships between named things* — the case a long
+paragraph is often too verbose and convoluted. 
 
-### Software: the webhooks that never update an order
+One is a bug in a running system; the other is a piece of mathematics that
+happens to be running on a robot. Each is shown twice: the answer a capable model gives in prose, written
+out in full, and the same answer as a board.
+
+### 1. Software: the webhooks that never update an order
 
 **The question.**
 
@@ -97,17 +104,17 @@ out in full and not a strawman, and the same answer as a board.
 right fixes, and would be enough to act on.
 
 <!-- prose:webhook:start -->
-Both symptoms come from the same shape: this path writes to two stores that cannot commit together, and it acknowledges work before the work is durable.
-
-**The loss is between the claim and the enqueue.** `SETNX event_id` in Redis and `XADD` to `webhook-events` are two independent writes. If the process dies, the pod is evicted, or the produce times out after Redis has said "new", the event is marked seen and no message exists. Stripe sees the failure and retries — and the retry makes it worse: `SETNX` returns 0, the endpoint returns 202, and the second attempt is discarded *because the first one failed*. No error, no DLQ row, and Stripe correctly reports delivery.
-
-Make the claim and the message durable together. The cheap fix: do not return 202 until the produce has succeeded, and make the claim two-phase — `pending` before the produce, `done` after — so a retry that finds `pending` republishes instead of deduping. The thorough fix removes Redis from the ack path: insert the raw event into an inbox table and publish from a poller, so the claim and the intent to publish are one commit. An outbox written by the transaction that changes the order is the same idea with the order as the source of truth.
-
-**The duplicates are the same problem one hop later.** If the consumer commits its Kafka offset before the Postgres commit lands — or auto-commits on a timer — a crash in between redelivers the message. That is harmless only if the handler is idempotent: `UPDATE orders SET status = 'paid' WHERE id = $2 AND status <> 'paid'` is; `balance = balance + amount`, or a capture call to Stripe, is not. Key the effect on `event_id`, not on delivery count, and ack after `COMMIT` with manual commit.
-
-**The third window is the DLQ.** An event that fails three times is parked, but the endpoint already returned 202 and the `event_id` is seen, so no retry brings it back. The DLQ needs an alarm and a replay command, or it is where events go to be forgotten.
-
-The rule that ties it together: the dedupe record must live in the same durability domain as the effect it guards, and the ack must come after the durable effect, not after the attempt.
+> Both symptoms come from the same shape: this path writes to two stores that cannot commit together, and it acknowledges work before the work is durable.
+>
+> **The loss is between the claim and the enqueue.** `SETNX event_id` in Redis and `XADD` to `webhook-events` are two independent writes. If the process dies, the pod is evicted, or the produce times out after Redis has said "new", the event is marked seen and no message exists. Stripe sees the failure and retries — and the retry makes it worse: `SETNX` returns 0, the endpoint returns 202, and the second attempt is discarded *because the first one failed*. No error, no DLQ row, and Stripe correctly reports delivery.
+>
+> Make the claim and the message durable together. The cheap fix: do not return 202 until the produce has succeeded, and make the claim two-phase — `pending` before the produce, `done` after — so a retry that finds `pending` republishes instead of deduping. The thorough fix removes Redis from the ack path: insert the raw event into an inbox table and publish from a poller, so the claim and the intent to publish are one commit. An outbox written by the transaction that changes the order is the same idea with the order as the source of truth.
+>
+> **The duplicates are the same problem one hop later.** If the consumer commits its Kafka offset before the Postgres commit lands — or auto-commits on a timer — a crash in between redelivers the message. That is harmless only if the handler is idempotent: `UPDATE orders SET status = 'paid' WHERE id = $2 AND status <> 'paid'` is; `balance = balance + amount`, or a capture call to Stripe, is not. Key the effect on `event_id`, not on delivery count, and ack after `COMMIT` with manual commit.
+>
+> **The third window is the DLQ.** An event that fails three times is parked, but the endpoint already returned 202 and the `event_id` is seen, so no retry brings it back. The DLQ needs an alarm and a replay command, or it is where events go to be forgotten.
+>
+> The rule that ties it together: the dedupe record must live in the same durability domain as the effect it guards, and the ack must come after the durable effect, not after the attempt.
 <!-- prose:webhook:end -->
 
 The same answer, on the board:
@@ -134,8 +141,7 @@ two writes with no transaction, written under the endpoint; redelivery, written
 on the consume hop where it happens; the ack, written under the worker. The
 shapes carry weight too — the queue and the Redis cylinder are drawn
 differently because one is a log you replay and the other is a copy you can
-afford to lose, and the DLQ branch is visibly a dead end rather than one more
-hop.
+afford to lose, and the DLQ branch is visibly a dead end.
 
 The board is worse at what prose is good at: you can grep a sentence, quote it
 in a postmortem, paste it into a ticket. The honest claim is narrower than "a
@@ -143,137 +149,64 @@ drawing beats a wall of text" — for a system with several named parts and the
 arrows between them, the drawing removes the reconstruction, and the prose
 still carries the argument. Which is why the agent does both.
 
-Both pictures are generated, so neither can drift from what it claims: the
-board from [`examples/webhook-retry.json`](examples/webhook-retry.json), and
-the comparison from that spec plus the very paragraphs printed above — the
-word count is a count of them.
-
-```console
-$ node tools/example.js examples/webhook-retry.json docs/examples/webhook-retry.svg
-docs/examples/webhook-retry.svg
-  1539 × 308  (5.00:1)
-  title 1 · nodes 7 · edges 6 · callouts 3 · steps 6
-  23 ops drawn one at a time · 18 ops as this one file
-$ node tools/compare.js webhook
-docs/examples/webhook-retry-compare.svg
-  1646 × 638
-  384 words (32 lines) · board 1539 × 308 · 23 ops
-```
+Neither picture was drawn by hand. The board is generated from
+[`examples/webhook-retry.json`](examples/webhook-retry.json), and the
+comparison from that spec plus the very paragraphs printed above, so the word
+count is a count of them and the board cannot show something the renderer no
+longer draws.
 
 A board this wide is close to the limit of what a README column can show. Open
 the [full-size SVG](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/webhook-retry.svg)
 if the labels are small at this width — or just run it, where the board gets a
 whole pane and `spiega step 3` lights one hop at a time.
 
-### Not software: why a cut keeps bleeding
-
-Not every process made of named parts and handoffs is a system. This one is a
-cut, and the parts are proteins.
+### 2. Engineering: which sensor should the robot believe?
 
 **The question.**
 
-> My GP put me on apixaban last month. Why does a small cut bleed for so long
-> now, and what is actually meant to happen when a blood vessel is cut?
+> I am fusing GPS with wheel odometry on a small robot. The GPS jitters by a
+> couple of metres but never drifts; the odometry is smooth but walks away
+> within a minute. The Kalman filter mostly works and I can follow the algebra,
+> but I do not understand what it is actually deciding. And why does the
+> estimate lurch when the wheels slip?
 
 **The answer a model gives without a board.**
 
-<!-- prose:clot:start -->
-Three things stop a cut, and they run on different clocks.
-
-The vessel clamps down first. The torn wall releases endothelin, the smooth
-muscle in it contracts, and the pipe narrows, slowing the leak.
-
-Then platelets. Collagen that normally sits hidden under the endothelium is
-exposed, and circulating platelets bind it — directly, and through von
-Willebrand factor. Binding activates them: they change shape, release ADP and
-thromboxane A2, which recruit more platelets, and they pile into a plug. This
-is primary haemostasis, and it takes seconds. The plug is soft and easily
-dislodged, so it needs a scaffold.
-
-That scaffold is fibrin, and making it is a chain of proteases. Clotting
-factors circulate as inactive zymogens, each switched on by the one before it.
-The modern account starts with tissue factor: a protein on cells beneath the
-endothelium that blood never normally meets. Injury exposes it, it binds factor
-VIIa, and the complex switches on factor X — and factor IX. Factor Xa, with
-factor Va, converts prothrombin to thrombin.
-
-That first thrombin is only a trickle, and that is the point: it starts a loop.
-Thrombin switches on factors XI, VIII and V and activates platelets, so the
-IXa–VIIIa complex — tenase — can now make far more Xa on the platelet surface.
-Ignition, then amplification: roughly 5% of the thrombin comes from the first
-reaction, 95% from the loop. The textbook picture of intrinsic and extrinsic
-pathways with equal billing is an artefact of test tubes; in the body the
-tissue-factor arm starts it and the contact arm keeps it going. Every one of
-those complexes needs calcium and a phospholipid surface, which is why blood in
-a citrate tube never clots — the citrate takes the calcium.
-
-Thrombin also cuts fibrinogen into fibrin, which polymerises around the plug,
-and switches on factor XIII, which cross-links the strands into a mesh. The
-platelets contract, the clot tightens, the bleeding has stopped.
-
-Days later the repair comes apart. Endothelial cells release t-PA, which turns
-plasminogen — much of it already bound to the fibrin — into plasmin. Plasmin
-cuts the mesh into soluble fragments, the plug is cleared, and the vessel
-reopens.
-
-Apixaban sits at factor Xa. The loop still runs, but the amplification stage
-makes much less thrombin: the platelet plug still forms, so a small cut still
-stops, but the fibrin scaffold is thinner, slower to build and easier to
-disturb. Dabigatran blocks thrombin itself, one link further down; warfarin
-leaves you with less of factors II, VII, IX and X to begin with; heparin makes
-antithrombin far more effective at shutting down Xa and thrombin. All of them
-slow the same chain, each at a different link.
-<!-- prose:clot:end -->
+<!-- prose:kalman:start -->
+> The filter is not choosing between your two sensors. Every step it decides how far to move its current belief towards the new measurement, and that distance is a ratio of two uncertainties.
+>
+> **It tracks how wrong it expects to be.** Alongside the position estimate the filter carries a covariance, P, which is its own claim about how unsure it is. Prediction steps the state forward with the odometry and adds process noise Q, so P grows: every second without a fix, the filter knows less. The measurement arrives with its own noise, R. In the scalar case the gain is K = P-/(P- + R), model uncertainty over total uncertainty. If the prediction is ten times less certain than the fix, K is near 1 and the estimate jumps most of the way to the GPS. If the fix is the noisy one, K is near 0 and the estimate barely moves. Nothing in there asks which sensor is better in general, only which is less sure right now.
+>
+> **What gets corrected is the disagreement.** The correction is K times the innovation, the difference between the fix and what the model expected. That is why the two failure modes you describe cancel: GPS jitter is zero-mean, so repeated small corrections average out rather than accumulating, while odometry drift is a steady bias that the innovation sees as a growing disagreement and keeps pulling back. Each sensor covers the other's weakness, and the gain is what decides the balance moment by moment.
+>
+> **The lurch is Q being wrong, not the filter.** Q is a claim about how far the motion model can be off in one step. Wheel slip violates it: the odometry reports travel that did not happen, and the error is far larger than Q admits. The filter has no way to know. It still believes its prediction is good, so P- stays small, K stays small, the GPS fix is discounted as noise, and the estimate follows a prediction that is simply wrong. It recovers, but slowly, because it has to accumulate enough innovation to overcome its own confidence.
+>
+> The fix is not a larger Q everywhere, which throws away the odometry's real precision between slips. It is to notice the slip and inflate Q for those steps, from a wheel-encoder disagreement, an IMU, or a current spike. Failing that, gate on the innovation itself: if it is much larger than the square root of P- + R, the filter's own numbers say something it believes cannot be true, and that is the moment to stop trusting the model.
+<!-- prose:kalman:end -->
 
 **The same answer, on the board.**
 
-![a hand-drawn board: a damaged vessel branching to a platelet plug, tissue factor and the contact arm; both arms feed factor Xa, which makes thrombin, which makes the fibrin clot; a line runs back from thrombin to the contact arm, and another back from plasmin into the clot](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/blood-clot.svg)
+![a hand-drawn board: a prediction and a GPS fix meeting at an innovation, a gain formula weighing one uncertainty against the other, both feeding an update that produces an estimate, and a dashed line carrying that estimate back round to become the next prediction](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/kalman.svg)
 
 Side by side, at the size each is actually read:
 
-![the model's answer as a column of text beside the same answer as a board](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/blood-clot-compare.svg)
+![the model's answer as a column of text beside the same answer as a board](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/kalman-compare.svg)
 
-Eight boxes, ten lines. The damaged wall branches three ways, so three things
-sit side by side in one column instead of stretching the board sideways; both
-arms converge on one box; and a line runs back from thrombin to the contact
-arm, under everything else. That back edge is the whole point — an ignition,
-then a loop that makes almost all of the rest of the thrombin — and it is why a
-paragraph about clotting keeps doubling back on itself. On the board the loop
-is a line you can see closing.
+432 words against 23 ops. Six boxes, seven lines. The prediction and the fix converge on one place, the
+gain hangs off the prediction because that is the only input the filter
+controls, and the dashed line running back underneath is the thing the algebra
+hides: the output of one step is the input to the next, which is why a textbook
+derivation keeps saying "at time k" and a reader keeps losing track of which k.
 
-What stayed in the prose is what was never structure: the 5% / 95% split,
-calcium on a membrane, which drug stops which factor. The board does not
-replace the answer and is not trying to. Nothing on it explains *why* tissue
-factor is exposed. What it buys is the shape — where the loop closes, which arm
-is amplification — held still while you read the words next to it.
+The formula is on the board rather than in the margin because here the equation
+*is* the explanation. One ratio decides everything the filter does, and
+everything else on the board is what feeds it or what it produces.
 
-The flow is the other half. Ten numbered steps, each one hop with a sentence on
-it, so `spiega step 4` lights the ignition alone and dims the rest, and
-`spiega step 8` lights the loop. Those sentences live beside the drawing rather
-than inside it, which is how the board stays narrow enough to read.
-
-```console
-$ node tools/example.js examples/blood-clot.json docs/examples/blood-clot.svg
-docs/examples/blood-clot.svg
-  1586 × 475  (3.34:1)
-  title 1 · nodes 8 · edges 10 · boundaries 1 · steps 10
-  30 ops drawn one at a time · 21 ops as this one file
-$ node tools/compare.js clot
-docs/examples/blood-clot-compare.svg
-  1646 × 773
-  452 words (41 lines) · board 1586 × 475 · 30 ops
-```
-
-The 30 is the number that matters: an agent drawing this live sends one small
-object per box, per line, per enclosure, per step. The 21 is the same board
-sent as a single spec file, where a whole flow travels as one `flow` op.
-
-Width is worth watching while a board is drawn. Columns come from the edges, so
-a long chain with nothing branching off it grows sideways and nothing warns
-you; at some point the labels are too small to read at the width a page gives
-the picture, and a board nobody can read explains nothing. Both examples here
-are about 1,600px wide. That is near the limit, which is why `tools/example.js`
-prints the ratio, and why the drawings above branch instead of running straight.
+This is the example where the prose keeps the most. The reason jitter and drift
+cancel is an argument about zero-mean versus bias, and that is reasoning, not
+structure: no arrangement of boxes shows it. What the board holds still is where
+the loop closes and what the gain is weighing, so the paragraph next to it has
+somewhere to land.
 
 ## Install
 

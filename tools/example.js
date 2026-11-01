@@ -8,7 +8,7 @@
    because nothing fails. This runs the same renderSVG the board runs, so
    running it again after a change to the drawing *is* the update.
 
-   Run: node tools/example.js examples/blood-clot.json docs/examples/blood-clot.svg
+   Run: node tools/example.js examples/kalman.json docs/examples/kalman.svg
    ============================================================ */
 
 import fs from 'node:fs';

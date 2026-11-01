@@ -1,0 +1,118 @@
+{
+  "title": "What the filter is actually deciding",
+  "nodes": [
+    {
+      "id": "predict",
+      "kind": "blob",
+      "label": "Prediction",
+      "sub": "odometry, less certain"
+    },
+    {
+      "id": "meas",
+      "kind": "source",
+      "label": "GPS fix",
+      "sub": "noisy, no drift"
+    },
+    {
+      "id": "innov",
+      "kind": "particle",
+      "label": "Innovation",
+      "sub": "fix minus prediction"
+    },
+    {
+      "id": "gain",
+      "kind": "formula",
+      "label": "K = \\frac{P^{-}}{P^{-} + R}"
+    },
+    {
+      "id": "update",
+      "kind": "blob",
+      "label": "Update",
+      "sub": "step K of the way"
+    },
+    {
+      "id": "est",
+      "kind": "vessel",
+      "label": "Estimate",
+      "sub": "more certain than either"
+    }
+  ],
+  "edges": [
+    {
+      "from": "predict",
+      "to": "innov",
+      "label": "expected"
+    },
+    {
+      "from": "meas",
+      "to": "innov",
+      "label": "measured"
+    },
+    {
+      "from": "predict",
+      "to": "gain",
+      "label": "P⁻"
+    },
+    {
+      "from": "innov",
+      "to": "update"
+    },
+    {
+      "from": "gain",
+      "to": "update",
+      "label": "how far"
+    },
+    {
+      "from": "update",
+      "to": "est"
+    },
+    {
+      "from": "est",
+      "to": "predict",
+      "label": "next prior",
+      "async": true
+    }
+  ],
+  "callouts": [
+    {
+      "at": "gain",
+      "side": "right",
+      "label": "the whole decision is this one ratio"
+    },
+    {
+      "at": "est>predict",
+      "side": "below",
+      "label": "wheel slip breaks Q, so the filter trusts a wrong prediction"
+    }
+  ],
+  "flow": [
+    {
+      "edge": "predict>innov",
+      "step": "Odometry carries the last estimate forward, and its uncertainty grows"
+    },
+    {
+      "edge": "meas>innov",
+      "step": "A fix arrives, scattered but centred on the truth"
+    },
+    {
+      "edge": "predict>gain",
+      "step": "The gain weighs the model's uncertainty against the sensor's"
+    },
+    {
+      "edge": "gain>update",
+      "step": "K near 1 believes the fix, K near 0 believes the model"
+    },
+    {
+      "edge": "innov>update",
+      "step": "The correction is K times the innovation, never all of it"
+    },
+    {
+      "edge": "update>est",
+      "step": "The estimate lands between the two, more certain than either"
+    },
+    {
+      "edge": "est>predict",
+      "step": "It becomes the prior, and the cycle runs again"
+    }
+  ]
+}
