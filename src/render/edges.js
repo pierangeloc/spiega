@@ -146,8 +146,94 @@ function edgeTag(at, step, label, { lit, seed }) {
   });
 }
 
-/* `state` is 'idle' | 'lit' | 'dim' — the board lights one path at a time. */
-export function drawEdge(r, { step = null, state = 'idle' } = {}) {
+/* Where one tag wants to sit, and how big it is, with no knowledge of the
+   others. On a short hop between neighbouring boxes the tag is wider than the
+   gap, so centring it on the line buries it under whatever is next door. Lift
+   it clear of both boxes instead — nudging it a few pixels is not enough,
+   since a box is far taller than the line is thick. `away` records which way
+   it was lifted, so that if it later has to move again it keeps going the way
+   it already went rather than back across the line it belongs to. */
+/**
+ * @param {any} r
+ * @param {number|null} step
+ */
+export function tagBox(r, step) {
+  const { e } = r;
+  const label = (step != null ? String(step) + '  ' : '') + (e.label || '');
+  const spot = tagSpot(r.pts);
+  const w = lettering(label).length * 6.51 + 20;
+  let at = spot.at, away = 0;
+  if (w > spot.len * 0.95) {
+    const { a, b } = r;
+    if (!spot.vertical) {
+      away = b.x >= a.x ? -1 : 1;
+      at = away < 0
+        ? [spot.at[0], Math.min(a.y, b.y) - 13]
+        : [spot.at[0], Math.max(a.y + a.h, b.y + b.h) + 13];
+    } else {
+      at = b.y >= a.y
+        ? [Math.max(a.x + a.w, b.x + b.w) + w / 2 + 10, spot.at[1]]
+        : [Math.min(a.x, b.x) - w / 2 - 10, spot.at[1]];
+    }
+  }
+  return { at, w, h: 19, away };
+}
+
+/* Tags are placed one edge at a time, which is exactly why they collide: a
+   node that fans out sends several edges through the same gutter, each lifts
+   its tag clear of the same box, and they all land on the same spot. Nothing
+   downstream can tell, because each pill draws itself happily on top of the
+   last. So resolve them together, once, before any of them is drawn.
+
+   Order matters for stability: left to right, then top to bottom, so adding an
+   edge on the right never reshuffles the tags on the left. A tag that was
+   lifted keeps being pushed the way it was lifted; one sitting on its own line
+   moves to whichever side is nearer, since either reads fine. */
+/**
+ * @param {any[]} planned
+ * @param {(r: any) => number|null} [stepFor]
+ * @returns {Map<string, number[]>}
+ */
+export function planTags(planned, stepFor = () => null) {
+  const PAD = 4;
+  const placed = [];
+  const out = new Map();
+  const items = planned
+    .map(r => ({ r, ...tagBox(r, stepFor(r)) }))
+    .filter(t => {
+      const { e } = t.r;
+      return e.label || stepFor(t.r) != null;
+    })
+    .sort((p, q) => (p.at[0] - q.at[0]) || (p.at[1] - q.at[1]));
+
+  const hits = (a, b) =>
+    Math.abs(a.at[0] - b.at[0]) < (a.w + b.w) / 2 + PAD &&
+    Math.abs(a.at[1] - b.at[1]) < (a.h + b.h) / 2 + PAD;
+
+  for (const t of items) {
+    // bounded: each pass moves clear of one neighbour, and there are finitely
+    // many. The cap stops a pathological spec from spinning here.
+    for (let guard = 0; guard < 40; guard++) {
+      const clash = placed.find(p => hits(p, t));
+      if (!clash) break;
+      const dir = t.away || (t.at[1] >= clash.at[1] ? 1 : -1);
+      t.at = [t.at[0], clash.at[1] + dir * ((t.h + clash.h) / 2 + PAD)];
+      t.away = dir;
+    }
+    placed.push(t);
+    out.set(t.r.key, t.at);
+  }
+  return out;
+}
+
+/* `state` is 'idle' | 'lit' | 'dim' — the board lights one path at a time.
+   `place` is the anchor planTags settled on; without one the tag places itself,
+   which is right for a lone edge and wrong for a fan. */
+/**
+ * @param {any} r
+ * @param {{step?: number|null, state?: string, place?: number[]|null}} [opts]
+ */
+export function drawEdge(r, { step = null, state = 'idle', place = null } = {}) {
   const { e, pts } = r;
   const seed = hashSeed(r.key) % 100000;
   const lit = state === 'lit', dim = state === 'dim';
@@ -170,21 +256,7 @@ export function drawEdge(r, { step = null, state = 'idle' } = {}) {
     // a box is far taller than the line is thick. A pair of edges running both
     // ways between the same two boxes splits above and below, so the two tags
     // do not then collide with each other.
-    const label = (step != null ? String(step) + '  ' : '') + (e.label || '');
-    const need = label.length * 6.5 + 20;
-    let at = spot.at;
-    if (need > spot.len * 0.95) {
-      const { a, b } = r;
-      if (!spot.vertical) {
-        at = b.x >= a.x
-          ? [spot.at[0], Math.min(a.y, b.y) - 13]
-          : [spot.at[0], Math.max(a.y + a.h, b.y + b.h) + 13];
-      } else {
-        at = b.y >= a.y
-          ? [Math.max(a.x + a.w, b.x + b.w) + need / 2 + 10, spot.at[1]]
-          : [Math.min(a.x, b.x) - need / 2 - 10, spot.at[1]];
-      }
-    }
+    const at = place || tagBox(r, step).at;
     out += `<g class="tag">${edgeTag(at, step, e.label, { lit, seed: seed + 5 })}</g>`;
   }
   return out + `</g>`;

@@ -10,7 +10,7 @@
 import { PAPER, INK, MUTED, ACCENT, PANEL, handFilter } from './theme.js';
 import { roughRect, stroke, fill, text, hashSeed } from './ink.js';
 import { drawNode, drawBoundary } from './glyphs.js';
-import { drawEdge, planEdges, edgeKey } from './edges.js';
+import { drawEdge, planEdges, planTags, edgeKey } from './edges.js';
 import { planCallouts, drawCallout } from './callout.js';
 import { assign, layout, boundaryBox } from './layout.js';
 
@@ -104,10 +104,14 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   }
 
   const planned = planEdges(edges, boxes);
+  /** @param {{e: any, key: string}} r */
+  const stepFor = r => (r.e.step != null ? r.e.step : (stepOf[r.key] ?? null));
+  // every tag resolved against every other before any is drawn, or two edges
+  // leaving the same box land their pills on the same spot
+  const tags = planTags(planned, stepFor);
   for (const r of planned) {
     const state = !focus ? 'idle' : focus.edges.has(r.key) ? 'lit' : 'dim';
-    const step = r.e.step != null ? r.e.step : (stepOf[r.key] ?? null);
-    body += drawEdge(r, { step, state });
+    body += drawEdge(r, { step: stepFor(r), state, place: tags.get(r.key) || null });
   }
 
   for (const n of nodes) {
