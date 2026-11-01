@@ -150,6 +150,11 @@ export function specToOps(spec) {
   for (const n of spec.nodes || []) ops.push({ op: 'node', ...n });
   for (const e of spec.edges || []) ops.push({ op: 'edge', ...e });
   for (const b of spec.boundaries || []) ops.push({ op: 'boundary', ...b });
+  // A callout is an op like any other, and a spec is a list of ops by another
+  // name. Dropping them here meant `spiega draw spec.json` drew every box and
+  // then quietly omitted the sentence saying what the boxes were about, while
+  // `spiega render` on the same file kept it.
+  for (const c of spec.callouts || []) ops.push({ op: 'callout', ...c });
   if (spec.flow?.length) ops.push({ op: 'flow', steps: spec.flow });
   for (const t of spec.transcript || []) ops.push({ op: 'say', text: t.text ?? t });
   return ops;
