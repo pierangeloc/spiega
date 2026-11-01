@@ -55,7 +55,7 @@ const THIS = () => (isCheckout() ? 'this checkout' : 'this install');
 /* Is ROOT itself a repository? `git -C` walks up, so containment is not
    enough — see checkout() for what that cost. */
 let _isCheckout = null;
-function isCheckout() {
+export function isCheckout() {
   if (_isCheckout === null) {
     const top = sh('git', ['-C', ROOT, 'rev-parse', '--show-toplevel']);
     try {

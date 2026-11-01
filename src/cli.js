@@ -140,24 +140,10 @@ async function readOps(arg) {
   if (Array.isArray(parsed)) return parsed;
   if (parsed.ops) return parsed.ops;
   // A whole spec, not an op list: turn it into the ops that would build it.
-  if (parsed.nodes || parsed.edges) return specToOps(parsed);
+  // Imported here rather than at the top of the file so the Node version check
+  // above still runs before anything in src/ is parsed.
+  if (parsed.nodes || parsed.edges) return (await import('./spec.js')).specToOps(parsed);
   return [parsed];
-}
-
-export function specToOps(spec) {
-  const ops = [];
-  if (spec.title) ops.push({ op: 'title', text: spec.title });
-  for (const n of spec.nodes || []) ops.push({ op: 'node', ...n });
-  for (const e of spec.edges || []) ops.push({ op: 'edge', ...e });
-  for (const b of spec.boundaries || []) ops.push({ op: 'boundary', ...b });
-  // A callout is an op like any other, and a spec is a list of ops by another
-  // name. Dropping them here meant `spiega draw spec.json` drew every box and
-  // then quietly omitted the sentence saying what the boxes were about, while
-  // `spiega render` on the same file kept it.
-  for (const c of spec.callouts || []) ops.push({ op: 'callout', ...c });
-  if (spec.flow?.length) ops.push({ op: 'flow', steps: spec.flow });
-  for (const t of spec.transcript || []) ops.push({ op: 'say', text: t.text ?? t });
-  return ops;
 }
 
 /* ---------- commands ---------- */
@@ -166,6 +152,7 @@ const HELP = `spiega — a hand-drawn board an agent draws on while it explains
 
   serve [--port N] [--open]     start the board and keep it running (--solo: own process)
   open [--tab] [--size WxH]     open the board in its own browser window
+  version                       which copy this is, and where it came from
   doctor                        check that agents are reading the current version
   migrate                       move everything over from the old handwave name
   install [targets...]          wire it into your agents (--detect to see what it would do)
@@ -522,6 +509,7 @@ const main = async () => {
       const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
       const { emptyBoard, applyOps } = await import('./board/state.js');
       const { snapshotHTML } = await import('./board/snapshot.js');
+      const { specToOps } = await import('./spec.js');
       const board = emptyBoard();
       applyOps(board, specToOps(spec));
       const html = snapshotHTML(board, { active: flag('step') ? Number(flag('step')) - 1 : null });
@@ -717,6 +705,38 @@ const main = async () => {
           `${names.length - own} of them${own ? `; ${own} on ${own === 1 ? 'its' : 'their'} own` : ''}.`)}`);
       }
       console.log('');
+      return;
+    }
+
+    /* `spiega --version` is the first thing anybody types to find out whether
+       the thing on their PATH is the one they think it is, and until now it
+       was "no such command". Which copy is answering matters here more than
+       the number does: this tool is installed from npm by its users and run
+       from a checkout by the person developing it, and the two look identical
+       from the outside. So the path and its provenance go on the second line.
+       The number is alone on the first, where `spiega --version | head -1`
+       and the eye both expect it. */
+    case 'version': case '--version': case '-v': {
+      const pkg = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8'));
+      console.log(`spiega ${pkg.version}`);
+
+      // The same check doctor uses, not a second guess at it: `git -C` walks
+      // up, so a plain `rev-parse` inside an npm prefix under nvm answers
+      // about nvm's own clone. That bug shipped once already.
+      const { isCheckout } = await import('./doctor.js');
+      const root = path.resolve(HERE, '..');
+      let where = 'installed from npm';
+      if (isCheckout()) {
+        const cp = await import('node:child_process');
+        let head = '';
+        try {
+          head = cp.execFileSync('git', ['-C', root, 'rev-parse', '--short', 'HEAD'],
+            { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        } catch { /* a checkout with no commits yet still is one */ }
+        where = head ? `a checkout at ${head}` : 'a checkout';
+      }
+      console.log(`${root} — ${where}`);
+      console.log(`node ${process.version}`);
       return;
     }
 

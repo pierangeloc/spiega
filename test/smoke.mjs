@@ -662,7 +662,7 @@ test('colour and glyphs stay out of piped output', async () => {
    sentences explaining why the boxes mattered, and said nothing about it. The
    invariant is that the two routes agree on what the spec contains. */
 test('drawing a spec keeps everything rendering it would show', async () => {
-  const { specToOps } = await import('../src/cli.js');
+  const { specToOps } = await import('../src/spec.js');
 
   const spec = {
     title: 'two routes',
@@ -689,6 +689,197 @@ test('drawing a spec keeps everything rendering it would show', async () => {
     if (!want) continue;
     assert.equal(specToOps(shipped).filter(o => o.op === 'callout').length, want,
       `callouts in examples/${f} are dropped when it is drawn`);
+  }
+
+  /* The first fix was to one copy. There was a second, in tools/example.js,
+     which is what generates the worked examples in the README — so the fix
+     landed and the published pictures were still missing their callouts, and
+     the test that regenerates them passed, because it compared the broken tool
+     against its own output. One definition, or it happens again. */
+  const defs = [];
+  for (const dir of ['src', 'tools']) {
+    const walk = d => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const full = path.join(d, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (e.name.endsWith('.js') &&
+                 /function specToOps\b/.test(fs.readFileSync(full, 'utf8')))
+          defs.push(path.relative(ROOT, full));
+      }
+    };
+    walk(path.join(ROOT, dir));
+  }
+  assert.deepEqual(defs, ['src/spec.js'],
+    `specToOps must be defined once; found it in: ${defs.join(', ')}`);
+});
+
+/* A broken image in a README fails silently: GitHub shows a tiny torn page and
+   the author, whose copy is cached, sees nothing wrong. Same for a link to a
+   file that moved. These are the README's facts about itself, so they can be
+   checked like any other fact. */
+test('every file the docs point at is actually there', () => {
+  const docs = ['README.md', ...fs.readdirSync(path.join(ROOT, 'docs'))
+    .filter(f => f.endsWith('.md')).map(f => path.join('docs', f))];
+
+  const missing = [];
+  for (const rel of docs) {
+    const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+
+    // images and links served from the repo over raw.githubusercontent
+    const RAW = /https:\/\/raw\.githubusercontent\.com\/pierangeloc\/spiega\/main\/([^"')>\s]+)/g;
+    for (const m of text.matchAll(RAW))
+      if (!fs.existsSync(path.join(ROOT, m[1]))) missing.push(`${rel} -> ${m[1]}`);
+
+    // ordinary relative links, skipping anchors, urls and mail
+    const REL = /\]\(([^)#:\s]+)\)/g;
+    for (const m of text.matchAll(REL)) {
+      const target = m[1];
+      if (/^(https?|mailto)/.test(target)) continue;
+      const from = path.dirname(path.join(ROOT, rel));
+      if (!fs.existsSync(path.resolve(from, target))) missing.push(`${rel} -> ${target}`);
+    }
+  }
+  assert.deepEqual(missing, [], `docs point at files that do not exist:\n  ${missing.join('\n  ')}`);
+});
+
+/* "Fourteen node kinds" is the first concrete promise the README makes, and a
+   reader counts the pictures under it. Adding a glyph without touching the
+   sentence makes a liar of the sentence, quietly. */
+test('the README counts the node kinds it actually has', () => {
+  const md = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+  const words = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
+    'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen',
+    'seventeen', 'eighteen', 'nineteen', 'twenty'];
+  const said = md.match(/\b(\w+) node kinds\b/i);
+  assert.ok(said, 'the README no longer says how many node kinds there are');
+  assert.equal(said[1].toLowerCase(), words[KINDS.length],
+    `the README says ${said[1]} node kinds; there are ${KINDS.length}: ${KINDS.join(', ')}`);
+});
+
+/* The link checker above reads markdown links. It does not read inside a code
+   block, and that is where the README kept two `awk` commands pointed at files
+   that were never committed — reproduction instructions that reproduced
+   nothing, printed next to the numbers they were supposed to justify. A path
+   a reader is told to type is a claim like any other. */
+test('every file a README command names is actually there', () => {
+  const docs = ['README.md', ...fs.readdirSync(path.join(ROOT, 'docs'))
+    .filter(f => f.endsWith('.md')).map(f => path.join('docs', f))];
+
+  const missing = [];
+  for (const rel of docs) {
+    const text = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    for (const block of text.matchAll(/```(?:sh|bash|console)\n([\s\S]*?)```/g)) {
+      // paths that look like ours: a known top directory, then a file
+      for (const m of block[1].matchAll(/\b((?:src|docs|tools|test|examples|bin|skills|integrations)\/[\w./-]+\.\w+)/g)) {
+        const target = m[1];
+        if (!fs.existsSync(path.join(ROOT, target))) missing.push(`${rel} -> ${target}`);
+      }
+    }
+  }
+  assert.deepEqual(missing, [], `README commands name files that do not exist:\n  ${missing.join('\n  ')}`);
+});
+
+/* The README prints the output of the tools that make its pictures, as the
+   evidence for the counts in the paragraphs around it — 384 words, 23 ops,
+   1539 × 308. Those were transcribed by hand, and one of them was already
+   wrong: the prose said 390 words where the block above it said 384. A number
+   nobody re-runs is a number that rots, so re-run them. */
+test('the numbers the README prints are the numbers the tools print', async () => {
+  const cp = await import('node:child_process');
+  const md = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+
+  let checked = 0;
+  for (const block of md.matchAll(/```console\n([\s\S]*?)```/g)) {
+    const lines = block[1].split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const cmd = lines[i].match(/^\$ node (tools\/[\w.-]+\.js.*)$/);
+      if (!cmd) continue;
+      const quoted = [];
+      while (++i < lines.length && !lines[i].startsWith('$ ') && lines[i] !== '') quoted.push(lines[i]);
+      i--;
+
+      const args = cmd[1].split(/\s+/);
+      const got = cp.execFileSync(process.execPath, [path.join(ROOT, args[0]), ...args.slice(1)],
+        { cwd: ROOT, encoding: 'utf8' }).trimEnd().split('\n');
+      assert.deepEqual(got, quoted,
+        `README shows stale output for "node ${cmd[1]}"\n` +
+        `  it prints:\n    ${got.join('\n    ')}\n  README says:\n    ${quoted.join('\n    ')}`);
+      checked++;
+    }
+  }
+  assert.ok(checked >= 2, `expected the worked examples to be checked, did ${checked}`);
+});
+
+/* The gallery and the worked examples claim they cannot drift from the code,
+   because they are generated by it. That is only true while someone checks. */
+test('the generated pictures match the specs they come from', async () => {
+  const cp = await import('node:child_process');
+  const gen = [
+    ['tools/gallery.js', []],
+    ['tools/example.js', ['examples/webhook-retry.json', 'docs/examples/webhook-retry.svg']],
+    ['tools/example.js', ['examples/blood-clot.json', 'docs/examples/blood-clot.svg']],
+    ['tools/compare.js', []],
+  ];
+  for (const [tool, args] of gen)
+    cp.execFileSync(process.execPath, [path.join(ROOT, tool), ...args],
+      { cwd: ROOT, stdio: 'pipe' });
+
+  const dirty = cp.execFileSync('git', ['-C', ROOT, 'status', '--porcelain',
+    '--', 'docs/gallery', 'docs/examples'], { encoding: 'utf8' }).trim();
+  assert.equal(dirty, '',
+    `regenerating changed committed pictures — they had drifted:\n${dirty}`);
+});
+
+/* `spiega --version` answered "no such command", which is the one thing a
+   version flag must never do: it is what somebody types when they already
+   suspect the binary on their PATH is not the one they think it is.
+
+   Which copy answers matters more than the number. This tool is installed from
+   npm by the people who use it and run from a checkout by the person building
+   it, and the two are indistinguishable from the outside — which is exactly
+   the confusion the README's develop-vs-user section exists for. So both
+   branches are driven here, including the trap doctor fell into: an install
+   that happens to sit inside somebody else's repository (npm's prefix under
+   nvm) must not describe itself as a checkout of that repository. */
+test('--version says which copy it is, from a checkout and from an install', async () => {
+  const cp = await import('node:child_process');
+  const run = (cwd, args) => cp.execFileSync(process.execPath, args,
+    { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trimEnd().split('\n');
+
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+
+  for (const spelling of [['--version'], ['-v'], ['version']]) {
+    const out = run(ROOT, [path.join(ROOT, 'src', 'cli.js'), ...spelling]);
+    assert.equal(out[0], `spiega ${pkg.version}`,
+      `${spelling[0]} must put the bare version on the first line`);
+    assert.match(out[1], /a checkout at [0-9a-f]{7}/,
+      `${spelling[0]} run from the repo should say it is a checkout: ${out[1]}`);
+  }
+
+  // the same package copied out, with no .git of its own, inside a repo that
+  // is not it — the nvm shape
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-version-'));
+  try {
+    const git = (...a) => cp.execFileSync('git', ['-C', tmp, ...a], { stdio: 'pipe', encoding: 'utf8' });
+    git('init', '-q');
+    fs.writeFileSync(path.join(tmp, 'f'), 'x');
+    git('add', 'f');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false',
+      'commit', '-qm', 'the enclosing repo, not spiega');
+
+    const inst = path.join(tmp, 'lib', 'node_modules', 'spiega');
+    fs.mkdirSync(inst, { recursive: true });
+    fs.cpSync(path.join(ROOT, 'src'), path.join(inst, 'src'), { recursive: true });
+    fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(inst, 'package.json'));
+
+    const out = run(tmp, [path.join(inst, 'src', 'cli.js'), '--version']);
+    assert.equal(out[0], `spiega ${pkg.version}`);
+    // realpath, because /var is a symlink to /private/var on macOS and the
+    // path it prints is the resolved one
+    assert.equal(out[1], `${fs.realpathSync(inst)} — installed from npm`,
+      `an install inside somebody else's repo must not claim to be a checkout: ${out[1]}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 

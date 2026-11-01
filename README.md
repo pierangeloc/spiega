@@ -21,19 +21,270 @@ arrows between them in your head while you read a paragraph about them.
 
 ![a finished board, saved as a snapshot, with step 3 lit](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/board.png)
 
+**[Install](#install)** · **[What it can draw](#what-it-can-draw)** · **[Examples](#where-it-earns-its-keep)**
+
 ## Why not Miro, or Mermaid
 
-Miro is a place you go. This is a pane beside the conversation that the agent
-is already having, and the board is gone when you are done unless you keep it.
+Miro is a place you go. This is a pane beside the conversation the agent is
+already having. The board is kept — its log lives at
+`~/.spiega/boards/<name>.jsonl` and comes back the next time that board is
+opened, so you can close the window and pick the explanation up later.
+`spiega clear` empties it.
 
 Mermaid renders a finished diagram. This is drawn incrementally, in the order
 the explanation goes, which is most of what makes it followable — and it looks
 drawn, not generated, so it reads as somebody thinking rather than a document.
 
+## What it can draw
+
+Fourteen node kinds, each with its own drawing. Eight are software's furniture —
+a browser, a gateway, a service, a replica set, a database, a cache, a queue,
+and something you do not own. Two are writing on the board: a note and a
+formula. Four carry no infrastructure meaning, so a figure about a cell or a
+gas does not have to borrow software's nouns.
+
+<img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/kinds-software.svg" width="760" alt="client, gateway, service, compute, datastore, cache, queue and external nodes">
+
+<img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/kinds-neutral.svg" width="540" alt="blob, vessel, particle and source nodes">
+
+<img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/kinds-writing.svg" width="510" alt="a note and a formula written on the board">
+
+An arrow can be plain, carry a label, be dashed because the caller does not
+wait for it, or carry the number of a flow step:
+
+<img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/edges.svg" width="520" alt="a plain edge and a labelled edge">
+
+<img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/edges-async.svg" width="520" alt="an async dashed edge and an edge carrying a numbered flow step">
+
+A `boundary` groups boxes, a `callout` points at something without crowding it,
+and a `note` sits in the margin:
+
+<img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/boundary.svg" width="700" alt="a dashed boundary around Orders and Postgres">
+
+<img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/callout.svg" width="460" alt="a callout pointing at an edge">
+
+<img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/note.svg" width="700" alt="a note in the left margin beside a path from Orders to Postgres">
+
+A flow numbers the hops, lights one at a time, and dims the rest — with the
+numbered hops also laid out as a list beside the drawing:
+
+<img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/flow.svg" width="760" alt="a three-step flow with step one lit, and the numbered list beside the drawing">
+
+Every picture is rendered by the board's own renderer and regenerated with
+`node tools/gallery.js`, so it cannot drift from what you will see. The full
+tour — all fourteen kinds, the title bar, and the code for each — is in
+[the gallery](https://github.com/pierangeloc/spiega/blob/main/docs/gallery.md).
+
+## Where it earns its keep
+
+Two questions whose answers are mostly *relationships between named things* —
+the case a paragraph is worst at. One is a production bug, one is not software
+at all. Each is shown twice: the answer a capable model gives in prose, written
+out in full and not a strawman, and the same answer as a board.
+
+### Software: the webhooks that never update an order
+
+**The question.**
+
+> We take Stripe webhooks. The endpoint checks the signature, claims `event_id`
+> in Redis with `SETNX`, and only if the claim is new does it add the event to
+> `webhook-events` and return `202`. A worker consumes it and updates the
+> order. Last week three orders never moved to `paid`, even though Stripe shows
+> those events as delivered, and one customer was charged twice after a retry.
+> Stripe says it retried. Where do the events go?
+
+**The answer a model gives without a board.** It names the right bug, gives the
+right fixes, and would be enough to act on.
+
+<!-- prose:webhook:start -->
+Both symptoms come from the same shape: this path writes to two stores that cannot commit together, and it acknowledges work before the work is durable.
+
+**The loss is between the claim and the enqueue.** `SETNX event_id` in Redis and `XADD` to `webhook-events` are two independent writes. If the process dies, the pod is evicted, or the produce times out after Redis has said "new", the event is marked seen and no message exists. Stripe sees the failure and retries — and the retry makes it worse: `SETNX` returns 0, the endpoint returns 202, and the second attempt is discarded *because the first one failed*. No error, no DLQ row, and Stripe correctly reports delivery.
+
+Make the claim and the message durable together. The cheap fix: do not return 202 until the produce has succeeded, and make the claim two-phase — `pending` before the produce, `done` after — so a retry that finds `pending` republishes instead of deduping. The thorough fix removes Redis from the ack path: insert the raw event into an inbox table and publish from a poller, so the claim and the intent to publish are one commit. An outbox written by the transaction that changes the order is the same idea with the order as the source of truth.
+
+**The duplicates are the same problem one hop later.** If the consumer commits its Kafka offset before the Postgres commit lands — or auto-commits on a timer — a crash in between redelivers the message. That is harmless only if the handler is idempotent: `UPDATE orders SET status = 'paid' WHERE id = $2 AND status <> 'paid'` is; `balance = balance + amount`, or a capture call to Stripe, is not. Key the effect on `event_id`, not on delivery count, and ack after `COMMIT` with manual commit.
+
+**The third window is the DLQ.** An event that fails three times is parked, but the endpoint already returned 202 and the `event_id` is seen, so no retry brings it back. The DLQ needs an alarm and a replay command, or it is where events go to be forgotten.
+
+The rule that ties it together: the dedupe record must live in the same durability domain as the effect it guards, and the ack must come after the durable effect, not after the attempt.
+<!-- prose:webhook:end -->
+
+The same answer, on the board:
+
+![the webhook path, its two commit points, and the numbers of the walk-through](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/webhook-retry.svg)
+
+Side by side, at the size each is actually read:
+
+![the model's answer as a column of text beside the same answer as a board](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/webhook-retry-compare.svg)
+
+384 words against 23 ops — one op per box, per line, per handwritten note, per
+numbered hop, which is what an agent emits while it talks. Neither number is
+the point on its own. The point is what you have to do with either column.
+
+The prose is serial. To agree with it you hold seven names — Stripe, the
+endpoint, Redis, the topic, the worker, Postgres, the DLQ — and the windows
+between the writes in your head at once, then work out which store is written
+when, which one holds the acknowledgement, and where a crash has to land to
+lose the event. The answer tells you all of it, and a careful reader can
+rebuild the picture. That rebuilding is the cost.
+
+The board hands the picture over, and then says three things on top of it: the
+two writes with no transaction, written under the endpoint; redelivery, written
+on the consume hop where it happens; the ack, written under the worker. The
+shapes carry weight too — the queue and the Redis cylinder are drawn
+differently because one is a log you replay and the other is a copy you can
+afford to lose, and the DLQ branch is visibly a dead end rather than one more
+hop.
+
+The board is worse at what prose is good at: you can grep a sentence, quote it
+in a postmortem, paste it into a ticket. The honest claim is narrower than "a
+drawing beats a wall of text" — for a system with several named parts and the
+arrows between them, the drawing removes the reconstruction, and the prose
+still carries the argument. Which is why the agent does both.
+
+Both pictures are generated, so neither can drift from what it claims: the
+board from [`examples/webhook-retry.json`](examples/webhook-retry.json), and
+the comparison from that spec plus the very paragraphs printed above — the
+word count is a count of them.
+
+```console
+$ node tools/example.js examples/webhook-retry.json docs/examples/webhook-retry.svg
+docs/examples/webhook-retry.svg
+  1539 × 308  (5.00:1)
+  title 1 · nodes 7 · edges 6 · callouts 3 · steps 6
+  23 ops drawn one at a time · 18 ops as this one file
+$ node tools/compare.js webhook
+docs/examples/webhook-retry-compare.svg
+  1646 × 638
+  384 words (32 lines) · board 1539 × 308 · 23 ops
+```
+
+A board this wide is close to the limit of what a README column can show. Open
+the [full-size SVG](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/webhook-retry.svg)
+if the labels are small at this width — or just run it, where the board gets a
+whole pane and `spiega step 3` lights one hop at a time.
+
+### Not software: why a cut keeps bleeding
+
+Not every process made of named parts and handoffs is a system. This one is a
+cut, and the parts are proteins.
+
+**The question.**
+
+> My GP put me on apixaban last month. Why does a small cut bleed for so long
+> now, and what is actually meant to happen when a blood vessel is cut?
+
+**The answer a model gives without a board.**
+
+<!-- prose:clot:start -->
+Three things stop a cut, and they run on different clocks.
+
+The vessel clamps down first. The torn wall releases endothelin, the smooth
+muscle in it contracts, and the pipe narrows, slowing the leak.
+
+Then platelets. Collagen that normally sits hidden under the endothelium is
+exposed, and circulating platelets bind it — directly, and through von
+Willebrand factor. Binding activates them: they change shape, release ADP and
+thromboxane A2, which recruit more platelets, and they pile into a plug. This
+is primary haemostasis, and it takes seconds. The plug is soft and easily
+dislodged, so it needs a scaffold.
+
+That scaffold is fibrin, and making it is a chain of proteases. Clotting
+factors circulate as inactive zymogens, each switched on by the one before it.
+The modern account starts with tissue factor: a protein on cells beneath the
+endothelium that blood never normally meets. Injury exposes it, it binds factor
+VIIa, and the complex switches on factor X — and factor IX. Factor Xa, with
+factor Va, converts prothrombin to thrombin.
+
+That first thrombin is only a trickle, and that is the point: it starts a loop.
+Thrombin switches on factors XI, VIII and V and activates platelets, so the
+IXa–VIIIa complex — tenase — can now make far more Xa on the platelet surface.
+Ignition, then amplification: roughly 5% of the thrombin comes from the first
+reaction, 95% from the loop. The textbook picture of intrinsic and extrinsic
+pathways with equal billing is an artefact of test tubes; in the body the
+tissue-factor arm starts it and the contact arm keeps it going. Every one of
+those complexes needs calcium and a phospholipid surface, which is why blood in
+a citrate tube never clots — the citrate takes the calcium.
+
+Thrombin also cuts fibrinogen into fibrin, which polymerises around the plug,
+and switches on factor XIII, which cross-links the strands into a mesh. The
+platelets contract, the clot tightens, the bleeding has stopped.
+
+Days later the repair comes apart. Endothelial cells release t-PA, which turns
+plasminogen — much of it already bound to the fibrin — into plasmin. Plasmin
+cuts the mesh into soluble fragments, the plug is cleared, and the vessel
+reopens.
+
+Apixaban sits at factor Xa. The loop still runs, but the amplification stage
+makes much less thrombin: the platelet plug still forms, so a small cut still
+stops, but the fibrin scaffold is thinner, slower to build and easier to
+disturb. Dabigatran blocks thrombin itself, one link further down; warfarin
+leaves you with less of factors II, VII, IX and X to begin with; heparin makes
+antithrombin far more effective at shutting down Xa and thrombin. All of them
+slow the same chain, each at a different link.
+<!-- prose:clot:end -->
+
+**The same answer, on the board.**
+
+![a hand-drawn board: a damaged vessel branching to a platelet plug, tissue factor and the contact arm; both arms feed factor Xa, which makes thrombin, which makes the fibrin clot; a line runs back from thrombin to the contact arm, and another back from plasmin into the clot](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/blood-clot.svg)
+
+Side by side, at the size each is actually read:
+
+![the model's answer as a column of text beside the same answer as a board](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/blood-clot-compare.svg)
+
+Eight boxes, ten lines. The damaged wall branches three ways, so three things
+sit side by side in one column instead of stretching the board sideways; both
+arms converge on one box; and a line runs back from thrombin to the contact
+arm, under everything else. That back edge is the whole point — an ignition,
+then a loop that makes almost all of the rest of the thrombin — and it is why a
+paragraph about clotting keeps doubling back on itself. On the board the loop
+is a line you can see closing.
+
+What stayed in the prose is what was never structure: the 5% / 95% split,
+calcium on a membrane, which drug stops which factor. The board does not
+replace the answer and is not trying to. Nothing on it explains *why* tissue
+factor is exposed. What it buys is the shape — where the loop closes, which arm
+is amplification — held still while you read the words next to it.
+
+The flow is the other half. Ten numbered steps, each one hop with a sentence on
+it, so `spiega step 4` lights the ignition alone and dims the rest, and
+`spiega step 8` lights the loop. Those sentences live beside the drawing rather
+than inside it, which is how the board stays narrow enough to read.
+
+```console
+$ node tools/example.js examples/blood-clot.json docs/examples/blood-clot.svg
+docs/examples/blood-clot.svg
+  1586 × 475  (3.34:1)
+  title 1 · nodes 8 · edges 10 · boundaries 1 · steps 10
+  30 ops drawn one at a time · 21 ops as this one file
+$ node tools/compare.js clot
+docs/examples/blood-clot-compare.svg
+  1646 × 773
+  452 words (41 lines) · board 1586 × 475 · 30 ops
+```
+
+The 30 is the number that matters: an agent drawing this live sends one small
+object per box, per line, per enclosure, per step. The 21 is the same board
+sent as a single spec file, where a whole flow travels as one `flow` op.
+
+Width is worth watching while a board is drawn. Columns come from the edges, so
+a long chain with nothing branching off it grows sideways and nothing warns
+you; at some point the labels are too small to read at the width a page gives
+the picture, and a board nobody can read explains nothing. Both examples here
+are about 1,600px wide. That is near the limit, which is why `tools/example.js`
+prints the ratio, and why the drawings above branch instead of running straight.
+
 ## Install
 
 Node 20 or newer. No dependencies and no build step, so there is nothing to
 compile and nothing to wait for.
+
+Everything runs on your machine: a local server on `127.0.0.1:4777`, no
+account, no sign-up, no network calls. The board is an ordinary web page —
+`spiega open` gives it a chromeless window of its own if you have Chrome,
+Brave, Edge or Chromium, and otherwise opens a tab in your default browser.
+State is written under `~/.spiega`.
 
 Developed and used on **macOS**, and tested on macOS and Linux across Node 20,
 22 and 24. Windows paths are in the code and nobody has run them in anger — if
@@ -65,6 +316,13 @@ spiega help
 ```
 
 ### 2. Wire it into your agents
+
+This step needs a coding agent that can run an MCP server or read a skill file —
+the table below lists the ones spiega knows about. **MCP** (Model Context
+Protocol) is the standard those agents use to call external tools; a **skill**
+is a markdown file an agent loads as instructions. If you have neither, skip to
+[Use it yourself](#use-it-yourself): drawing from a shell needs nothing wired in
+at all.
 
 ```bash
 spiega install --detect     # what it would do, touching nothing
@@ -142,10 +400,31 @@ the board" — and watch the pane.
 
 ### Updating, and checking that it took
 
+Installed from npm:
+
 ```bash
-cd spiega && git pull && npm test
+npm install -g spiega@latest
+spiega install          # re-point the skills and MCP entries at the new copy
+spiega doctor           # is what an agent reads the thing that is on disk?
+```
+
+`spiega --version` is the quick version of that question. It prints the number,
+then which copy answered — the thing worth knowing once you have both an npm
+install and a clone on the same machine:
+
+```console
+$ spiega --version
+spiega 0.1.2
+/Users/you/.nvm/versions/node/v22.14.0/lib/node_modules/spiega — installed from npm
+node v22.14.0
+```
+
+From a clone:
+
+```bash
+cd spiega && git pull
 spiega install          # only the copies need this: AGENTS.md blocks, the Cursor rule
-spiega doctor           # is what is running the thing that is on disk?
+spiega doctor
 ```
 
 spiega reaches an agent through four kinds of thing, and they go stale
@@ -262,9 +541,13 @@ spiega open --size 1200x900 --pos 60,60
 Render a whole spec with no server, or keep what is on the board:
 
 ```bash
-spiega render examples/order-flow.json -o order-flow.html
-spiega snapshot -o docs/board.html
+spiega render my-spec.json -o my-spec.html    # a spec file you wrote
+spiega snapshot -o my-board.html              # whatever is on the board now
 ```
+
+The specs under [`examples/`](examples/) ship inside the package as well as the
+repo, so to render one of those, point at where it actually is — from a clone,
+`spiega render examples/order-flow.json -o out.html`.
 
 `spiega help` lists the rest.
 
@@ -296,6 +579,53 @@ a flow with the arrow keys — those repaint once per keypress. It is poor at
 continuous zoom and dragging, because every frame has to be encoded and pushed
 through the TTY however fast the page itself is. Both can watch the same board
 at once.
+
+## What the agent actually draws
+
+A Claude skill, a Cursor rule and an MCP server, all driving the same board —
+see [`integrations/`](integrations/). The agent needs no new vocabulary: it
+emits small JSON ops as it talks.
+
+Every op, every node kind and every layout hint is in
+[`docs/vocabulary.md`](docs/vocabulary.md), along with what the board does
+*not* model — worth reading before asking for a sequence diagram. The
+instructions the agent itself reads are in [`docs/skill.md`](docs/skill.md).
+
+```jsonc
+{"op":"node","id":"db","kind":"datastore","label":"Postgres","sub":"orders"}
+{"op":"edge","from":"orders","to":"bus","label":"publish","async":true}
+{"op":"callout","at":"orders","side":"below","label":"two writes, no transaction"}
+{"op":"note","label":"idempotency key\nlives 24h"}
+{"op":"boundary","label":"our VPC","members":["gw","orders","db"]}
+{"op":"step","edge":"gw>orders","step":"Gateway authenticates and forwards"}
+{"op":"say","text":"The gateway checks the token first.","step":2}
+```
+
+A board has two halves, and a `say` can name the step it explains. Walking the
+flow then lights the matching lines of the script while the others recede, so
+the words and the picture move together. Lines about the board as a whole carry
+no step and never dim; a line said while a step was lit is attributed for free.
+Nothing is inferred beyond that — an untagged script does not highlight rather
+than highlighting the wrong thing.
+
+Which lines went with which step is often clear only afterwards, so tags can be
+set on lines already said. The board keeps them; nothing is drawn again.
+
+```bash
+spiega script                              # the lines, numbered, and what each is tied to
+spiega tag --match "Flyway V25" --step 6
+spiega tag 1 --step off                    # an opening remark belongs to no step
+```
+
+The rail shows what was said, in the order it was said. So a script narrated
+topic by topic, with each line tagged by whichever step it touches, comes out
+`2, 1, 3, 3, 4, 3, 6` — which looks like a sort gone wrong, though nothing
+sorted anything. `spiega script` says so when it happens, because from the
+board you cannot tell the difference between that and a bug.
+
+Nothing is ever placed by hand. Columns are derived from the edges — a node
+sits one column right of whatever points at it — so the agent draws a box, then
+the arrow into it, and the layout follows.
 
 ## One board per conversation
 
@@ -361,7 +691,7 @@ See [`integrations/herdr/`](integrations/herdr/).
 ```bash
 spiega bench --list                     # models you can reach right now
 spiega bench "how a write-through cache works" \
-  --models github-copilot/claude-opus-5.5,github-copilot/gpt-6-sol
+  --models github-copilot/claude-opus-5,github-copilot/gpt-6-sol
 ```
 
 Runs the same brief through each model via `opencode run`, parses the ops out of
@@ -369,52 +699,6 @@ whatever it replied with, renders each board, and writes `bench/index.html`
 comparing them side by side — boxes, lines, steps, how many edges it bothered to
 label, how many kinds it reached for. Each model's raw reply is kept next to its
 board. Runs are isolated and never touch a live board.
-
-
-
-A Claude skill, a Cursor rule and an MCP server, all driving the same board —
-see [`integrations/`](integrations/). The agent needs no new vocabulary: it
-emits small JSON ops as it talks.
-
-Every op, every node kind and every layout hint is in
-[`docs/vocabulary.md`](docs/vocabulary.md), along with what the board does
-*not* model — worth reading before asking for a sequence diagram. The
-instructions the agent itself reads are in [`docs/skill.md`](docs/skill.md).
-
-```jsonc
-{"op":"node","id":"db","kind":"datastore","label":"Postgres","sub":"orders"}
-{"op":"edge","from":"orders","to":"bus","label":"publish","async":true}
-{"op":"note","label":"idempotency key\nlives 24h"}
-{"op":"boundary","label":"our VPC","members":["gw","orders","db"]}
-{"op":"step","edge":"gw>orders","step":"Gateway authenticates and forwards"}
-{"op":"say","text":"The gateway checks the token first.","step":2}
-```
-
-A board has two halves, and a `say` can name the step it explains. Walking the
-flow then lights the matching lines of the script while the others recede, so
-the words and the picture move together. Lines about the board as a whole carry
-no step and never dim; a line said while a step was lit is attributed for free.
-Nothing is inferred beyond that — an untagged script does not highlight rather
-than highlighting the wrong thing.
-
-Which lines went with which step is often clear only afterwards, so tags can be
-set on lines already said. The board keeps them; nothing is drawn again.
-
-```bash
-spiega script                              # the lines, numbered, and what each is tied to
-spiega tag --match "Flyway V25" --step 6
-spiega tag 1 --step off                    # an opening remark belongs to no step
-```
-
-The rail shows what was said, in the order it was said. So a script narrated
-topic by topic, with each line tagged by whichever step it touches, comes out
-`2, 1, 3, 3, 4, 3, 6` — which looks like a sort gone wrong, though nothing
-sorted anything. `spiega script` says so when it happens, because from the
-board you cannot tell the difference between that and a bug.
-
-Nothing is ever placed by hand. Columns are derived from the edges — a node
-sits one column right of whatever points at it — so the agent draws a box, then
-the arrow into it, and the layout follows.
 
 ## How it is put together
 

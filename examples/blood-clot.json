@@ -1,0 +1,44 @@
+{
+  "title": "How a cut stops bleeding — and how the clot comes apart",
+
+  "nodes": [
+    { "id": "injury",   "kind": "source",   "label": "Damaged vessel",  "sub": "endothelium torn", "w": 142 },
+    { "id": "plug",     "kind": "blob",     "label": "Platelet plug",   "sub": "seconds", "w": 164, "h": 84 },
+    { "id": "tf",       "kind": "particle", "label": "Tissue factor",   "sub": "TF–VIIa", "w": 146 },
+    { "id": "contact",  "kind": "particle", "label": "Contact arm",     "sub": "XIIa → XIa → IXa", "w": 146 },
+    { "id": "xa",       "kind": "particle", "label": "Factor Xa",       "sub": "both arms meet", "w": 132 },
+    { "id": "thrombin", "kind": "particle", "label": "Thrombin",        "sub": "factor IIa", "w": 132 },
+    { "id": "clot",     "kind": "blob",     "label": "Fibrin clot",     "sub": "mesh on the plug", "w": 164, "h": 84 },
+    { "id": "plasmin",  "kind": "particle", "label": "Plasmin",         "sub": "t-PA, days later", "w": 132 }
+  ],
+
+  "edges": [
+    { "from": "injury",   "to": "plug",     "label": "stick" },
+    { "from": "injury",   "to": "contact",  "label": "collagen" },
+    { "from": "injury",   "to": "tf",       "label": "unmasks" },
+    { "from": "tf",       "to": "xa",       "label": "X → Xa" },
+    { "from": "contact",  "to": "xa",       "label": "tenase" },
+    { "from": "xa",       "to": "thrombin", "label": "prothrombinase" },
+    { "from": "thrombin", "to": "clot",     "label": "cuts fibrinogen" },
+    { "from": "thrombin", "to": "contact",  "label": "also XI, VIII, V" },
+    { "from": "clot",     "to": "plasmin",  "label": "t-PA", "async": true },
+    { "from": "plasmin",  "to": "clot",     "label": "cuts the mesh" }
+  ],
+
+  "boundaries": [
+    { "id": "site", "label": "at the torn wall", "members": ["plug", "tf", "contact"] }
+  ],
+
+  "flow": [
+    { "edge": "injury>plug",   "step": "The wall tears; platelets stick and pile up" },
+    { "edge": "injury>tf",     "step": "Torn tissue unmasks tissue factor" },
+    { "edge": "injury>contact","step": "Exposed collagen starts the contact arm" },
+    { "edge": "tf>xa",         "step": "TF–VIIa switches on X: the ignition" },
+    { "edge": "contact>xa",    "step": "IXa with VIIIa (tenase) makes almost all of the Xa" },
+    { "edge": "xa>thrombin",   "step": "Xa with Va turns prothrombin into thrombin" },
+    { "edge": "thrombin>clot", "step": "Thrombin cuts fibrinogen; XIIIa ties the strands", "lights": ["plug"] },
+    { "edge": "thrombin>contact", "step": "Thrombin activates XI, VIII and V: the burst feeds itself" },
+    { "edge": "clot>plasmin",  "step": "Days later, t-PA turns plasminogen into plasmin" },
+    { "edge": "plasmin>clot",  "step": "Plasmin cuts the mesh; the vessel reopens" }
+  ]
+}
