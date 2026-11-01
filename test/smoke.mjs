@@ -586,28 +586,69 @@ test('a stale shared server is not fixed one board at a time', async () => {
 
 /* Terminal dressing is for terminals. Piped into a file, a pager, or an agent
    reading the output, escape codes are noise at best and corrupt data at
-   worst — and the test process is itself not a TTY, which is the case that
-   matters. */
+   worst. The suite runs both ways — piped in CI, on a TTY when someone runs
+   `npm test` by hand, and `npm publish` runs it on a TTY — so the assertion
+   has to be that colour FOLLOWS the terminal, never that it is off. Pinning
+   it to one of the two is how this test once failed only during a release. */
 test('colour and glyphs stay out of piped output', async () => {
   const term = await import('../src/term.js');
   const ESC = /\u001b\[/;
 
-  assert.equal(term.colourful(), false, 'not a TTY here, so no colour');
-  assert.ok(!ESC.test(term.c.bold('x') + term.c.dim('y') + term.c.accent('z')),
-    'no escape codes when nothing can render them');
+  /* term.js holds a reference to process.env from module load, so these have
+     to be put back key by key. Replacing process.env wholesale swaps the
+     object the test can see and leaves the one the module reads still dirty,
+     which leaks into every later test. */
+  const set = (k, v) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; };
+  const before = {
+    NO_COLOR: process.env.NO_COLOR,
+    FORCE_COLOR: process.env.FORCE_COLOR,
+    TERM: process.env.TERM,
+  };
+  try {
+    // the case that matters: nothing can render them, so none are emitted
+    set('FORCE_COLOR', undefined);
+    set('NO_COLOR', '1');
+    assert.equal(term.colourful(), false);
+    assert.ok(!ESC.test(term.c.bold('x') + term.c.dim('y') + term.c.accent('z')),
+      'no escape codes when nothing can render them');
+
+    // and the other way, so the paint is reachable at all
+    set('NO_COLOR', undefined);
+    set('FORCE_COLOR', '1');
+    assert.ok(ESC.test(term.c.bold('x')), 'a terminal that can render them gets them');
+
+    // NO_COLOR wins over FORCE_COLOR when both are set
+    set('NO_COLOR', '1');
+    assert.equal(term.colourful(), false, 'NO_COLOR outranks FORCE_COLOR');
+
+    /* Both branches, driven rather than inherited. The suite runs piped in CI
+       and on a TTY under `npm publish`; asserting on the one it happens to
+       have is how this test once failed only during a release. */
+    set('NO_COLOR', undefined);
+    set('FORCE_COLOR', undefined);
+    const realTTY = process.stdout.isTTY;
+    try {
+      set('TERM', 'xterm');  // ambient TERM=dumb would answer for us
+      Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+      assert.equal(term.colourful(), true, 'a terminal gets colour');
+      Object.defineProperty(process.stdout, 'isTTY', { value: false, configurable: true });
+      assert.equal(term.colourful(), false, 'a pipe does not');
+      Object.defineProperty(process.stdout, 'isTTY', { value: true, configurable: true });
+      set('TERM', 'dumb');
+      assert.equal(term.colourful(), false, 'TERM=dumb is not worth painting');
+    } finally {
+      Object.defineProperty(process.stdout, 'isTTY', { value: realTTY, configurable: true });
+    }
+  } finally {
+    set('NO_COLOR', before.NO_COLOR);
+    set('FORCE_COLOR', before.FORCE_COLOR);
+    set('TERM', before.TERM);
+  }
 
   // width is measured on what the terminal shows, not on the bytes
   const painted = '\u001b[1mabc\u001b[0m';
   assert.equal(term.visible(painted), 3);
   assert.equal(term.visible(term.pad(painted, 10)), 10, 'padding aligns by visible width');
-
-  // NO_COLOR wins, FORCE_COLOR overrides the other way
-  const old = { ...process.env };
-  process.env.FORCE_COLOR = '1';
-  assert.equal(term.colourful(), true);
-  process.env.NO_COLOR = '1';
-  assert.equal(term.colourful(), false, 'NO_COLOR outranks FORCE_COLOR');
-  process.env = old;
 
   // a long path keeps its tail, which is the part that identifies it
   const short = term.shortPath('/a/very/deeply/nested/set/of/directories/spiega/skills/spiega', 30);
