@@ -176,6 +176,54 @@ never built. `spiega doctor` finds it:
 It exits non-zero when something is wrong, so it can go in a shell prompt or a
 pre-flight check. It makes no network calls and changes nothing.
 
+### Developing on spiega, or just using it
+
+Installing the package changes the **command**. It does not change the **agent
+setup files**, and those are what an agent actually reads. The two move
+independently, which is the whole reason this section exists:
+
+| | set by | points at |
+|---|---|---|
+| the `spiega` command | `npm install -g` / `npm link` | whichever you ran last |
+| skills, MCP entries, `AGENTS.md` blocks | **`spiega install`** | wherever spiega was *when you ran it* |
+
+So `npm install -g spiega` on a machine that once had the repo linked leaves
+every agent still loading the working tree — uncommitted edits and all — while
+`spiega` on your own PATH runs the published copy. Nothing warns you: both work,
+and they are different code.
+
+`spiega doctor` is what tells you, and it names the path it found:
+
+```
+  ✗ claude skill   linked to ~/Documents/…/spiega/skills/spiega, not this install
+  ✗ claude MCP     points at ~/Documents/…/spiega/src/mcp/server.js
+```
+
+**To use the published version**, as anyone else would:
+
+```bash
+npm install -g spiega
+spiega install          # rewires skills and MCP to the installed copy, backing up what it replaces
+```
+
+**To go back to developing**, with agents reading your working tree:
+
+```bash
+cd spiega && npm link
+spiega install
+```
+
+Two things that bite:
+
+- **Restart your agent sessions.** A running MCP server holds the code it was
+  launched with, so until it restarts it keeps serving the old location
+  whatever the config now says. `doctor` counts these.
+- **Check `which -a spiega`, not `which spiega`.** An older install may have
+  left a launcher in `~/.local/bin` or `/opt/homebrew/bin` with an absolute
+  path baked in. Those shadow the npm copy or are shadowed by it depending on
+  PATH order — and an agent's non-interactive shell often has a different PATH
+  than yours.
+
 ### If you use herdr
 
 ```bash
