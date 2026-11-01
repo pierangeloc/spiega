@@ -47,11 +47,43 @@ const bad = (what, detail, fix) => ({ level: 'bad', what, detail, fix });
 
 const tilde = p => String(p).replace(HOME, '~');
 
+/* Most people meet spiega through `npm install -g`, where there is no
+   checkout and the word is simply wrong. Developers run it from a clone,
+   where "install" would be equally wrong. One word, decided once. */
+const THIS = () => (isCheckout() ? 'this checkout' : 'this install');
+
+/* Is ROOT itself a repository? `git -C` walks up, so containment is not
+   enough — see checkout() for what that cost. */
+let _isCheckout = null;
+function isCheckout() {
+  if (_isCheckout === null) {
+    const top = sh('git', ['-C', ROOT, 'rev-parse', '--show-toplevel']);
+    try {
+      _isCheckout = Boolean(top) && fs.existsSync(top) &&
+        fs.realpathSync(top) === fs.realpathSync(ROOT);
+    } catch { _isCheckout = false; }
+  }
+  return _isCheckout;
+}
+
 /* ---------- the checkout ---------- */
 
 function checkout(rows) {
-  const head = sh('git', ['-C', ROOT, 'rev-parse', '--short', 'HEAD']);
-  if (!head) { rows.push(warn('checkout', 'not a git checkout, so there is nothing to compare against')); return 0; }
+  /* `git -C <dir>` walks UP until it finds a repository, so asking it about a
+     directory that is not one answers about whatever encloses it. Installed
+     from npm under nvm — which is itself a git clone — that is nvm: doctor
+     reported nvm's HEAD as "this checkout", nvm's dirty file as uncommitted
+     work, and then measured every skill and MCP entry against it. A page of
+     red crosses, all meaningless, on the most ordinary install there is.
+
+     So the repository has to BE this directory, not merely contain it. */
+  const head = isCheckout() ? sh('git', ['-C', ROOT, 'rev-parse', '--short', 'HEAD']) : null;
+  if (!head) {
+    rows.push(warn('checkout', sh('git', ['-C', ROOT, 'rev-parse', '--show-toplevel'])
+      ? 'installed from npm, not a checkout — nothing to compare against'
+      : 'not a git checkout, so there is nothing to compare against'));
+    return 0;
+  }
 
   const when = Number(sh('git', ['-C', ROOT, 'log', '-1', '--format=%ct']) || 0) * 1000;
   const subject = sh('git', ['-C', ROOT, 'log', '-1', '--format=%s']) || '';
@@ -159,8 +191,8 @@ function invocation(rows) {
 
   const mine = [path.resolve(ROOT, 'bin', 'spiega'), path.resolve(ROOT, 'src', 'cli.js')];
   rows.push(mine.includes(real)
-    ? ok('spiega is this checkout', `${tilde(which)} → ${tilde(real)}`)
-    : bad('spiega is this checkout', `${tilde(which)} → ${tilde(real)}, which is NOT this checkout`,
+    ? ok(`spiega is ${THIS()}`, `${tilde(which)} → ${tilde(real)}`)
+    : bad(`spiega is ${THIS()}`, `${tilde(which)} → ${tilde(real)}, which is NOT ${THIS()}`,
         'spiega install'));
 
   const floor = nodeFloor();
@@ -212,8 +244,8 @@ function skills(rows) {
     if (st.isSymbolicLink()) {
       const to = fs.readlinkSync(dest);
       rows.push(to === SKILL_SRC
-        ? ok(`${name} skill`, 'linked — tracks the checkout')
-        : bad(`${name} skill`, `linked to ${tilde(to)}, not this checkout`, `spiega install ${name}`));
+        ? ok(`${name} skill`, isCheckout() ? 'linked — tracks the checkout' : 'linked')
+        : bad(`${name} skill`, `linked to ${tilde(to)}, not ${THIS()}`, `spiega install ${name}`));
       continue;
     }
     // a copy: current only until the source changes, so compare it
@@ -283,7 +315,7 @@ function registrations(rows) {
     const entry = pick(readJSON(file));
     if (!entry) { rows.push(warn(`${name} MCP`, 'not registered', `spiega install ${name}`)); continue; }
     rows.push(entry === MCP_ENTRY
-      ? ok(`${name} MCP`, 'points at this checkout')
+      ? ok(`${name} MCP`, `points at ${THIS()}`)
       : bad(`${name} MCP`, `points at ${tilde(entry)}`, `spiega install ${name}`));
   }
   // Codex keeps its servers in TOML
@@ -292,8 +324,8 @@ function registrations(rows) {
     const raw = fs.readFileSync(toml, 'utf8');
     const has = /^\s*\[mcp_servers\.spiega\]/m.test(raw);
     rows.push(has && raw.includes(MCP_ENTRY)
-      ? ok('codex MCP', 'points at this checkout')
-      : warn('codex MCP', has ? 'registered, but not at this checkout' : 'not registered', 'spiega install codex'));
+      ? ok('codex MCP', `points at ${THIS()}`)
+      : warn('codex MCP', has ? `registered, but not at ${THIS()}` : 'not registered', 'spiega install codex'));
   }
 }
 

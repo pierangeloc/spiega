@@ -656,6 +656,60 @@ test('colour and glyphs stay out of piped output', async () => {
   assert.ok(short.endsWith('spiega'), 'the end is what names it');
 });
 
+/* `git -C <dir>` walks UP until it finds a repository. npm's global prefix
+   under nvm sits inside nvm's own clone, so doctor answered about nvm:
+   reporting its HEAD as "this checkout", its dirty file as uncommitted work,
+   and then measuring every skill and MCP entry against it. The install is the
+   ordinary one — most people get Node from nvm — so the output almost nobody
+   should see was the output almost everybody got. */
+test('doctor does not mistake an enclosing repo for its own checkout', async () => {
+  const cp = await import('node:child_process');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-enclosed-'));
+  try {
+    const git = (...a) => cp.execFileSync('git', ['-C', tmp, ...a],
+      { stdio: 'pipe', encoding: 'utf8' });
+    git('init', '-q');
+    fs.writeFileSync(path.join(tmp, 'f'), 'x');
+    git('add', '-A');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false',
+      'commit', '-qm', 'the enclosing repo, not spiega');
+    fs.writeFileSync(path.join(tmp, 'dirty'), 'uncommitted');
+
+    // the package, copied in with no .git of its own — an npm install
+    const pkg = path.join(tmp, 'lib', 'node_modules', 'spiega');
+    fs.mkdirSync(pkg, { recursive: true });
+    for (const d of ['src', 'bin', 'skills', 'integrations']) {
+      if (fs.existsSync(path.join(ROOT, d))) fs.cpSync(path.join(ROOT, d), path.join(pkg, d), { recursive: true });
+    }
+    fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(pkg, 'package.json'));
+
+    const home = path.join(tmp, 'home');
+    fs.mkdirSync(home, { recursive: true });
+    // doctor exits non-zero whenever it finds anything to report, which here
+    // it will — the point is what it says, not what it returns
+    let out;
+    try {
+      out = cp.execFileSync(process.execPath, [path.join(pkg, 'src', 'cli.js'), 'doctor'], {
+        encoding: 'utf8',
+        env: { HOME: home, PATH: '/usr/bin:/bin', SPIEGA_ASCII: '1', NO_COLOR: '1' },
+      });
+    } catch (e) {
+      out = String(e.stdout || '');
+      assert.ok(out, `doctor produced no output: ${e.stderr || e.message}`);
+    }
+
+    const line = out.split('\n').find(l => /\bcheckout\b/.test(l)) || '';
+    assert.match(line, /not a checkout/,
+      `doctor claimed a checkout it does not have: ${line.trim()}`);
+    assert.ok(!/the enclosing repo/.test(out),
+      'the enclosing repo\'s commit must not appear anywhere in the report');
+    assert.ok(!/uncommitted changes/.test(out),
+      'nor its dirty working tree');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 /* A node that fans out sends several edges through the same gutter. Each tag
    lifts itself clear of the same box, independently, and lands in the same
    place — and nothing downstream notices, because each pill draws over the
