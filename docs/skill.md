@@ -65,7 +65,7 @@ A skill is linked, not copied, so it tracks the checkout. An `AGENTS.md` block
 is text inside a file you wrote, so it sits between `<!-- SPIEGA_START -->` and
 `<!-- SPIEGA_END -->` and a reinstall replaces it in place. Tool descriptions
 are read from the running MCP server, which is why a stale server shows an
-agent stale guidance — see [`spiega doctor`](../README.md#updating-and-checking-that-it-took).
+agent stale guidance — see [`spiega doctor`](install.md#updating-and-checking-that-it-took).
 
 The block is generated from [`src/agents-block.js`](../src/agents-block.js),
 and the condensing is the point: it sits in a file the agent reads on *every*
