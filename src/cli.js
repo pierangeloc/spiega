@@ -140,24 +140,10 @@ async function readOps(arg) {
   if (Array.isArray(parsed)) return parsed;
   if (parsed.ops) return parsed.ops;
   // A whole spec, not an op list: turn it into the ops that would build it.
-  if (parsed.nodes || parsed.edges) return specToOps(parsed);
+  // Imported here rather than at the top of the file so the Node version check
+  // above still runs before anything in src/ is parsed.
+  if (parsed.nodes || parsed.edges) return (await import('./spec.js')).specToOps(parsed);
   return [parsed];
-}
-
-export function specToOps(spec) {
-  const ops = [];
-  if (spec.title) ops.push({ op: 'title', text: spec.title });
-  for (const n of spec.nodes || []) ops.push({ op: 'node', ...n });
-  for (const e of spec.edges || []) ops.push({ op: 'edge', ...e });
-  for (const b of spec.boundaries || []) ops.push({ op: 'boundary', ...b });
-  // A callout is an op like any other, and a spec is a list of ops by another
-  // name. Dropping them here meant `spiega draw spec.json` drew every box and
-  // then quietly omitted the sentence saying what the boxes were about, while
-  // `spiega render` on the same file kept it.
-  for (const c of spec.callouts || []) ops.push({ op: 'callout', ...c });
-  if (spec.flow?.length) ops.push({ op: 'flow', steps: spec.flow });
-  for (const t of spec.transcript || []) ops.push({ op: 'say', text: t.text ?? t });
-  return ops;
 }
 
 /* ---------- commands ---------- */
@@ -522,6 +508,7 @@ const main = async () => {
       const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
       const { emptyBoard, applyOps } = await import('./board/state.js');
       const { snapshotHTML } = await import('./board/snapshot.js');
+      const { specToOps } = await import('./spec.js');
       const board = emptyBoard();
       applyOps(board, specToOps(spec));
       const html = snapshotHTML(board, { active: flag('step') ? Number(flag('step')) - 1 : null });

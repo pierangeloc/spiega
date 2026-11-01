@@ -15,45 +15,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps } from '../src/board/state.js';
+import { specToOps, measure } from '../src/spec.js';
 import { renderSVG } from '../src/render/render.js';
 import { boundaryBox } from '../src/render/layout.js';
 import { PAPER } from '../src/render/theme.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-
-/* The spec shape, mapped to ops the way `spiega render` does it (see specToOps
-   in src/cli.js). Kept here rather than imported because importing that file
-   runs the CLI; the mapping is four lines and it is not worth a second module
-   for it. */
-function specToOps(spec) {
-  const ops = [];
-  if (spec.title) ops.push({ op: 'title', text: spec.title });
-  for (const n of spec.nodes || []) ops.push({ op: 'node', ...n });
-  for (const e of spec.edges || []) ops.push({ op: 'edge', ...e });
-  for (const b of spec.boundaries || []) ops.push({ op: 'boundary', ...b });
-  if (spec.flow?.length) ops.push({ op: 'flow', steps: spec.flow });
-  for (const t of spec.transcript || []) ops.push({ op: 'say', text: t.text ?? t });
-  return ops;
-}
-
-/* What the board is made of, counted the way an agent draws it: one op per box,
-   per line, per enclosure, per step. A spec file is a compact way to send the
-   same thing (a whole flow travels as one op), so both numbers are printed —
-   the per-element one is what the picture cost to say. */
-function measure(spec) {
-  const nodes = spec.nodes || [];
-  const parts = {
-    title: spec.title ? 1 : 0,
-    nodes: nodes.filter(n => n.kind !== 'note').length,
-    notes: nodes.filter(n => n.kind === 'note').length,
-    edges: (spec.edges || []).length,
-    boundaries: (spec.boundaries || []).length,
-    steps: (spec.flow || []).length,
-    said: (spec.transcript || []).length,
-  };
-  const ops = Object.values(parts).reduce((a, b) => a + b, 0);
-  return { parts, ops, asFile: specToOps(spec).length };
-}
 
 /* The board page paints its own paper; a file does not, and a transparent SVG
    dropped into a dark-mode README is ink on ink. Cropped to what was actually
