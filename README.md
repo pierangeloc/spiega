@@ -192,7 +192,9 @@ Side by side, at the size each is actually read:
 
 ![the model's answer as a column of text beside the same answer as a board](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/kalman-compare.svg)
 
-432 words against 23 ops. Six boxes, seven lines. The prediction and the fix converge on one place, the
+432 words against 31 ops, eight of which are the sentences themselves.
+
+Six boxes, seven lines. The prediction and the fix converge on one place, the
 gain hangs off the prediction because that is the only input the filter
 controls, and the dashed line running back underneath is the thing the algebra
 hides: the output of one step is the input to the next, which is why a textbook
@@ -201,6 +203,30 @@ derivation keeps saying "at time k" and a reader keeps losing track of which k.
 The formula is on the board rather than in the margin because here the equation
 *is* the explanation. One ratio decides everything the filter does, and
 everything else on the board is what feeds it or what it produces.
+
+**Walking it.** The board is not a picture of the answer, it is the answer
+being given. Each hop lights in turn, everything else recedes, and the line
+that explains *that* hop lights with it — which is what the numbers on the
+lines are for.
+
+![the Kalman board walked a step at a time: each hop lights in turn while the rest dim, and the matching line in the script lights with it](https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/examples/kalman-walk.gif)
+
+The script on the right is not a caption. A line tied to a step is a way into
+that step: click it and the board walks there, so you can read a sentence and
+go straight to the hop it describes instead of hunting for the number. Clicking
+the step already lit clears it, so one gesture goes both ways, and lines tied
+to no step — the opening remark here — are not clickable and do not pretend to
+be.
+
+Which is why the tags matter more than they look. `spiega say "..." --step 3`
+is what ties a sentence to a hop; an untagged script highlights nothing at all.
+Tags can be set afterwards, when it is clear what belonged where, without
+drawing anything again:
+
+```bash
+spiega script                      # the lines, numbered, and what each is tied to
+spiega tag --match "wheel slip" --step 7
+```
 
 This is the example where the prose keeps the most. The reason jitter and drift
 cancel is an argument about zero-mean versus bias, and that is reasoning, not

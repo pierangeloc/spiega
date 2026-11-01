@@ -682,6 +682,19 @@ test('drawing a spec keeps everything rendering it would show', async () => {
   assert.equal(ops.find(o => o.op === 'callout').text, 'the thing worth saying',
     'and it carries its text');
 
+  /* A transcript line's step is what ties the words to the hop they explain:
+     walk the flow and the matching lines light up, click one and the board
+     goes to its step. The mapping picked out `text` and dropped `step` and
+     `edge`, so a spec file could not describe a board whose script does the
+     one thing the script is for. */
+  const said = specToOps({
+    transcript: [{ text: 'about hop two', step: 2, edge: 'a>b' }, 'an opening remark'],
+  }).filter(o => o.op === 'say');
+  assert.equal(said[0].step, 2, 'a tagged line keeps its step');
+  assert.equal(said[0].edge, 'a>b', 'and the edge it is about');
+  assert.equal(said[1].text, 'an opening remark', 'a bare string is still a line');
+  assert.equal(said[1].step, undefined, 'and stays untagged');
+
   // any shipped example that uses callouts must survive being drawn
   for (const f of fs.readdirSync(path.join(ROOT, 'examples')).filter(f => f.endsWith('.json'))) {
     const shipped = JSON.parse(fs.readFileSync(path.join(ROOT, 'examples', f), 'utf8'));

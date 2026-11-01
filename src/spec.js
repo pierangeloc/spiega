@@ -25,7 +25,13 @@ export function specToOps(spec) {
   for (const b of spec.boundaries || []) ops.push({ op: 'boundary', ...b });
   for (const c of spec.callouts || []) ops.push({ op: 'callout', ...c });
   if (spec.flow?.length) ops.push({ op: 'flow', steps: spec.flow });
-  for (const t of spec.transcript || []) ops.push({ op: 'say', text: t.text ?? t });
+  /* Spread, like every other mapping above, rather than picking out `text`.
+     Picking lost `step` and `edge`, the two fields that tie a line to the hop
+     it explains — so a spec could describe a board whose script highlights
+     nothing, and no way existed to write one that did. A say op gains fields
+     over time; this one does not have to be edited again when it does. */
+  for (const t of spec.transcript || [])
+    ops.push({ op: 'say', ...(typeof t === 'string' ? { text: t } : t) });
   return ops;
 }
 

@@ -114,5 +114,38 @@
       "edge": "est>predict",
       "step": "It becomes the prior, and the cycle runs again"
     }
+  ],
+  "transcript": [
+    {
+      "text": "This is one cycle of a Kalman filter. It runs again for every fix that arrives."
+    },
+    {
+      "text": "Odometry carries the last estimate forward. Nothing has measured anything yet, so the filter is only less sure than it was.",
+      "step": 1
+    },
+    {
+      "text": "Now a fix lands, and the innovation is the disagreement: what the fix says, minus what the model expected.",
+      "step": 2
+    },
+    {
+      "text": "Here is the whole decision. The gain is the model's uncertainty over the total, so it asks which of the two is less sure right now.",
+      "step": 3
+    },
+    {
+      "text": "K near 1 and the estimate jumps to the fix. K near 0 and it barely moves. Nothing asks which sensor is better in general.",
+      "step": 4
+    },
+    {
+      "text": "The correction is K times the innovation, never the whole of it. That is why GPS jitter averages out instead of accumulating.",
+      "step": 5
+    },
+    {
+      "text": "And the estimate ends up more certain than either input, which is the part that looks like magic and is really just two numbers.",
+      "step": 6
+    },
+    {
+      "text": "Then it becomes the prior and the cycle runs again. Wheel slip breaks this: the odometry lies by more than Q admits, so the filter keeps believing a wrong prediction.",
+      "step": 7
+    }
   ]
 }
