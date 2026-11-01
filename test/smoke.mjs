@@ -830,6 +830,59 @@ test('the generated pictures match the specs they come from', async () => {
     `regenerating changed committed pictures — they had drifted:\n${dirty}`);
 });
 
+/* `spiega --version` answered "no such command", which is the one thing a
+   version flag must never do: it is what somebody types when they already
+   suspect the binary on their PATH is not the one they think it is.
+
+   Which copy answers matters more than the number. This tool is installed from
+   npm by the people who use it and run from a checkout by the person building
+   it, and the two are indistinguishable from the outside — which is exactly
+   the confusion the README's develop-vs-user section exists for. So both
+   branches are driven here, including the trap doctor fell into: an install
+   that happens to sit inside somebody else's repository (npm's prefix under
+   nvm) must not describe itself as a checkout of that repository. */
+test('--version says which copy it is, from a checkout and from an install', async () => {
+  const cp = await import('node:child_process');
+  const run = (cwd, args) => cp.execFileSync(process.execPath, args,
+    { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trimEnd().split('\n');
+
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+
+  for (const spelling of [['--version'], ['-v'], ['version']]) {
+    const out = run(ROOT, [path.join(ROOT, 'src', 'cli.js'), ...spelling]);
+    assert.equal(out[0], `spiega ${pkg.version}`,
+      `${spelling[0]} must put the bare version on the first line`);
+    assert.match(out[1], /a checkout at [0-9a-f]{7}/,
+      `${spelling[0]} run from the repo should say it is a checkout: ${out[1]}`);
+  }
+
+  // the same package copied out, with no .git of its own, inside a repo that
+  // is not it — the nvm shape
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-version-'));
+  try {
+    const git = (...a) => cp.execFileSync('git', ['-C', tmp, ...a], { stdio: 'pipe', encoding: 'utf8' });
+    git('init', '-q');
+    fs.writeFileSync(path.join(tmp, 'f'), 'x');
+    git('add', 'f');
+    git('-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false',
+      'commit', '-qm', 'the enclosing repo, not spiega');
+
+    const inst = path.join(tmp, 'lib', 'node_modules', 'spiega');
+    fs.mkdirSync(inst, { recursive: true });
+    fs.cpSync(path.join(ROOT, 'src'), path.join(inst, 'src'), { recursive: true });
+    fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(inst, 'package.json'));
+
+    const out = run(tmp, [path.join(inst, 'src', 'cli.js'), '--version']);
+    assert.equal(out[0], `spiega ${pkg.version}`);
+    // realpath, because /var is a symlink to /private/var on macOS and the
+    // path it prints is the resolved one
+    assert.equal(out[1], `${fs.realpathSync(inst)} — installed from npm`,
+      `an install inside somebody else's repo must not claim to be a checkout: ${out[1]}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 /* `git -C <dir>` walks UP until it finds a repository. npm's global prefix
    under nvm sits inside nvm's own clone, so doctor answered about nvm:
    reporting its HEAD as "this checkout", its dirty file as uncommitted work,

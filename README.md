@@ -408,6 +408,17 @@ spiega install          # re-point the skills and MCP entries at the new copy
 spiega doctor           # is what an agent reads the thing that is on disk?
 ```
 
+`spiega --version` is the quick version of that question. It prints the number,
+then which copy answered — the thing worth knowing once you have both an npm
+install and a clone on the same machine:
+
+```console
+$ spiega --version
+spiega 0.1.2
+/Users/you/.nvm/versions/node/v22.14.0/lib/node_modules/spiega — installed from npm
+node v22.14.0
+```
+
 From a clone:
 
 ```bash

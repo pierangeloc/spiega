@@ -152,6 +152,7 @@ const HELP = `spiega — a hand-drawn board an agent draws on while it explains
 
   serve [--port N] [--open]     start the board and keep it running (--solo: own process)
   open [--tab] [--size WxH]     open the board in its own browser window
+  version                       which copy this is, and where it came from
   doctor                        check that agents are reading the current version
   migrate                       move everything over from the old handwave name
   install [targets...]          wire it into your agents (--detect to see what it would do)
@@ -704,6 +705,38 @@ const main = async () => {
           `${names.length - own} of them${own ? `; ${own} on ${own === 1 ? 'its' : 'their'} own` : ''}.`)}`);
       }
       console.log('');
+      return;
+    }
+
+    /* `spiega --version` is the first thing anybody types to find out whether
+       the thing on their PATH is the one they think it is, and until now it
+       was "no such command". Which copy is answering matters here more than
+       the number does: this tool is installed from npm by its users and run
+       from a checkout by the person developing it, and the two look identical
+       from the outside. So the path and its provenance go on the second line.
+       The number is alone on the first, where `spiega --version | head -1`
+       and the eye both expect it. */
+    case 'version': case '--version': case '-v': {
+      const pkg = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8'));
+      console.log(`spiega ${pkg.version}`);
+
+      // The same check doctor uses, not a second guess at it: `git -C` walks
+      // up, so a plain `rev-parse` inside an npm prefix under nvm answers
+      // about nvm's own clone. That bug shipped once already.
+      const { isCheckout } = await import('./doctor.js');
+      const root = path.resolve(HERE, '..');
+      let where = 'installed from npm';
+      if (isCheckout()) {
+        const cp = await import('node:child_process');
+        let head = '';
+        try {
+          head = cp.execFileSync('git', ['-C', root, 'rev-parse', '--short', 'HEAD'],
+            { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        } catch { /* a checkout with no commits yet still is one */ }
+        where = head ? `a checkout at ${head}` : 'a checkout';
+      }
+      console.log(`${root} — ${where}`);
+      console.log(`node ${process.version}`);
       return;
     }
 
