@@ -2195,12 +2195,19 @@ await atest('install links the command once, and moves it rather than leaving a 
 
   /* An earlier install's link in a toolchain directory on the agent's PATH,
      and somebody else's spiega beside it. Only zsh can be given a PATH here:
-     a bare non-interactive bash reads no file at all. */
+     a bare non-interactive bash reads no file at all.
+
+     The PATH is written out in full rather than prepended to $PATH. agentPath
+     runs the shell under `env -i`, so $PATH there is not this developer's — it
+     is zsh's own default, which on macOS is /bin:/usr/bin:/usr/ucb:/usr/local/bin.
+     That last one is where the rule this commit replaces often put the link,
+     and ensureBin removes every link to this launcher it finds on PATH. A test
+     must not be able to reach outside the HOME it was given. */
   const zsh = ['/bin/zsh', '/usr/bin/zsh'].some(f => fs.existsSync(f));
   const old = path.join(home, 'sdk');
   const theirs = path.join(home, 'theirs');
   if (zsh) {
-    fs.writeFileSync(path.join(home, '.zshenv'), 'export PATH="$HOME/sdk:$HOME/theirs:$PATH"\n');
+    fs.writeFileSync(path.join(home, '.zshenv'), 'export PATH="$HOME/sdk:$HOME/theirs"\n');
     link(old, launcher);
     link(theirs, '/somewhere/else/spiega');
   }
