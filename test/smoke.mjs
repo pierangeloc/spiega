@@ -2175,6 +2175,76 @@ await atest('boards persist across a restart, and POST /op keeps its latency bud
    evaluates, and every board renders empty with nothing in the terminal to say
    why. That is exactly what happened once persistence put `node:fs` into
    state.js, which board.html imports. Hence this. */
+/* The link once landed in ~/Library/Android/sdk/platform-tools, because that
+   was the first writable directory on someone's PATH — a directory the SDK
+   manager replaces on update. A toolchain's directory must never be chosen,
+   and the one chosen must be the only one left. */
+await atest('install links the command once, and moves it rather than leaving a second', async () => {
+  const { binDir } = await import('../src/install.js');
+  const local = path.join(os.homedir(), '.local', 'bin');
+  const sdk = path.join(os.homedir(), 'Library', 'Android', 'sdk', 'platform-tools');
+  assert.notEqual(binDir(null, [sdk, '/usr/bin']), sdk, 'first and writable is not a reason');
+  assert.equal(binDir(null, [sdk, local]), local, '~/.local/bin wins when an agent can see it');
+  assert.equal(binDir('/opt/mine/bin', [sdk]), '/opt/mine/bin', '--bin-dir is taken as asked');
+
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-bin-'));
+  const launcher = path.join(ROOT, 'bin', 'spiega');
+  const link = (dir, to) => { fs.mkdirSync(dir, { recursive: true }); fs.symlinkSync(to, path.join(dir, 'spiega')); };
+
+  /* An earlier install's link in a toolchain directory on the agent's PATH,
+     and somebody else's spiega beside it. Only zsh can be given a PATH here:
+     a bare non-interactive bash reads no file at all.
+
+     The PATH is written out in full rather than prepended to $PATH. agentPath
+     runs the shell under `env -i`, so $PATH there is not this developer's — it
+     is zsh's own default, which on macOS is /bin:/usr/bin:/usr/ucb:/usr/local/bin.
+     That last one is where the rule this commit replaces often put the link,
+     and ensureBin removes every link to this launcher it finds on PATH. A test
+     must not be able to reach outside the HOME it was given. */
+  const zsh = ['/bin/zsh', '/usr/bin/zsh'].some(f => fs.existsSync(f));
+  const old = path.join(home, 'sdk');
+  const theirs = path.join(home, 'theirs');
+  if (zsh) {
+    fs.writeFileSync(path.join(home, '.zshenv'), 'export PATH="$HOME/sdk:$HOME/theirs"\n');
+    link(old, launcher);
+    link(theirs, '/somewhere/else/spiega');
+  }
+
+  const run = async dir => {
+    const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
+      `const { ensureBin } = await import(${JSON.stringify(path.join(ROOT, 'src/install.js'))});
+       console.log(JSON.stringify(ensureBin({ touchShell: false, requestedDir: ${JSON.stringify(dir)} })));`],
+      { env: isolatedEnv(home) });
+    return JSON.parse(stdout.trim());
+  };
+  const recorded = () => fs.readFileSync(path.join(home, '.spiega', 'link'), 'utf8').trim();
+
+  const first = path.join(home, 'first');
+  const a = await run(first);
+  assert.equal(fs.readlinkSync(path.join(first, 'spiega')), launcher);
+  assert.equal(recorded(), path.join(first, 'spiega'), 'where it went is recorded');
+  if (zsh) {
+    assert.ok(!fs.existsSync(path.join(old, 'spiega')), 'the earlier link on PATH is removed');
+    assert.deepEqual(a.removed, [path.join(old, 'spiega')]);
+    assert.equal(fs.readlinkSync(path.join(theirs, 'spiega')), '/somewhere/else/spiega',
+      'a spiega this install did not make is never touched');
+  }
+
+  const second = path.join(home, 'second');
+  const b = await run(second);
+  assert.ok(!fs.existsSync(path.join(first, 'spiega')), 'moving the link takes the old one with it');
+  assert.deepEqual(b.removed, [path.join(first, 'spiega')], 'found by the record, though not on PATH');
+  assert.equal(recorded(), path.join(second, 'spiega'));
+
+  const c = await run(second);
+  assert.equal(c.changed, false, 'a second install in the same place is not work');
+  assert.deepEqual(c.removed, []);
+
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
 await atest('install never edits a shell file without being told yes', async () => {
   /* The only write install makes outside a config file it owns. A stranger who
      just ran a command should not find their ~/.zshenv changed; and an agent,

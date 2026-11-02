@@ -57,8 +57,15 @@ spiega install              # do it
 writing a config for a harness you do not use is how you end up with a file you
 never asked for. `--list` shows every target and what it writes.
 
-It also links the command into a directory an agent's shell can see. That link
-is the one write it makes outside a config file of its own, and when
+It also links the command into a directory an agent's shell can see:
+`~/.local/bin`, or `/usr/local/bin` when only that one is on a non-interactive
+`PATH` and writable. Never another directory on your `PATH`, however writable —
+those belong to a toolchain (an SDK, cargo, Homebrew) that may replace them on
+update. `--bin-dir DIR` puts it somewhere else on purpose. Where it went is
+recorded in `~/.spiega/link`, and a re-install that picks a new place removes
+the old link instead of leaving two.
+
+That link is the one write it makes outside a config file of its own, and when
 `~/.local/bin` is not already on a non-interactive `PATH` it **asks** before
 adding a line to your `~/.zshenv`:
 

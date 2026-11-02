@@ -157,7 +157,8 @@ const HELP = `spiega — a hand-drawn board an agent draws on while it explains
   migrate                       move everything over from the old handwave name
   install [targets...]          wire it into your agents (--detect to see what it would do)
                                 asks before touching your shell startup files
-                                (--path / --no-path to answer in advance)
+                                (--path / --no-path to answer in advance;
+                                --bin-dir DIR to link the command somewhere else)
   mcp-config [--shape S]        print the MCP entry to paste into any other harness
   bench <prompt> --models a,b   draw the same explanation with several models
   draw <json|file|->            add to the board (one op, or a list, or a whole spec)
@@ -314,7 +315,9 @@ const main = async () => {
       /* Neither flag: ask. The prompt refuses itself when there is nobody
          to answer, so a scripted install never hangs and never writes. */
       const touchShell = flag('no-path') ? false : flag('path') ? true : 'ask';
-      const results = install(want, { touchShell });
+      const bin = flag('bin-dir');
+      if (bin === true) die('spiega install: --bin-dir needs a directory');
+      const results = install(want, { touchShell, binDir: bin });
       for (const r of results) {
         const mark = !r.ok ? c.accent(g.bad) : r.state === 'unchanged' ? c.dim(g.idle) : c.good(g.ok);
         const gets = r.gets ? pad(c.muted(r.gets), getsW + 10) : pad('', getsW + 10);
