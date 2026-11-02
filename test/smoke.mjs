@@ -16,6 +16,16 @@ import { lettering } from '../src/render/ink.js';
 import { upsertBlock, removeBlock, START, END, BLOCK } from '../src/agents-block.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/* A child that installs must see only the HOME it was given. Profile variables
+   point an install somewhere else entirely, and one inherited from the shell
+   running the suite would write into that person's real config. */
+const isolatedEnv = home => {
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  delete env.PI_CODING_AGENT_DIR;
+  delete env.XDG_CONFIG_HOME;
+  return env;
+};
 let n = 0;
 const test = (name, fn) => { fn(); n++; console.log('  ok  ' + name); };
 
@@ -2180,7 +2190,7 @@ await atest('install never edits a shell file without being told yes', async () 
   const run = async (args, home) => {
     const { stdout } = await promisify(execFile)(
       process.execPath, [path.join(ROOT, 'src/cli.js'), 'install', ...args],
-      { env: { ...process.env, HOME: home, USERPROFILE: home }, maxBuffer: 4 << 20 });
+      { env: isolatedEnv(home), maxBuffer: 4 << 20 });
     return stdout;
   };
   const home = () => fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-consent-'));
@@ -2219,6 +2229,66 @@ await atest('install never edits a shell file without being told yes', async () 
   }
 
   for (const h of homes) fs.rmSync(h, { recursive: true, force: true });
+});
+
+/* pi is told apart from the rest by two things a plain MCP entry gets wrong:
+   its tools are invisible to the model unless the server is `direct`, and it
+   reads one instruction file of several, so a block in the wrong one is
+   installed and never seen. */
+await atest('install pi writes a skill, a direct MCP server and the instruction file pi reads', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-pi-'));
+  const agentDir = path.join(home, 'pi-profile');
+  fs.mkdirSync(agentDir, { recursive: true });
+  // someone else's server and someone's own instructions, which must survive
+  fs.writeFileSync(path.join(agentDir, 'mcp.json'),
+    JSON.stringify({ mcpServers: { other: { command: 'other-mcp' } } }));
+  fs.writeFileSync(path.join(agentDir, 'AGENTS.override.md'), '# Mine\n\nMy own rule.\n');
+
+  const run = async () => {
+    const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
+      `const { TARGETS, detect } = await import(${JSON.stringify(path.join(ROOT, 'src/install.js'))});
+       const { doctor } = await import(${JSON.stringify(path.join(ROOT, 'src/doctor.js'))});
+       const r = TARGETS.pi.run();
+       console.log(JSON.stringify({ state: r[2], detected: detect().includes('pi'),
+         doctor: doctor().filter(x => x.what.startsWith('pi ')).map(x => [x.what, x.level]) }));`],
+      { env: { ...isolatedEnv(home), PI_CODING_AGENT_DIR: agentDir } });
+    return JSON.parse(stdout.trim());
+  };
+
+  const first = await run();
+  assert.equal(first.state, 'written');
+  assert.equal(first.detected, true, 'PI_CODING_AGENT_DIR is where pi lives, so it is where to look');
+  assert.ok(!fs.existsSync(path.join(home, '.pi')), 'a profile install must not touch the default directory');
+
+  assert.equal(fs.realpathSync(path.join(agentDir, 'skills', 'spiega')),
+    fs.realpathSync(path.join(ROOT, 'skills', 'spiega')), 'the skill is linked to this checkout');
+
+  const mcp = JSON.parse(fs.readFileSync(path.join(agentDir, 'mcp.json'), 'utf8')).mcpServers;
+  assert.equal(mcp.spiega.args[0], path.join(ROOT, 'src', 'mcp', 'server.js'));
+  assert.equal(mcp.spiega.exposure, 'direct', 'codemode exposure hides every tool from the model');
+  assert.equal(mcp.other.command, 'other-mcp', "someone else's server must survive");
+
+  const override = fs.readFileSync(path.join(agentDir, 'AGENTS.override.md'), 'utf8');
+  assert.ok(override.includes(START), 'the block goes in the file pi actually reads');
+  assert.ok(override.startsWith('# Mine'), 'and leaves their own text where it was');
+  assert.ok(!fs.existsSync(path.join(agentDir, 'AGENTS.md')), 'not into one the override hides');
+
+  for (const [what, level] of first.doctor) assert.equal(level, 'ok', `doctor: ${what} should be ok`);
+  assert.deepEqual(first.doctor.map(x => x[0]).sort(), ['pi AGENTS.md', 'pi MCP', 'pi skill']);
+
+  const again = await run();
+  assert.equal(again.state, 'unchanged', 'a second install must report no work');
+
+  // the default exposure is the failure doctor exists to catch here
+  const cfg = JSON.parse(fs.readFileSync(path.join(agentDir, 'mcp.json'), 'utf8'));
+  delete cfg.mcpServers.spiega.exposure;
+  fs.writeFileSync(path.join(agentDir, 'mcp.json'), JSON.stringify(cfg));
+  const hidden = await run();
+  assert.equal(hidden.state, 'written', 'install puts the exposure back');
+
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
 await atest('nothing the browser imports reaches for a node builtin', async () => {

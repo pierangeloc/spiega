@@ -199,8 +199,8 @@ a line about the whole board carries no step and never dims.
 
 kinds: client gateway service compute datastore cache queue external note
 
-install targets: claude codex gemini opencode copilot cursor windsurf zed
-                 vscode claude_desktop project
+install targets: claude codex gemini opencode pi copilot cursor windsurf zed
+                 vscode claude_desktop herdr project
   spiega install                 whatever is on this machine
   spiega install --detect        what that would be, without doing it
   spiega install --list          every target and what it writes
@@ -345,16 +345,18 @@ const main = async () => {
        entry so it can be pasted, rather than leaving the person to guess. */
     case 'mcp-config': {
       const entry = path.join(HERE, 'mcp', 'server.js');
+      const { piMcpEntry } = await import('./pi.js');
       const shape = String(flag('shape') || 'stdio');
       const shapes = {
         stdio: { mcpServers: { spiega: { type: 'stdio', command: 'node', args: [entry] } } },
         servers: { servers: { spiega: { type: 'stdio', command: 'node', args: [entry] } } },
         opencode: { mcp: { spiega: { type: 'local', command: ['node', entry], enabled: true } } },
         zed: { context_servers: { spiega: { source: 'custom', command: 'node', args: [entry] } } },
+        pi: { mcpServers: { spiega: piMcpEntry(entry) } },
         toml: null,
       };
       if (shape === 'toml') return void console.log(`[mcp_servers.spiega]\ncommand = "node"\nargs = ["${entry}"]`);
-      if (!shapes[shape]) die(`spiega mcp-config: unknown shape "${shape}" (stdio, servers, opencode, zed, toml)`);
+      if (!shapes[shape]) die(`spiega mcp-config: unknown shape "${shape}" (stdio, servers, opencode, zed, pi, toml)`);
       console.log(JSON.stringify(shapes[shape], null, 2));
       return;
     }

@@ -16,6 +16,7 @@ terminal can draw on it at the same time.
 | `codex` | the skill, an `~/.codex/AGENTS.md` block, an `mcp_servers` table |
 | `gemini` | the skill, a `GEMINI.md` block, `mcpServers` in `settings.json` |
 | `opencode` | `mcp.spiega` in `opencode.json`, and an `AGENTS.md` block |
+| `pi` | the skill, an `AGENTS.md` block, and `mcpServers` in `mcp.json` with `exposure: "direct"` — all under `$PI_CODING_AGENT_DIR`, else `~/.pi/agent` |
 | `copilot` | `mcpServers` in `~/.copilot/mcp-config.json` |
 | `cursor` | `mcpServers` in `~/.cursor/mcp.json`, and a rule |
 | `windsurf` | `mcpServers` in `~/.codeium/windsurf/mcp_config.json` |
@@ -59,6 +60,7 @@ spiega mcp-config                  # {"mcpServers": {...}}  — the common shape
 spiega mcp-config --shape servers  # VS Code
 spiega mcp-config --shape opencode # opencode
 spiega mcp-config --shape zed      # Zed
+spiega mcp-config --shape pi       # pi, with the tools declared to the model
 spiega mcp-config --shape toml     # Codex
 ```
 

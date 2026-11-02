@@ -14,6 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { upsertBlock } from './agents-block.js';
 import { upsertTable } from './toml.js';
+import { piDir, piInstructionsFile, piMcpEntry } from './pi.js';
 import { c, sym, pad, shortPath } from './term.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -435,6 +436,25 @@ export const TARGETS = {
       const block = agentsFile(path.join(CONFIG, 'opencode', 'AGENTS.md'));
       return [file, `${note}; AGENTS.md ${block[1]}`,
         combine([block, [null, null, wrote ? 'written' : 'unchanged']])];
+    },
+  },
+
+  /* pi reads skills, but a skill only loads when the model thinks to look,
+     which is the failure the AGENTS.md block was written against; so pi gets
+     all three, like Codex and Gemini. */
+  pi: {
+    what: 'pi — skill, MCP server and AGENTS.md',
+    app: 'pi',
+    gets: 'skill, MCP, AGENTS.md',
+    detect: () => fs.existsSync(piDir()),
+    run: () => {
+      const parts = [
+        linkSkill(path.join(piDir(), 'skills')),
+        mcpJSON(path.join(piDir(), 'mcp.json'), 'mcpServers', piMcpEntry(MCP_ENTRY)),
+        agentsFile(piInstructionsFile()),
+      ];
+      return [parts[0][0], `skill, MCP server, ${path.basename(piInstructionsFile())}; /reload or start a new pi session to pick it up`,
+        combine(parts)];
     },
   },
 

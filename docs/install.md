@@ -89,6 +89,7 @@ Install says so when you decline, and `spiega doctor` keeps saying so.
 | `codex` | the skill, an `AGENTS.md` block, an `mcp_servers` table |
 | `gemini` | the skill, a `GEMINI.md` block, an `mcpServers` entry |
 | `opencode` | `mcp.spiega` in `opencode.json`, and an `AGENTS.md` block |
+| `pi` | the skill, an `AGENTS.md` block, and `mcpServers` in `mcp.json` with `exposure: "direct"` — all under `$PI_CODING_AGENT_DIR`, else `~/.pi/agent` |
 | `copilot` `cursor` `windsurf` `zed` `vscode` `claude_desktop` | the MCP server, in each one's own config shape |
 | `herdr` | a plugin: reach this task's board from its pane |
 | `project` | an `AGENTS.md` block in the repo you are in — ask for it by name |

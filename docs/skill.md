@@ -18,8 +18,8 @@ them. `spiega install` writes whichever apply.
 
 | route | who reads it | what it carries |
 |---|---|---|
-| **skill file** | Claude Code, Codex, Gemini CLI | the whole thing — judgement, vocabulary, worked examples |
-| **`AGENTS.md` block** | opencode, Codex, Gemini CLI | a condensed version: when to draw, the two rules, where the detail is |
+| **skill file** | Claude Code, Codex, Gemini CLI, pi | the whole thing — judgement, vocabulary, worked examples |
+| **`AGENTS.md` block** | opencode, Codex, Gemini CLI, pi | a condensed version: when to draw, the two rules, where the detail is |
 | **MCP tool descriptions** | anything speaking MCP | per-call guidance, attached to the tool it is about |
 
 The three are not interchangeable, and the difference decides whether the
@@ -56,6 +56,9 @@ to install into it, and `doctor` has to be asked about it the same way:
 XDG_CONFIG_HOME=$HOME/.opencode-work/config spiega install opencode
 XDG_CONFIG_HOME=$HOME/.opencode-work/config spiega doctor
 ```
+
+pi's profiles move `PI_CODING_AGENT_DIR` instead, and the same applies:
+`PI_CODING_AGENT_DIR=~/.pi/work spiega install pi`.
 
 Skills are not XDG-scoped — `~/.claude/skills` is read by Claude Code and by
 opencode alike, so one link serves every profile. Which is exactly how a
