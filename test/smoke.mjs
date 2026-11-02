@@ -1757,18 +1757,18 @@ test('a process from a previous location is found, not reported as absent', asyn
   const { scanProcesses } = await import('../src/doctor.js');
   const root = '/Users/x/projects/spiega';
   const ps = [
-    `  101 node ${root}/src/mcp/server.js`,
-    `  102 node /Users/x/projects/drawing-explanation-tool/src/cli.js serve --quiet`,
-    `  103 node ${root}/src/cli.js serve --port 4778`,
-    `  104 node ${root}/src/cli.js draw {"op":"node"}`,     // not a server
-    `  105 node /somewhere/else/app.js serve`,              // not ours
-    `  106 ps -Ao pid=,command=`,                           // the listing itself
+    `  101 500 node ${root}/src/mcp/server.js`,
+    `  102 500 node /Users/x/projects/drawing-explanation-tool/src/cli.js serve --quiet`,
+    `  103 500 node ${root}/src/cli.js serve --port 4778`,
+    `  104 500 node ${root}/src/cli.js draw {"op":"node"}`,  // not a server
+    `  105 500 node /somewhere/else/app.js serve`,           // not ours
+    `  106 500 ps -Ao pid=,ppid=,command=`,                  // the listing itself
     '',
   ].join('\n');
 
   const { boards, mcp } = scanProcesses(ps, root);
-  assert.deepEqual(mcp, [{ pid: 101, here: true }]);
-  assert.deepEqual(boards, [{ pid: 102, here: false }, { pid: 103, here: true }],
+  assert.deepEqual(mcp, [{ pid: 101, ppid: 500, here: true }]);
+  assert.deepEqual(boards, [{ pid: 102, ppid: 500, here: false }, { pid: 103, ppid: 500, here: true }],
     'the one from the old location must still be found, and marked as elsewhere');
 
   // a one-off command is not a server, and neither is somebody else's process
@@ -1777,6 +1777,39 @@ test('a process from a previous location is found, not reported as absent', asyn
 
   assert.deepEqual(scanProcesses('', root), { boards: [], mcp: [] });
   assert.deepEqual(scanProcesses(undefined, root), { boards: [], mcp: [] });
+});
+
+/* The ppid is what the report acts on — an MCP server is ended by ending the
+   session that owns it — and Claude.app does not make that the parent. It runs
+   each server behind a `disclaimer` helper whose own command line names
+   server.js, so the helper is matched as a server too and is the parent of the
+   real one. Taken literally the report blames a wrapper for its own child and
+   never names the app. */
+test('a wrapped MCP server carries its wrapper as parent, and both are found', async () => {
+  const { scanProcesses } = await import('../src/doctor.js');
+  const root = '/Users/x/projects/spiega';
+  const node = `/Users/x/.nvm/versions/node/v26.10.0/bin/node ${root}/src/mcp/server.js`;
+  const ps = [
+    `  1212 569 /Applications/Claude.app/Contents/Helpers/disclaimer --pgroup -- ${node}`,
+    `  1213 1212 ${node}`,
+    `  9815 9753 ${node}`,
+    '',
+  ].join('\n');
+
+  const { mcp } = scanProcesses(ps, root);
+  assert.deepEqual(mcp, [
+    { pid: 1212, ppid: 569, here: true },
+    { pid: 1213, ppid: 1212, here: true },
+    { pid: 9815, ppid: 9753, here: true },
+  ], 'the wrapper names server.js too, so both it and the real server are ours');
+
+  // walking up out of our own pids is what turns 1213 into "the app", not "the
+  // wrapper" — the same walk the report does before grouping
+  const ours = new Set(mcp.map(p => p.pid));
+  const by = new Map(mcp.map(p => [p.pid, p]));
+  const session = p => { let up = p.ppid; while (up && ours.has(up)) up = by.get(up)?.ppid ?? null; return up; };
+  assert.deepEqual(mcp.map(session), [569, 569, 9753],
+    'both of the pair belong to the app, and the unwrapped one to its own session');
 });
 
 /* Documentation that names things in the code goes stale silently, which is

@@ -391,21 +391,44 @@ function startedAt(pid) {
    code" — a clean bill of health for the exact situation it exists to catch.
    Match on the file, then say where it came from.
 
+   The parent matters as much as the pid. An MCP server cannot be stopped from
+   a terminal — it belongs to the session that spawned it — so the only useful
+   thing to say about a stale one is which session to end, and that is the
+   ppid. The listing is asked for `pid=,ppid=,command=` for this reason.
+
    Exported, and taking the listing as an argument, so the cases that matter
    can be tested without starting anything. */
 export function scanProcesses(psOutput, root) {
   const out = { boards: [], mcp: [] };
   for (const line of String(psOutput || '').split('\n')) {
     if (line.includes('ps -Ao')) continue;
-    const pid = Number(line.trim().split(/\s+/)[0]);
+    const [pid, ppid] = line.trim().split(/\s+/, 2).map(Number);
     if (!pid) continue;
     const isMcp = /\/src\/mcp\/server\.js(?:\s|$)/.test(line);
     // `cli.js serve`, and not some other subcommand that mentions the word
     const isBoard = /\/src\/cli\.js\s/.test(line) && /\bserve\b/.test(line);
     if (!isMcp && !isBoard) continue;
-    (isMcp ? out.mcp : out.boards).push({ pid, here: line.includes(`${root}/`) });
+    (isMcp ? out.mcp : out.boards).push({
+      pid, ppid: Number.isFinite(ppid) ? ppid : null, here: line.includes(`${root}/`),
+    });
   }
   return out;
+}
+
+/* The command behind a ppid, short enough to put on one line: `opencode` from
+   `/opt/homebrew/Cellar/opencode-v2/2.2.2/bin/opencode serve --service`, and
+   `Claude` from the .app bundle. `comm=` gives the executable path with no
+   arguments, which is what makes it short; the basename of that is what a
+   person recognises in a Dock or a window title.
+
+   A parent that has exited answers nothing. That is worth printing as the
+   pid alone rather than hiding the row: an orphaned server whose session is
+   already gone is the one case where there is nothing left to close. */
+function ownerName(ppid) {
+  if (!ppid) return null;
+  const cmd = sh('ps', ['-o', 'comm=', '-p', String(ppid)]);
+  if (!cmd) return null;
+  return path.basename(cmd.trim().split(' ')[0]) || null;
 }
 
 /* What to do about a board process running old code.
@@ -420,7 +443,7 @@ export const staleBoardFix = shared => shared
   : 'spiega stop --board <name>, then draw again \u2014 note the drawing is lost (no persistence yet)';
 
 function processes(rows, headTime) {
-  const ps = sh('ps', ['-Ao', 'pid=,command=']) || '';
+  const ps = sh('ps', ['-Ao', 'pid=,ppid=,command=']) || '';
   const { boards, mcp } = scanProcesses(ps, ROOT);
 
   /* Stale means either of two things, and both leave an agent talking to code
@@ -474,6 +497,50 @@ function processes(rows, headTime) {
      Nothing typed at a terminal reaches one. "Start a fresh agent session"
      was already the only fix there is, but it left that to be inferred from a
      count of processes the reader had just been told were running. */
+  /* Which sessions to end, since the fix line can only say "end them".
+
+     Two things make this less obvious than reading ppids off a listing.
+
+     A parent can be one of our own processes. Claude.app runs each server
+     behind a `disclaimer` helper — `disclaimer --pgroup -- node .../server.js`
+     — and the helper's command line names server.js too, so it is matched as a
+     server itself and is the parent of the real one. Reported literally that
+     is a wrapper owning its own child, twice, and the session that owns both
+     goes unnamed. So the walk goes up until it leaves our own pids.
+
+     And they are grouped, because "opencode x4" is the fact that changes what
+     you do: that daemon accumulates a server per session and holds them until
+     it restarts, so ending a session clears the others and not those.
+
+     Only the stale ones — a current server has nothing for the reader to do. */
+  const mcpPids = new Set(mcp.map(p => p.pid));
+  const byPid = new Map(mcp.map(p => [p.pid, p]));
+
+  const session = p => {
+    let up = p.ppid, hops = 0;
+    while (up && mcpPids.has(up) && hops++ < 8) up = byPid.get(up)?.ppid ?? null;
+    return up;
+  };
+
+  const owners = list => {
+    const by = new Map();
+    for (const p of list) {
+      const key = session(p) ?? 0;
+      if (!by.has(key)) by.set(key, { ppid: key || null, n: 0 });
+      by.get(key).n++;
+    }
+    const all = [...by.values()].sort((a, b) => b.n - a.n || (a.ppid ?? 0) - (b.ppid ?? 0));
+    /* Four is what fits on a line next to the label. The rest are counted
+       rather than dropped: the number is the reason to go and look. */
+    const shown = all.slice(0, 4).map(({ ppid, n }) => {
+      const name = ownerName(ppid);
+      const who = name ? `${name} ${ppid}` : (ppid ? `pid ${ppid}, gone` : 'unknown');
+      return n > 1 ? `${who} \u00d7${n}` : who;
+    });
+    const rest = all.length - shown.length;
+    return shown.join(' \u00b7 ') + (rest ? ` \u00b7 +${rest} more` : '');
+  };
+
   const oldMcp = stale(mcp);
   rows.push(oldMcp.length
     ? bad('agent MCP servers', `${mcp.length} running, ${why(oldMcp)}`,
@@ -481,6 +548,7 @@ function processes(rows, headTime) {
     : ok('agent MCP servers', mcp.length
       ? `${mcp.length} running, all current \u2014 one per agent session`
       : 'none running'));
+  if (oldMcp.length) rows.push(warn('\u21b3 end these', owners(oldMcp)));
 }
 
 /* ---------- the report ---------- */

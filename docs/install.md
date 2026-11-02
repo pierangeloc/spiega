@@ -179,10 +179,16 @@ never built. `spiega doctor` finds it:
   ✓ claude skill         linked — tracks the checkout
   ✓ opencode AGENTS.md   block is current
   ✗ agent MCP servers    16 running, 16 started before the current commit
+  ! ↳ end these          opencode 23477 ×8 · Claude 569 ×4 · claude 9753 · claude 58136
 
   To fix
     → start a fresh agent session — these belong to the agent, not to spiega; stop cannot reach them
 ```
+
+The second line is the actionable half, because "start a fresh agent session"
+is not always enough. A long-lived `opencode serve --service` accumulates one
+server per session and holds them until *it* restarts, so a new session clears
+every other row and leaves that one exactly where it was.
 
 Note what those processes are, because the count invites the wrong move.
 `spiega stop` works on the board registry, and an MCP server is not in it: it
