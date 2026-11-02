@@ -26,6 +26,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { START, END, BLOCK } from './agents-block.js';
 import { c, sym, pad, heading } from './term.js';
+import { piDir, piInstructionsFile, piMcpEntry } from './pi.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -231,6 +232,7 @@ const SKILL_DIRS = {
   claude: path.join(HOME, '.claude', 'skills', 'spiega'),
   codex: path.join(HOME, '.codex', 'skills', 'spiega'),
   gemini: path.join(HOME, '.gemini', 'skills', 'spiega'),
+  pi: path.join(piDir(), 'skills', 'spiega'),
 };
 
 function skills(rows) {
@@ -264,6 +266,7 @@ const AGENT_FILES = {
   opencode: path.join(CONFIG, 'opencode', 'AGENTS.md'),
   codex: path.join(HOME, '.codex', 'AGENTS.md'),
   gemini: path.join(HOME, '.gemini', 'GEMINI.md'),
+  pi: piInstructionsFile(),
 };
 
 function blocks(rows) {
@@ -317,6 +320,23 @@ function registrations(rows) {
     rows.push(entry === MCP_ENTRY
       ? ok(`${name} MCP`, `points at ${THIS()}`)
       : bad(`${name} MCP`, `points at ${tilde(entry)}`, `spiega install ${name}`));
+  }
+  /* pi registers a server whose tools the model never sees unless it is
+     `direct`, so a right path with the wrong exposure is still no board.
+
+     Gated on pi being here rather than on mcp.json, because a pi with no
+     mcp.json at all is just a pi nobody has installed into — the one state
+     worth a row. Gating on the file is how `install --detect` comes to offer
+     a target doctor never mentions. */
+  const piMcp = path.join(piDir(), 'mcp.json');
+  if (fs.existsSync(piDir())) {
+    const entry = fs.existsSync(piMcp) ? readJSON(piMcp)?.mcpServers?.spiega : null;
+    const want = piMcpEntry(MCP_ENTRY);
+    if (!entry) rows.push(warn('pi MCP', 'not registered', 'spiega install pi'));
+    else if (entry.args?.[0] !== MCP_ENTRY) rows.push(bad('pi MCP', `points at ${tilde(entry.args?.[0] || '?')}`, 'spiega install pi'));
+    else if (entry.exposure !== want.exposure) {
+      rows.push(bad('pi MCP', `exposure is ${entry.exposure || 'codemode'}, so the model never sees the tools`, 'spiega install pi'));
+    } else rows.push(ok('pi MCP', `points at ${THIS()}`));
   }
   // Codex keeps its servers in TOML
   const toml = path.join(HOME, '.codex', 'config.toml');
