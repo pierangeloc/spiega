@@ -2257,6 +2257,18 @@ await atest('install pi writes a skill, a direct MCP server and the instruction 
     return JSON.parse(stdout.trim());
   };
 
+  /* Before anything is installed: a pi that is there and has no spiega is the
+     state doctor has to have an opinion about, or `install --detect` offers a
+     target doctor is silent on. */
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-pi-bare-'));
+  const { stdout: bareOut } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e',
+    `const { doctor } = await import(${JSON.stringify(path.join(ROOT, 'src/doctor.js'))});
+     console.log(JSON.stringify(doctor().filter(x => x.what.startsWith('pi ')).map(x => [x.what, x.level])));`],
+    { env: { ...isolatedEnv(home), PI_CODING_AGENT_DIR: bare } });
+  assert.deepEqual(JSON.parse(bareOut.trim()).filter(([what]) => what === 'pi MCP'),
+    [['pi MCP', 'warn']], 'pi with no mcp.json at all is not a reason to say nothing');
+  fs.rmSync(bare, { recursive: true, force: true });
+
   const first = await run();
   assert.equal(first.state, 'written');
   assert.equal(first.detected, true, 'PI_CODING_AGENT_DIR is where pi lives, so it is where to look');

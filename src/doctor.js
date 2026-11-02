@@ -322,10 +322,15 @@ function registrations(rows) {
       : bad(`${name} MCP`, `points at ${tilde(entry)}`, `spiega install ${name}`));
   }
   /* pi registers a server whose tools the model never sees unless it is
-     `direct`, so a right path with the wrong exposure is still no board. */
+     `direct`, so a right path with the wrong exposure is still no board.
+
+     Gated on pi being here rather than on mcp.json, because a pi with no
+     mcp.json at all is just a pi nobody has installed into — the one state
+     worth a row. Gating on the file is how `install --detect` comes to offer
+     a target doctor never mentions. */
   const piMcp = path.join(piDir(), 'mcp.json');
-  if (fs.existsSync(piMcp)) {
-    const entry = readJSON(piMcp)?.mcpServers?.spiega;
+  if (fs.existsSync(piDir())) {
+    const entry = fs.existsSync(piMcp) ? readJSON(piMcp)?.mcpServers?.spiega : null;
     const want = piMcpEntry(MCP_ENTRY);
     if (!entry) rows.push(warn('pi MCP', 'not registered', 'spiega install pi'));
     else if (entry.args?.[0] !== MCP_ENTRY) rows.push(bad('pi MCP', `points at ${tilde(entry.args?.[0] || '?')}`, 'spiega install pi'));
