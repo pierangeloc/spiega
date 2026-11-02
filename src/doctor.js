@@ -463,11 +463,24 @@ function processes(rows, headTime) {
       staleBoardFix(Boolean(server && pids.has(server.pid)))));
   }
 
+  /* Plural, and the fix names whose these are, because the row directly above
+     ends in a `spiega stop` command and this one cannot.
+
+     From a real session: doctor said "11 running, 2 from a previous location",
+     the obvious next move was `spiega stop --all`, and that answered "nothing
+     to stop" \u2014 correct, and useless. `stop` works on the board registry, and
+     an MCP server is not in it: it is a child of the agent harness, talking
+     stdio to the session that spawned it, holding no port and no board.
+     Nothing typed at a terminal reaches one. "Start a fresh agent session"
+     was already the only fix there is, but it left that to be inferred from a
+     count of processes the reader had just been told were running. */
   const oldMcp = stale(mcp);
   rows.push(oldMcp.length
-    ? bad('agent MCP server', `${mcp.length} running, ${why(oldMcp)}`,
-        'start a fresh agent session \u2014 a running one keeps the server it launched')
-    : ok('agent MCP server', mcp.length ? `${mcp.length} running, all current` : 'none running'));
+    ? bad('agent MCP servers', `${mcp.length} running, ${why(oldMcp)}`,
+        'start a fresh agent session \u2014 these belong to the agent, not to spiega; stop cannot reach them')
+    : ok('agent MCP servers', mcp.length
+      ? `${mcp.length} running, all current \u2014 one per agent session`
+      : 'none running'));
 }
 
 /* ---------- the report ---------- */
