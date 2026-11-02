@@ -11,7 +11,7 @@ MCP tool. Ops are applied in order and the board is their accumulation.
 | op | what it does | fields |
 |---|---|---|
 | `node` | a box on the board | `id` `label` `kind` `sub` and the layout hints below |
-| `note` | your own handwriting, in the left margin | `label` (`\n` for line breaks) |
+| `note` | your own handwriting, in the left margin | `label` (`\n` for line breaks; up to 12 lines) |
 | `edge` | a labelled line between two boxes | `from` `to` `label` `async` |
 | `boundary` | a dashed enclosure around several boxes | `label` `members[]` |
 | `callout` | a label joined to a point by a leader line | `at` `label` `side` |
@@ -35,6 +35,13 @@ capitals would destroy: `InvoiceBuilderNCC`, `invoice_builder`,
 while `Local input data` becomes `LOCAL INPUT DATA`. A label of both keeps
 both: `writes to InvoiceBuilderNCC` → `WRITES TO InvoiceBuilderNCC`. The same
 goes for edge labels and boundary labels.
+
+**How long a note may be.** A note's label wraps at 24 characters and runs to
+**12 lines** — some three hundred characters, which is more than anybody writes
+on a scrap of paper, so an honest caveat never meets the limit. Past it the
+note is cut at a line boundary and a line holding nothing but `…` is drawn
+beneath what was kept, so the board shows that there was more. Hitting that is
+a sign the text wanted to be several notes, or a `callout`, or the script.
 
 ## Node kinds
 

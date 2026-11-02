@@ -203,9 +203,32 @@ export function arrowHead(tip, dirRad, { size = 11, w = 1.8, color = INK, seed =
     stroke(roughLine(wing(-spread), tip, { ...o, seed: seed + 1 }), { w, color });
 }
 
+/* How many lines a note may run to before it is cut.
+
+   The measure a note wraps at is about reading; this number is about the one
+   mistake it cannot recover from, a label that was meant for somewhere else
+   and arrives as an essay. A note lives in the margin, where vertical space is
+   the cheap direction — nothing is laid out beside it — so the cap is set high
+   enough that an honest caveat never meets it. Twelve lines at the note's 24
+   characters is some three hundred characters, longer than anything anybody
+   writes on a scrap of paper, and still only about as tall as two boxes.
+
+   It is a different number from the ones the constrained callers pass, and
+   deliberately so: the text inside a blob or on a callout has a drawing around
+   it that it must not outgrow, and three or four lines is the whole of the
+   room there. Only the note has somewhere to grow into. */
+export const NOTE_LINES = 12;
+
 /* Greedy word wrap. A note is somebody's handwriting in the margin, so it wraps
    at a readable measure rather than stretching to fit whatever was typed; an
-   unwrapped sentence drawn centred will happily run clean across the board. */
+   unwrapped sentence drawn centred will happily run clean across the board.
+
+   What goes over `maxLines` is cut at a line boundary and replaced by an
+   ellipsis standing on a line of its own. Cutting mid-line used to put the
+   ellipsis at the end of a line that was itself complete, so the drawing read
+   as a sentence trailing off rather than as a note with its end missing, and
+   there was nowhere on the board to point at and say "the rest was here". A
+   line that is nothing but `…` is unmistakably not writing. */
 export function wrapText(s, max = 24, maxLines = 5) {
   const out = [];
   for (const para of String(s ?? '').split('\n')) {
@@ -219,9 +242,9 @@ export function wrapText(s, max = 24, maxLines = 5) {
   }
   const lines = out.filter((l, i) => l || i === 0);
   if (lines.length <= maxLines) return lines;
-  const kept = lines.slice(0, maxLines);
-  kept[maxLines - 1] = kept[maxLines - 1].slice(0, max - 1) + '\u2026';
-  return kept;
+  /* The ellipsis costs a line rather than sharing one, so the result is still
+     never taller than `maxLines` and no caller's box has to grow for it. */
+  return [...lines.slice(0, maxLines - 1), '\u2026'];
 }
 
 export { esc, f as round2 };

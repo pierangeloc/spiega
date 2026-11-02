@@ -12,7 +12,7 @@ import { KINDS } from '../src/render/glyphs.js';
 import { scriptSteps, linesFor, lineStates, clickStep, tagReport } from '../src/board/script.js';
 import { frame, unionBox, litKeys } from '../src/board/camera.js';
 import { registeredAs } from '../src/doctor.js';
-import { lettering } from '../src/render/ink.js';
+import { lettering, wrapText, NOTE_LINES } from '../src/render/ink.js';
 import { upsertBlock, removeBlock, START, END, BLOCK } from '../src/agents-block.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -2155,6 +2155,45 @@ test('capitals, except where the spelling is the information', () => {
   // whitespace is preserved exactly: the label is still one string to measure
   assert.equal(lettering('a  b'), 'A  B');
   assert.equal(lettering(''), '');
+});
+
+test('a note keeps every line it was given, up to a cap it is hard to reach', () => {
+  const six = 'line one\nline two\nline three\nline four\nline five\nline six';
+  assert.deepEqual(wrapText(six, 24, NOTE_LINES),
+    ['line one', 'line two', 'line three', 'line four', 'line five', 'line six'],
+    'six lines used to come back as five with the fifth ending in an ellipsis');
+
+  // right at the cap nothing is dropped and nothing is added
+  const atCap = Array.from({ length: NOTE_LINES }, (_, i) => 'l' + i).join('\n');
+  const kept = wrapText(atCap, 24, NOTE_LINES);
+  assert.equal(kept.length, NOTE_LINES);
+  assert.equal(kept.at(-1), 'l' + (NOTE_LINES - 1));
+  assert.equal(kept.includes('…'), false);
+});
+
+/* What the drawing has to show is not that text was cut — it is where. An
+   ellipsis sharing the last kept line says that line trailed off, which is a
+   lie about a line that arrived whole. */
+test('past the cap the cut is at a line boundary and the ellipsis stands alone', () => {
+  const over = Array.from({ length: NOTE_LINES + 3 }, (_, i) => 'l' + i).join('\n');
+  const kept = wrapText(over, 24, NOTE_LINES);
+  assert.equal(kept.length, NOTE_LINES, 'the ellipsis costs a line rather than growing the note');
+  assert.equal(kept.at(-1), '…');
+  assert.deepEqual(kept.slice(0, -1),
+    Array.from({ length: NOTE_LINES - 1 }, (_, i) => 'l' + i),
+    'every line before the ellipsis is whole');
+});
+
+/* The callers that wrap text inside a drawing — a blob's mass, a callout's
+   leader — have no room to grow, so the ellipsis must not cost them height. */
+test('a caller with its own line budget is never handed more lines than it asked for', () => {
+  const long = 'one two three four five six seven eight nine ten eleven twelve '
+    + 'thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty';
+  for (const limit of [2, 3, 4]) {
+    const lines = wrapText(long, 22, limit);
+    assert.equal(lines.length, limit);
+    assert.equal(lines.at(-1), '…');
+  }
 });
 
 /* Boards on disk, and the p99 budget on POST /op, live in their own file and
