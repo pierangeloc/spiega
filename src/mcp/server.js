@@ -178,6 +178,33 @@ const TOOLS = [
   },
 ];
 
+/* An argument that is documented as "one of these, or an array of them".
+
+   Clients do not agree on how to put a non-scalar on the wire: some send the
+   array the schema asks for, others serialize it and send a JSON string. The
+   string form used to be wrapped whole into a one-element array, so the board
+   was handed a single "op" that was a string — `op.op` undefined — and said
+   `unknown op "undefined"`, which reads as if the vocabulary were wrong rather
+   than the encoding. That made the array form fail in the one place it is
+   documented, and the error pointed nowhere near the cause.
+
+   A string that is not JSON gets named here for the same reason: by the time
+   it reaches applyOps there is nothing left to say about it. */
+const listArg = (value, what) => {
+  if (typeof value === 'string') {
+    let parsed;
+    try {
+      parsed = JSON.parse(value);
+    } catch (e) {
+      throw new Error(
+        `${what} arrived as a string, and it is not valid JSON: ${e.message}. ` +
+        `Pass ${what} as an object or an array of objects, or as a JSON string of one.`);
+    }
+    return [].concat(parsed);
+  }
+  return [].concat(value);
+};
+
 async function call(name, args = {}) {
   switch (name) {
     case 'board_say': {
@@ -187,16 +214,14 @@ async function call(name, args = {}) {
       return send([op]);
     }
 
-    case 'board_draw': {
-      const ops = Array.isArray(args.ops) ? args.ops : [args.ops];
-      return send(ops);
-    }
+    case 'board_draw':
+      return send(listArg(args.ops, 'ops'));
 
     case 'board_step':
       return send([{ op: 'focus', step: args.step == null ? null : Number(args.step) - 1 }]);
 
     case 'board_tag': {
-      const tags = Array.isArray(args.tags) ? args.tags : [args.tags];
+      const tags = listArg(args.tags, 'tags');
       return send(tags.map(t => ({ op: 'tag', ...t })));
     }
 
