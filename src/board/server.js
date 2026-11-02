@@ -68,6 +68,51 @@ const readBody = req => new Promise((resolve, reject) => {
 
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+/* ---------- who is allowed to talk to this server ----------
+
+   The server binds 127.0.0.1, and it is tempting to read that as "only me".
+   It is not. Loopback is not a security boundary in a browser: every page the
+   person has open can reach this port, and until now every one of them could
+   read any board and write to it, because the server answered with
+   `access-control-allow-origin: *`.
+
+   That was already worse than it looked — a board carries internal service
+   names, file paths and the script of the explanation, and `/state` handed all
+   of it to any origin that asked. It becomes much worse the moment anything
+   here writes outward (#47 posts to a PR through `gh`, #44 lets the page
+   author ops), so the boundary is drawn now, before that lands.
+
+   Two headers decide it, and neither is about the *body* of the request:
+
+   Origin — a browser sends it on every cross-origin fetch and on cross-origin
+   form posts. A request carrying a foreign origin is a page that is not this
+   board, whether it meant to read one or draw on one. A request with no Origin
+   at all is not a browser: the CLI, the MCP server, the test suite, curl.
+
+   Host — a name the attacker controls can be made to resolve to 127.0.0.1
+   (DNS rebinding), and the browser then treats the page as same-origin, so the
+   Origin check above agrees with it. The Host header is the one place that lie
+   is visible, because the browser sends the name it was asked for. */
+const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;
+
+const hostIsLoopback = req => LOOPBACK_HOST.test(req.headers.host || '');
+
+/* Same origin means the same host *and port*: another server on 127.0.0.1 is
+   a different origin and has no more business here than a page on the web. */
+const originIsOurs = req => {
+  const o = req.headers.origin;
+  if (!o) return true;
+  try { return new URL(o).host === req.headers.host; } catch { return false; }
+};
+
+/* A cross-origin POST carrying `text/plain` is a "simple request": the browser
+   sends it with no preflight to ask permission for. The Origin check above
+   already refuses it, so this is the second lock rather than the first — but
+   it is the one that does not depend on a browser being honest about who it
+   is. Only the two routes that parse a body are held to it; `/close` takes
+   none and has never sent a content-type. */
+const wantsJSON = req => /^application\/json\b/i.test(req.headers['content-type'] || '');
+
 export function createServer({ board = null, name = DEFAULT_BOARD, persist = false, debounce = 100 } = {}) {
   /* name -> { name, board, clients, log }. Nothing else in the process is per
      board: the renderer, the port and the HTTP server are shared. Tests and
@@ -140,11 +185,18 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     const url = new URL(req.url, 'http://x');
     const p = url.pathname;
 
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'content-type', 'access-control-allow-methods': 'GET,POST' });
-      return res.end();
+    /* No CORS headers anywhere, deliberately: nothing outside this origin has
+       a reason to read a board, so a cross-origin preflight should simply find
+       no permission rather than be told which methods exist. */
+    if (!hostIsLoopback(req)) {
+      res.writeHead(403, { 'content-type': 'text/plain' });
+      return res.end('spiega serves 127.0.0.1 only; this request arrived for another host\n');
     }
-    res.setHeader('access-control-allow-origin', '*');
+    if (!originIsOurs(req)) {
+      res.writeHead(403, { 'content-type': 'text/plain' });
+      return res.end('spiega refuses cross-origin requests\n');
+    }
+    if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
 
     // the renderer, served as plain modules for the browser — one copy, every board
     /* The icon, for the browser tab. It lives in docs/ with the rest of the
@@ -159,6 +211,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
        whatever else might be holding the port. */
     if (p === '/boards') {
       if (req.method === 'POST') {
+        if (!wantsJSON(req)) return json(res, 415, { ok: false, error: 'expected content-type: application/json' });
         let want;
         try { want = JSON.parse(await readBody(req)); }
         catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + e.message }); }
@@ -234,6 +287,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     }
 
     if (rest === '/op' && req.method === 'POST') {
+      if (!wantsJSON(req)) return json(res, 415, { ok: false, error: 'expected content-type: application/json' });
       let ops;
       try { ops = JSON.parse(await readBody(req)); }
       catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + e.message }); }
