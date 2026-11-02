@@ -53,7 +53,7 @@ const COL_GAP = 132;
 const ROW_GAP = 54;
 const PAD = 64;
 
-import { wrapText } from './ink.js';
+import { wrapText, NOTE_LINES } from './ink.js';
 import { measureMath } from './math.js';
 
 /** @type {Record<string, (n: LayoutNode, tw: number) => Size>} */
@@ -74,7 +74,7 @@ const SIZES = {
     return { w: Math.max(120, m.w + 44), h: Math.max(62, m.h + 42) };
   },
   note: n => {
-    const lines = n.lines || wrapText(n.label, 24);
+    const lines = n.lines || wrapText(n.label, 24, NOTE_LINES);
     const widest = Math.max(1, ...lines.map(l => l.length));
     return { w: Math.max(132, widest * 7.9 + 30), h: 30 + 15 * lines.length };
   },
