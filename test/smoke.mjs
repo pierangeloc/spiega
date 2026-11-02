@@ -1384,6 +1384,138 @@ await atest('the say and tag commands reach the board, and a bad tag fails loudl
   }
 });
 
+/* A flag the CLI did not recognise used to be read by nobody and reported by
+   nobody, so every typo was silent. These drive the real argv, because the
+   whole bug lived in the one place a unit test cannot reach: what is left in
+   argv after each command has taken the flags it knows. */
+await atest('a command still takes every flag it advertises, long, short or with an =', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = promisify(execFile);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-flags-'));
+  const cli = (...args) => run(process.execPath, [path.join(ROOT, 'src/cli.js'), ...args],
+    { env: isolatedEnv(home) });
+
+  const spec = path.join(home, 'spec.json');
+  fs.writeFileSync(spec, JSON.stringify({
+    nodes: [{ id: 'a', kind: 'service', label: 'A' }, { id: 'b', kind: 'datastore', label: 'B' }],
+    edges: [{ from: 'a', to: 'b' }],
+  }));
+
+  try {
+    // a flag with a value, a bare switch, the short spelling, and `--out=x`,
+    // which positional() always knew to step over and flag() could not read
+    const { stdout: toml } = await cli('mcp-config', '--shape', 'toml');
+    assert.match(toml, /^\[mcp_servers\.spiega\]/, '--shape is read, not ignored');
+    await cli('install', '--list');
+    for (const out of [['-o', path.join(home, 'short.html')],
+                       [`--out=${path.join(home, 'equals.html')}`],
+                       ['--out', path.join(home, 'long.html')]]) {
+      await cli('render', spec, ...out);
+    }
+    for (const f of ['short.html', 'equals.html', 'long.html']) {
+      assert.ok(fs.existsSync(path.join(home, f)), `render should have written ${f}`);
+    }
+
+    // a flag that is not the first one, beside a positional
+    const lit = path.join(home, 'step.html');
+    await cli('render', spec, '--out', lit, '--step', '1');
+    assert.ok(fs.existsSync(lit), 'render should take --step beside --out');
+
+    // a global flag before the command: the rotation puts the command first,
+    // and `--board` must survive it
+    await assert.rejects(() => cli('--board', 'nosuchboard', 'url'),
+      e => /no board is running/.test(e.stderr),
+      '--board before the command is a flag, not a command');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+await atest('an unknown flag stops the command before it runs, and names the one it meant', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = promisify(execFile);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-unknown-'));
+  const cli = (...args) => run(process.execPath, [path.join(ROOT, 'src/cli.js'), ...args],
+    { env: isolatedEnv(home) });
+
+  try {
+    for (const [args, typed, meant] of [
+      [['clear', '--keeptitle'], '--keeptitle', '--keep-title'],
+      [['say', 'hello', '--sstep', '2'], '--sstep', '--step'],
+      [['install', '--detct'], '--detct', '--detect'],
+      [['snapshot', '--outt', 'x.html'], '--outt', '--out'],
+    ]) {
+      await assert.rejects(() => cli(...args), e => {
+        assert.equal(e.code, 1, `${args[0]} ${typed} must not exit zero`);
+        assert.ok(e.stderr.includes(`unknown flag ${typed}`),
+          `the message has to name the flag that was typed: ${e.stderr}`);
+        assert.ok(e.stderr.includes(`did you mean ${meant}`),
+          `it should suggest ${meant}: ${e.stderr}`);
+        return true;
+      });
+    }
+
+    /* The check runs before the command, so what comes back is the complaint
+       about the flag and not a report from work that should never have
+       started. `url` says "no board is running" when it gets that far. */
+    await assert.rejects(() => cli('url', '--nope'), e => {
+      assert.match(e.stderr, /unknown flag --nope/);
+      assert.doesNotMatch(e.stderr, /no board is running/, 'it never reached the board');
+      return true;
+    });
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/* The one that cost somebody twenty minutes of drawing: `--keepTitle` is not
+   `--keep-title`, so it was ignored, the title was dropped, and the line the
+   command printed on its way past named the title it had just discarded. */
+await atest('a misspelt --keep-title costs no title, and clear says which it did', async () => {
+  const { createServer } = await import('../src/board/server.js');
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = promisify(execFile);
+  const { server, board } = createServer();
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const env = { ...process.env, SPIEGA_URL: `http://127.0.0.1:${server.address().port}/b/default` };
+  const cli = (...args) => run(process.execPath, [path.join(ROOT, 'src/cli.js'), ...args], { env });
+  const drawn = () => cli('draw', JSON.stringify([
+    { op: 'title', text: 'Plan of attack' },
+    { op: 'node', id: 'gw', kind: 'gateway', label: 'API Gateway' },
+  ]));
+
+  try {
+    await drawn();
+    const typo = await cli('clear', '--keeptitle').then(() => null, e => e);
+    assert.ok(typo, 'a flag it does not know must stop it');
+    assert.equal(board.title, 'Plan of attack', 'the typo must not have cost the title');
+    assert.equal(board.nodes.length, 1, 'and nothing else either — it did not run');
+
+    // the MCP spelling of the same option, which now answers here too
+    const kept = await cli('clear', '--keepTitle');
+    assert.equal(board.title, 'Plan of attack', '--keepTitle is --keep-title');
+    assert.equal(board.nodes.length, 0, 'the board itself is wiped');
+    assert.match(kept.stdout, /title kept/, 'it has to say which of the two it did');
+
+    await drawn();
+    const kebab = await cli('clear', '--keep-title');
+    assert.equal(board.title, 'Plan of attack');
+    assert.match(kebab.stdout, /title kept/);
+
+    await drawn();
+    const dropped = await cli('clear');
+    assert.equal(board.title, '', 'without the flag the title goes, as asked');
+    assert.match(dropped.stdout, /title dropped/,
+      'the two outcomes read identically before, which is how the title was lost');
+  } finally {
+    server.close();
+    server.closeAllConnections?.();
+  }
+});
+
 /* A stdio MCP server is told to go away by having its pipe closed — there is
    no shutdown message. One that ignores that outlives every editor session
    that ever started it, and each survivor holds the code it was launched with,

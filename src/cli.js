@@ -50,11 +50,34 @@ let argv = process.argv.slice(2);
 }
 const cmd = argv[0];
 
-/* Accepts both `--out x` and the short `-o x`, since the help advertises both. */
+/* Anything in argv that is shaped like a flag is treated as one, by flag()
+   below and by the check further down in equal measure. They have to agree:
+   a token one of them reads as a value and the other as a flag is how an
+   unknown flag would slip through, or a known one be refused. `-` on its own
+   is stdin and a bare `--` is not a name, so a flag needs a letter after its
+   dashes. */
+const isFlag = a => /^--?[A-Za-z]/.test(a);
+
+/* One name, two dialects. The CLI says `--keep-title` and the MCP tool says
+   `keepTitle` for the same option (src/mcp/server.js), so somebody who has
+   read one and is typing at the other is not wrong, only in the wrong dialect
+   — and until both spellings answer, the two vocabularies are free to drift
+   apart one option at a time. Comparing on the kebab form makes them the same
+   flag at the one place it matters, the lookup. */
+const canon = s => s.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+const flagName = a => canon(a.replace(/^--?/, '').split('=')[0]);
+
+/* Accepts both `--out x` and the short `-o x`, since the help advertises both,
+   and `--out=x`, which positional() has always known to step over but flag()
+   could not read — so it was accepted and then ignored, which is the whole
+   complaint. argv[0] is the command, never a flag, because of the rotation
+   above. */
 const flag = (name, def = null) => {
-  let i = argv.indexOf('--' + name);
-  if (i < 0) i = argv.indexOf('-' + name);
+  const want = canon(name);
+  const i = argv.findIndex((a, at) => at > 0 && isFlag(a) && flagName(a) === want);
   if (i < 0) return def;
+  const eq = argv[i].indexOf('=');
+  if (eq >= 0) return argv[i].slice(eq + 1) || true;
   const v = argv[i + 1];
   return v && !v.startsWith('-') ? v : true;
 };
@@ -62,6 +85,80 @@ const positional = () => argv.slice(1).filter((a, i, all) =>
   !a.startsWith('--') && !(i > 0 && all[i - 1].startsWith('--') && !all[i - 1].includes('=')));
 
 const die = (msg, code = 1) => { console.error(msg); process.exit(code); };
+
+/* ---------- flags a command will answer for ---------- */
+
+/* Every command asks for the flags it knows, by name, and nothing ever looked
+   at what was left over — so a flag nobody asked for was not rejected, it was
+   never looked at at all. On most commands that is merely unhelpful. On clear
+   it destroys work: `spiega clear --keepTitle` wiped the title and printed it
+   on the way out, which reads like a confirmation that it was kept.
+
+   Hence this table, which is the one place that knows what a command accepts.
+   It is a list and not something inferred from the flag() calls, because those
+   run inside the command: `serve` returns early when a board is already up and
+   never reaches `--open`, so nothing a running command can observe about
+   itself tells you which flags were legitimate.
+
+   Keep it in step with HELP, and with the switch below. A flag added to a
+   command and not to its row here is refused before the command runs. */
+const GLOBAL_FLAGS = ['board', 'name'];
+const FLAGS = {
+  serve: ['port', 'open', 'solo', 'quiet', 'tab', 'size', 'browser'],
+  open: ['tab', 'size', 'pos', 'browser'],
+  focus: ['tab', 'size', 'browser'],
+  install: ['detect', 'list', 'path', 'no-path', 'bin-dir'],
+  'mcp-config': ['shape'],
+  bench: ['list', 'models', 'out', 'timeout'],
+  draw: [], op: [],
+  say: ['step', 'edge'],
+  tag: ['step', 'edge', 'match'],
+  step: [], script: [], replay: [],
+  clear: ['keep-title', 'force'],
+  render: ['o', 'out', 'step'],
+  snapshot: ['o', 'out'],
+  boards: [], url: [], doctor: [], migrate: [],
+  stop: ['all', 'server'],
+  version: [], '--version': [], '-v': [],
+  help: [], '--help': [], '-h': [],
+};
+
+/* Only to say "did you mean". A suggestion that is not the flag the person
+   meant is worse than no suggestion, so what counts as near scales with the
+   length of the name: two edits away from `keep-title` is still recognisably
+   that flag, while two edits away from `name` is any four-letter word. */
+const distance = (a, b) => {
+  let prev = [...Array(b.length + 1).keys()];
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++) {
+      row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = row;
+  }
+  return prev[b.length];
+};
+
+/* Before the command runs, not inside it: a `clear` that has already cleared
+   has nothing left to refuse. */
+if (cmd != null && Object.hasOwn(FLAGS, cmd)) {
+  const allowed = [...FLAGS[cmd], ...GLOBAL_FLAGS].map(canon);
+  const known = new Set(allowed);
+  const bad = argv.slice(1).filter(a => isFlag(a) && !known.has(flagName(a)));
+  if (bad.length) {
+    const spell = n => (n.length === 1 ? '-' : '--') + n;   // the help advertises `-o`
+    const lines = bad.map(a => {
+      const want = flagName(a);
+      const near = allowed
+        .filter(n => distance(want, n) <= Math.max(1, Math.floor(Math.max(want.length, n.length) / 4))
+          || (want.length >= 3 && n.startsWith(want)))
+        .sort((x, y) => distance(want, x) - distance(want, y))[0];
+      return `unknown flag ${a.split('=')[0]}${near ? `; did you mean ${spell(near)}?` : ''}`;
+    });
+    die(`spiega ${cmd}: ${lines.join('\n  ')}\n`
+      + `  nothing was done. ${cmd} takes ${allowed.map(spell).join(' ')}`);
+  }
+}
 
 /* `--board NAME` picks which board this command talks to. `--name NAME` means
    the same thing, because that is what people type at `spiega serve` when they
@@ -180,6 +277,10 @@ that board, starting it if it is not running. One board per conversation: a
 Claude session and an opencode session drawing on the same board interleave
 two explanations into one picture. "spiega install" gives each harness its own
 name, so this happens without anyone thinking about it.
+
+A flag it does not know stops the command rather than being ignored, and a
+two-word flag answers to either spelling: --keep-title and --keepTitle are the
+same flag, because the MCP tools name that option the second way.
 
 One process serves them all, on port 4777, each board under /b/<name>. Eight
 boards cost one Node runtime rather than eight, and all of them run the code
@@ -504,8 +605,14 @@ const main = async () => {
           + `  Name it \u2014 spiega clear --board ${who.name} \u2014 or pass --force.\n`
           + `  Setting SPIEGA_URL to its url also counts as naming it.`);
       }
+      const keepTitle = !!flag('keep-title');
       console.log(`clearing ${describeBoard(who)}${!named ? '  (--force)' : ''}`);
-      return void (await send([{ op: 'clear', keepTitle: !!flag('keep-title') }]));
+      await send([{ op: 'clear', keepTitle }]);
+      /* The line above names the title on its way past, which on its own reads
+         like a promise to keep it. Say which it was: this is the only command
+         that takes something away, and the two outcomes looked identical. */
+      if (who.title) console.log(`cleared "${who.name}" — title ${keepTitle ? 'kept' : 'dropped'}`);
+      return;
     }
 
     case 'render': {
