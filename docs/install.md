@@ -178,11 +178,18 @@ never built. `spiega doctor` finds it:
   ✓ spiega on PATH     ~/.nvm/…/spiega → this checkout
   ✓ claude skill         linked — tracks the checkout
   ✓ opencode AGENTS.md   block is current
-  ✗ agent MCP server     16 running, 16 started before the current commit
+  ✗ agent MCP servers    16 running, 16 started before the current commit
 
   To fix
-    → start a fresh agent session — a running one keeps the server it launched
+    → start a fresh agent session — these belong to the agent, not to spiega; stop cannot reach them
 ```
+
+Note what those processes are, because the count invites the wrong move.
+`spiega stop` works on the board registry, and an MCP server is not in it: it
+is a child of the agent harness, talking stdio to the session that spawned it,
+holding no port and no board. So `stop --all` answers `nothing to stop`
+however many doctor has just counted, and the only thing that ends one is
+ending the session it belongs to.
 
 It exits non-zero when something is wrong, so it can go in a shell prompt or a
 pre-flight check. It makes no network calls and changes nothing.
