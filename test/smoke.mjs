@@ -1414,6 +1414,89 @@ await atest('the MCP server exits when its client closes the pipe', async () => 
   assert.equal(code, 0, 'it should exit cleanly');
 });
 
+/* The arguments an MCP client actually sends, which is the layer the rest of
+   the suite skips: everything else drives `applyOps` directly, and the bug
+   that prompted this test lived entirely above it. Clients disagree about how
+   to put a non-scalar argument on the wire, and one that serializes `ops` to a
+   JSON string had the array form — the form `board_draw`'s own description
+   asks for — rejected as `unknown op "undefined"`. So this talks to the real
+   server over its real pipe, with SPIEGA_URL pointing at a board of our own. */
+await atest('board_draw and board_tag take their list as a JSON string, as some clients send it', async () => {
+  const { spawn } = await import('node:child_process');
+  const { createServer } = await import('../src/board/server.js');
+  const app = createServer({ name: 'mcpargs' });
+  await new Promise(r => app.server.listen(0, '127.0.0.1', r));
+  const board = `http://127.0.0.1:${app.server.address().port}/b/mcpargs`;
+
+  const child = spawn(process.execPath, [path.join(ROOT, 'src/mcp/server.js')], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, SPIEGA_URL: board },
+  });
+  const waiting = new Map();
+  let out = '';
+  child.stdout.on('data', d => {
+    out += d;
+    for (let i; (i = out.indexOf('\n')) >= 0; ) {
+      const line = out.slice(0, i).trim(); out = out.slice(i + 1);
+      if (!line) continue;
+      const msg = JSON.parse(line);
+      waiting.get(msg.id)?.(msg);
+      waiting.delete(msg.id);
+    }
+  });
+  let id = 0;
+  const callTool = (name, args) => new Promise((res, rej) => {
+    const mine = ++id;
+    const t = setTimeout(() => rej(new Error(`no reply to ${name}`)), 8000);
+    waiting.set(mine, m => { clearTimeout(t); res(m.result); });
+    child.stdin.write(JSON.stringify(
+      { jsonrpc: '2.0', id: mine, method: 'tools/call', params: { name, arguments: args } }) + '\n');
+  });
+  const state = async () => (await fetch(board + '/state')).json();
+
+  try {
+    // the stringified array: three ops in one call, which is how a board gets built
+    const drew = await callTool('board_draw', {
+      ops: JSON.stringify([
+        { op: 'node', id: 'gw', kind: 'gateway', label: 'API Gateway' },
+        { op: 'node', id: 'orders', label: 'Orders' },
+        { op: 'edge', from: 'gw', to: 'orders', label: 'gRPC' },
+      ]),
+    });
+    assert.ok(!drew.isError, 'a stringified array of ops should draw: ' + drew.content[0].text);
+    let b = await state();
+    assert.deepEqual(b.nodes.map(x => x.id), ['gw', 'orders']);
+    assert.equal(b.edges.length, 1);
+
+    // a single op still works, as a string and as an object
+    await callTool('board_draw', { ops: JSON.stringify({ op: 'node', id: 'db', label: 'Orders DB' }) });
+    await callTool('board_draw', { ops: { op: 'node', id: 'cache', label: 'Cache' } });
+    b = await state();
+    assert.deepEqual(b.nodes.map(x => x.id), ['gw', 'orders', 'db', 'cache']);
+
+    // broken JSON must name itself, not surface as a complaint about the vocabulary
+    const bad = await callTool('board_draw', { ops: '[{"op":"node","id":"x"' });
+    assert.ok(bad.isError, 'malformed JSON should be an error');
+    assert.match(bad.content[0].text, /ops arrived as a string/);
+    assert.doesNotMatch(bad.content[0].text, /unknown op/,
+      'the message should point at the encoding, not at the op vocabulary');
+
+    // board_tag has the same shape and the same clients
+    await callTool('board_draw', { ops: JSON.stringify([
+      { op: 'say', text: 'The gateway checks the token first.' },
+      { op: 'step', edge: 'gw>orders', step: 'The gateway forwards the call' },
+    ]) });
+    const tagged = await callTool('board_tag', { tags: JSON.stringify([{ match: 'checks the token', step: 1 }]) });
+    assert.ok(!tagged.isError, 'a stringified array of tags should tag: ' + tagged.content[0].text);
+    assert.deepEqual(scriptSteps(await state()), [0]);
+  } finally {
+    child.stdin.end();
+    child.kill('SIGKILL');
+    app.server.close();
+    app.server.closeAllConnections?.();
+  }
+});
+
 /* Named boards. One board per conversation, because two agents sharing one
    interleave two explanations into one drawing. Run in a child with its own
    HOME: the registry lives under ~/.spiega and a test must never go near
