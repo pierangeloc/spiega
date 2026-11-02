@@ -133,11 +133,12 @@ const recordNode = () => {
    prose without saying so. The MCP server does not care, but the binary is the
    fallback when MCP is unavailable, so the fallback has to exist.
 
-   This puts a link to the sh launcher in a directory every shell sees. It
-   prefers a writable directory that is already on a non-interactive PATH
-   (/usr/local/bin on many machines); when there is none, it uses ~/.local/bin
-   and makes non-interactive zsh find it, since zsh reads ~/.zshenv even when
-   it is neither interactive nor a login shell. */
+   This puts a link to the sh launcher in a directory every shell sees, chosen
+   from a short list rather than from whatever on PATH happens to be writable.
+   That rule once put the link in ~/Library/Android/sdk/platform-tools, first on
+   someone's PATH and owned by them: a directory the SDK manager replaces
+   wholesale on update, so the link would have vanished without a word. See
+   binDir() for the list. */
 const AGENT_SHELL = ['/bin/zsh', '/usr/bin/zsh', '/bin/bash', '/bin/sh']
   .find(f => fs.existsSync(f)) || '/bin/sh';
 
@@ -157,6 +158,46 @@ const writableDir = d => {
 };
 
 const DOT_LOCAL = path.join(HOME, '.local', 'bin');
+/* The conventional place for something installed by hand, and the one that
+   makes CI work: a runner's agent shell is bash, which no ~/.zshenv line
+   reaches, while /usr/local/bin is on its PATH and writable. */
+const USR_LOCAL = '/usr/local/bin';
+/* Where the link went, so the next install can move it rather than leave a
+   second one behind, and so doctor and an uninstall know which one is ours. */
+const LINK_FILE = path.join(HOME, '.spiega', 'link');
+
+/* ~/.local/bin when an agent's shell can see it; /usr/local/bin when that one
+   can be seen and written instead; otherwise ~/.local/bin anyway, with the
+   question about ~/.zshenv. Never any other directory on PATH: those belong to
+   a toolchain — an SDK, cargo, Homebrew, nvm — which may replace or prune them,
+   and nobody looks there for a tool they installed. `--bin-dir` is the way to
+   choose one of those on purpose. */
+export const binDir = (requested, pathDirs) => {
+  if (requested) return path.resolve(requested);
+  if (pathDirs.includes(DOT_LOCAL)) return DOT_LOCAL;
+  if (pathDirs.includes(USR_LOCAL) && writableDir(USR_LOCAL)) return USR_LOCAL;
+  return DOT_LOCAL;
+};
+
+/* A link this file made: it names the launcher exactly. npm's own link is
+   relative and a person's is whatever they typed, so neither ever matches,
+   and only ours is moved or removed. */
+const isOurLink = file => {
+  try { return fs.lstatSync(file).isSymbolicLink() && fs.readlinkSync(file) === LAUNCHER; }
+  catch { return false; }
+};
+
+/* Links a previous install left somewhere other than `keep`: the one it
+   recorded, and any on the agent's PATH, which is how links made before there
+   was a record are found. Removing them costs nothing, a symlink to our own
+   launcher holds no content, and leaving them means `which -a spiega` answers
+   twice, in an order that depends on whose shell is asking. */
+const strayLinks = (keep, pathDirs) => {
+  let recorded = null;
+  try { recorded = fs.readFileSync(LINK_FILE, 'utf8').trim(); } catch { /* none */ }
+  const candidates = [recorded, ...pathDirs.map(d => path.join(d, 'spiega'))].filter(Boolean);
+  return [...new Set(candidates)].filter(f => f !== keep && isOurLink(f));
+};
 const RC_MARKER = '# spiega: the launcher, for the non-interactive shells agents get';
 const RC_FILE = path.join(HOME, '.zshenv');
 const RC_LINE = 'export PATH="$HOME/.local/bin:$PATH"';
@@ -213,11 +254,11 @@ const addToZshEnv = () => {
    say what to do instead is how that becomes issue #9 again.
 
    `touchShell`: 'ask' (default), true to go ahead, false to leave it alone.
-   `--path` and `--no-path` are the two overrides. */
-export function ensureBin({ touchShell = 'ask', confirm = askYesNo } = {}) {
+   `--path` and `--no-path` are the two overrides. `requestedDir` is
+   `--bin-dir`, or null to choose. */
+export function ensureBin({ touchShell = 'ask', confirm = askYesNo, requestedDir }) {
   const pathDirs = agentPath().split(':').filter(Boolean);
-  let dir = pathDirs.find(d => d.startsWith('/') && writableDir(d));
-  if (!dir) dir = DOT_LOCAL;
+  const dir = binDir(requestedDir, pathDirs);
   fs.mkdirSync(dir, { recursive: true });
 
   const link = path.join(dir, 'spiega');
@@ -234,6 +275,13 @@ export function ensureBin({ touchShell = 'ask', confirm = askYesNo } = {}) {
     fs.symlinkSync(LAUNCHER, link);
     changed = true;
   }
+  const removed = [], stuck = [];
+  for (const f of strayLinks(link, pathDirs)) {
+    try { fs.rmSync(f, { force: true }); removed.push(f); }
+    catch { stuck.push(f); }   // a root-owned directory: said, not forced
+  }
+  fs.mkdirSync(path.dirname(LINK_FILE), { recursive: true });
+  fs.writeFileSync(LINK_FILE, link + '\n');
 
   let onPath = agentPath().split(':').includes(dir);
   let addedToRc = false;
@@ -253,7 +301,7 @@ export function ensureBin({ touchShell = 'ask', confirm = askYesNo } = {}) {
     }
   }
 
-  return { dir, link, onPath, addedToRc, rcDeclined, rcAsked, changed };
+  return { dir, link, onPath, addedToRc, rcDeclined, rcAsked, changed, removed, stuck };
 }
 
 /* The install list is a table of harness targets, and the command itself is not
@@ -289,6 +337,14 @@ const reportBin = (info, rec) => {
     const made = info.addedToRc ? ' \u2014 added ~/.local/bin to ~/.zshenv, so open a new shell' : '';
     console.log(`  ${c.good(g.ok)} ${c.bold(pad('bin', width))}${c.dim(where)}  `
       + c.dim('on the PATH a non-interactive shell gets') + c.dim(made));
+  }
+  /* A link moved is a change to somebody's PATH, so it is said, and one that
+     could not be removed has to be, or `which -a` keeps answering twice. */
+  for (const f of info.removed) {
+    console.log(`    ${c.dim(`removed the link an earlier install left in ${shortPath(path.dirname(f), 46)}`)}`);
+  }
+  for (const f of info.stuck) {
+    console.log(`    ${c.accent(`could not remove the earlier link ${shortPath(f, 46)} \u2014 remove it by hand`)}`);
   }
   /* The link being findable is only half of "it runs": the launcher still
      needs a node, and on a machine whose node is not nvm's this recording is
@@ -565,14 +621,14 @@ export function detect() {
 
 export const TARGET_NAMES = Object.keys(TARGETS);
 
-export function install(names, { touchShell = 'ask' } = {}) {
+export function install(names, { touchShell, binDir: requestedDir }) {
   let rec = null;
   try { rec = recordNode(); }
   catch (e) {
     const g = sym();
     console.log(`  ${c.accent(g.bad)} ${c.bold(pad('node', 12))}${c.accent(`could not record the node for the launcher: ${e.message}`)}`);
   }
-  try { reportBin(ensureBin({ touchShell }), rec); }
+  try { reportBin(ensureBin({ touchShell, requestedDir }), rec); }
   catch (e) {
     const g = sym();
     console.log(`  ${c.accent(g.bad)} ${c.bold(pad('bin', 12))}${c.accent(`could not link the command: ${e.message}`)}`);

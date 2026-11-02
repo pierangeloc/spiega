@@ -225,6 +225,29 @@ function invocation(rows) {
   }
 }
 
+/* ---------- where install linked the command ---------- */
+
+/* install records the one link it made and removes any other link to the
+   launcher it finds on the agent's PATH. A second one is a link from before
+   that record existed, or from a machine whose PATH has changed since, and
+   it answers `which -a` in an order that depends on whose shell is asking. */
+const LAUNCHER = path.join(ROOT, 'bin', 'spiega');
+const LINK_FILE = path.join(HOME, '.spiega', 'link');
+
+function links(rows) {
+  let recorded = null;
+  try { recorded = fs.readFileSync(LINK_FILE, 'utf8').trim(); } catch { /* none */ }
+  const dirs = (agentShell('printf %s "$PATH"') || '').split(':').filter(Boolean);
+  const ours = f => { try { return fs.readlinkSync(f) === LAUNCHER; } catch { return false; } };
+  const extra = [...new Set(dirs.map(d => path.join(d, 'spiega')))].filter(f => f !== recorded && ours(f));
+  if (extra.length) {
+    rows.push(warn('command link', `also linked from ${extra.map(f => tilde(path.dirname(f))).join(', ')}`,
+      '`spiega install` moves it to one place'));
+  } else if (recorded && ours(recorded)) {
+    rows.push(ok('command link', tilde(recorded)));
+  }
+}
+
 /* ---------- skills ---------- */
 
 const SKILL_DIRS = {
@@ -472,6 +495,7 @@ export function doctor() {
   const rows = [];
   const headTime = checkout(rows);
   invocation(rows);
+  links(rows);
   skills(rows);
   blocks(rows);
   registrations(rows);
