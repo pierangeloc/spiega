@@ -59,6 +59,29 @@ const json = (res, code, body) => {
   res.end(s);
 };
 
+/* A board that cannot be drawn has to say so, and one bad board must not stop
+   the others.
+
+   A throw on a render route rejects inside the request handler, and an
+   unhandled rejection takes the process — and every board in it — down. So a
+   render costs its own render: a 500 with the reason, while the rest of the
+   server carries on. The door refuses the malformed ops a model actually
+   writes (see state.js), but state can also arrive from a log written before
+   that, and this is what keeps it a broken picture rather than a dead server. */
+const failedRender = (res, e) => {
+  const message = e && e.message ? e.message : String(e);
+  res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
+  return res.end(`spiega could not draw this board: ${message}\n`);
+};
+
+/* The same rule for the route a model actually posts to, mid-sentence. Its
+   callers parse the answer, so a failed batch answers in the shape they expect
+   rather than as plain text they would choke on. */
+const failedOp = (res, e) => {
+  const message = e && e.message ? e.message : String(e);
+  return json(res, 500, { ok: false, error: `spiega could not apply these ops: ${message}` });
+};
+
 const readBody = req => new Promise((resolve, reject) => {
   let b = '';
   req.on('data', c => { b += c; if (b.length > 4e6) reject(new Error('body too large')); });
@@ -291,7 +314,13 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
       let ops;
       try { ops = JSON.parse(await readBody(req)); }
       catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + e.message }); }
-      const { fresh, errors, applied } = applyOps(board, ops.ops || ops);
+      let result;
+      /* applyOps refuses what it can see is wrong; this is for what it cannot,
+         so a malformed batch still costs one request rather than the process.
+         The body itself can be `null`, so even reading `ops.ops` is in here. */
+      try { result = applyOps(board, ops && ops.ops ? ops.ops : ops); }
+      catch (e) { return failedOp(res, e); }
+      const { fresh, errors, applied } = result;
       /* No file I/O and no await here: the ops go into the log writer's buffer
          and the flush happens on its own timer. This route is on the critical
          path of somebody talking. */
@@ -324,13 +353,17 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     // The board as one standalone file, for pasting into a PR or a doc.
     if (rest === '/snapshot') {
       const { snapshotHTML } = await import('./snapshot.js');
-      const html = snapshotHTML(board, { active: url.searchParams.get('step') });
+      let html;
+      try { html = snapshotHTML(board, { active: url.searchParams.get('step') }); }
+      catch (e) { return failedRender(res, e); }
       res.writeHead(200, { 'content-type': 'text/html' });
       return res.end(html);
     }
     if (rest === '/snapshot.svg') {
       const { renderSVG } = await import('../render/render.js');
-      const { svg } = renderSVG(board, { margin: 16, active: board.active });
+      let svg;
+      try { svg = renderSVG(board, { margin: 16, active: board.active }).svg; }
+      catch (e) { return failedRender(res, e); }
       res.writeHead(200, { 'content-type': 'image/svg+xml' });
       return res.end(svg);
     }

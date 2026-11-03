@@ -134,6 +134,41 @@ await test('a corrupt or half-written last line is skipped, and the next op stil
   await s.close();
 });
 
+/* ---------- a bad op already in the file is not a poison pill ---------- */
+
+/* `boundary.members` was not checked at the door, so an op the renderer cannot
+   draw could be written to the log. A persisted board replayed it on the next
+   start and died again on the first render — a board that could never be
+   opened again, and a server that took its neighbours with it. Restore is
+   applyOps over the lines, so guarding the door is also the tolerance on the
+   way back in: the line is refused there too. */
+await test('a log written before the door was guarded still opens, and draws', async () => {
+  const name = 'poison';
+  const file = boardFile(name);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, [
+    { op: 'node', id: 'a', label: 'A' },
+    { op: 'node', id: 'b', label: 'B' },
+    { op: 'boundary', label: 'oops', members: '["a","b"]' },
+  ].map(op => JSON.stringify(op)).join('\n') + '\n');
+
+  const s = await listen(name);
+  const st = await state(s.U);
+  assert.deepEqual(st.nodes.map(x => x.id), ['a', 'b'], 'the good ops still replay');
+  assert.equal(st.boundaries.length, 0, 'the undrawable boundary is refused, not restored');
+
+  const svg = await fetch(s.U + '/snapshot.svg');
+  assert.equal(svg.status, 200, 'the board can be drawn');
+  assert.match(await svg.text(), /data-node="a"/);
+
+  const r = await send(s.U, [{ op: 'say', text: 'after the bad line' }]);
+  assert.equal(r.ok, true);
+  await s.app.flush();
+  assert.ok(fs.readFileSync(file, 'utf8').includes('after the bad line'),
+    'and it is still being saved to');
+  await s.close();
+});
+
 /* ---------- one owner per file ---------- */
 
 await test('two servers cannot interleave writes into one board file', async () => {

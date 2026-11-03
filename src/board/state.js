@@ -284,6 +284,38 @@ const upsert = (list, item, keyOf, index = null) => {
 /** @param {Edge} e @returns {string} */
 const edgeId = e => `${e.from}>${e.to}`;
 
+/* The array-valued fields a model writes by hand.
+
+   `"members": "[\"a\",\"b\"]"` is not a fuzz case. The op body is JSON inside a
+   tool argument, so an agent hand-writing an op has every reason to encode the
+   list twice, and there is no parser on the far side to undo it. Nothing
+   downstream recovers either: the renderer calls `.map` on whatever it is
+   given, and a throw there happens inside a request handler, which takes the
+   process — and every other board in it — down. So the door refuses it, the
+   way an unknown op is refused. `flow.steps` already survives a non-array; a
+   string where the elements are read is the inconsistency this closes. */
+/** @param {unknown} value */
+const stringIds = value => Array.isArray(value) && value.every(v => typeof v === 'string');
+
+/* An op is an object with a string `op` naming the operation. Anything else is
+   refused rather than read: `[null]` in an ops array — the other thing a client
+   can post by hand — used to throw on `op.op` inside the request handler, which
+   is the same dead process as a boundary whose members is a string. Rejecting
+   it where it arrives is what lets `applyOps` keep its promise never to throw
+   on input.
+
+   Returns the reason, or null when the value is an op. */
+/** @param {unknown} op @returns {string|null} */
+const notAnOp = op => {
+  if (!op || typeof op !== 'object' || Array.isArray(op)) {
+    const what = op === null ? 'null' : Array.isArray(op) ? 'an array' : typeof op;
+    return `not an op: expected an object with a string "op", got ${what}`;
+  }
+  const name = /** @type {{op?: unknown}} */ (op).op;
+  return typeof name === 'string' ? null
+    : `not an op: "op" must be a string naming the operation, got ${name === undefined ? 'nothing' : typeof name}`;
+};
+
 /* Applying an op returns the keys of whatever is new, so the client knows what
    to animate on and what was already on the board. It also returns the ops it
    accepted, which is exactly what the log writer buffers. */
@@ -296,6 +328,9 @@ const edgeId = e => `${e.from}>${e.to}`;
 function applyOne(board, op, sweep) {
   /** @type {Fresh} */
   const fresh = { nodes: [], edges: [], boundaries: [] };
+  // `applyOp` reaches here directly, so the check cannot live only in applyOps
+  const bad = notAnOp(op);
+  if (bad) return { ok: false, error: bad, fresh };
   // recorded before the switch, so a `clear` wipes the log with everything else
   const record = () => {
     board.log.push({ ...op, at: Date.now() });
@@ -388,6 +423,9 @@ function applyOne(board, op, sweep) {
 
     case 'boundary': {
       const { op: _op, ...fields } = op;
+      if (fields.members !== undefined && !stringIds(fields.members)) {
+        return { ok: false, error: 'boundary: "members" must be an array of string ids', fresh };
+      }
       const id = fields.id || (fields.label || 'b').toLowerCase().replace(/[^a-z0-9]+/g, '-');
       /** @type {Boundary} */
       const b = { ...fields, id };
@@ -397,13 +435,26 @@ function applyOne(board, op, sweep) {
 
     case 'step': {
       const { op: _op, ...step } = op;
+      /* A string here would not throw — `new Set('ab')` is the two characters —
+         it would light nothing and say nothing, which is the harder failure to
+         notice. Refused for the same reason as members. */
+      if (step.lights !== undefined && !stringIds(step.lights)) {
+        return { ok: false, error: 'step: "lights" must be an array of string ids', fresh };
+      }
       board.flow.push(step);
       break;
     }
 
-    case 'flow':
-      board.flow = Array.isArray(op.steps) ? op.steps.slice() : [];
+    case 'flow': {
+      const steps = Array.isArray(op.steps) ? op.steps : [];
+      // a whole flow arrives through this op, so it carries the same field
+      const bad = steps.findIndex(s => s && s.lights !== undefined && !stringIds(s.lights));
+      if (bad >= 0) {
+        return { ok: false, error: `flow: steps[${bad}].lights must be an array of string ids`, fresh };
+      }
+      board.flow = steps.slice();
       break;
+    }
 
     case 'focus':
       board.active = op.step == null ? null
@@ -457,6 +508,11 @@ export function applyOps(board, ops) {
   const list = Array.isArray(ops) ? ops : [ops];
   const sweep = newSweep();
   for (const op of list) {
+    /* Checked here as well as in applyOne because the sweep below reads `op.op`
+       before it gets there, and a value that is not an op cannot see the lists
+       — it must not end the run early and flush a sweep nobody asked for. */
+    const bad = notAnOp(op);
+    if (bad) { errors.push(bad); continue; }
     // End the run of removes before anything that can see the lists, so the
     // op is applied to the board as if each remove had landed on its own.
     if (sweep.ids.length && TOUCHES_LISTS.has(op.op)) sweepRemoved(board, sweep);
