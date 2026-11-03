@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps } from '../src/board/state.js';
 import { renderSVG } from '../src/render/render.js';
-import { boundaryShapes } from '../src/render/layout.js';
+import { boundaryShapes, intruders } from '../src/render/layout.js';
 import { tagBox, planTags } from '../src/render/edges.js';
 import { snapshotHTML } from '../src/board/snapshot.js';
 import { KINDS } from '../src/render/glyphs.js';
@@ -2422,6 +2422,60 @@ await atest('no random board draws an enclosure around a non-member', async () =
     })).lies);
   }
   assert.deepEqual(lies, []);
+});
+
+/* #78. When separation runs, `separate()` packed every box to the top, so a
+   column no boundary touched lost the centring layout() gives it and sat at the
+   top edge. A column whose boxes take part in no cross-column constraint is put
+   back in the middle: the members of a boundary stay where separation stood
+   them, and the untouched columns are centred again — without the boundary
+   re-swallowing anything. The check is on the drawn boxes, and on `intruders()`
+   after the move, not on how the centring was arrived at. */
+await atest('a boundary separates, and a column it never touched stays centred', async () => {
+  const spec = {
+    title: 'backlog: members spread over columns and rows',
+    nodes: [
+      { id: 'client', kind: 'client', label: 'Client' },
+      { id: 'gw', kind: 'gateway', label: 'Gateway' },
+      { id: 'auth', kind: 'service', label: 'Auth' },
+      { id: 'orders', kind: 'service', label: 'Orders' },
+      { id: 'billing', kind: 'service', label: 'Billing' },
+      { id: 'q', kind: 'queue', label: 'Events' },
+      { id: 'db', kind: 'datastore', label: 'Orders DB' },
+      { id: 'ext', kind: 'external', label: 'Payments' },
+    ],
+    edges: [
+      { from: 'client', to: 'gw' },
+      { from: 'gw', to: 'auth' },
+      { from: 'gw', to: 'orders' },
+      { from: 'orders', to: 'q' },
+      { from: 'orders', to: 'db' },
+      { from: 'q', to: 'billing' },
+      { from: 'billing', to: 'ext' },
+    ],
+    boundaries: [
+      { id: 'ours', label: 'ours', members: ['gw', 'orders', 'db', 'billing'] },
+      { id: 'data', label: 'data', members: ['orders', 'db'] },
+    ],
+  };
+
+  const { boxes } = renderSVG(await drawn(spec));
+
+  // the boundary still encloses only its own members, after the centring
+  for (const b of spec.boundaries)
+    assert.deepEqual(intruders(b.members, boxes), [], `${b.id}: a non-member fell back inside`);
+
+  // columns the boundary never touched are centred against the board again ...
+  const content = d => ({ y0: d.y, y1: d.y + d.h + (d.labelBelow || 0) });
+  const top = Math.min(...Object.values(boxes).map(b => content(b).y0));
+  const bot = Math.max(...Object.values(boxes).map(b => content(b).y1));
+  const centre = id => Math.abs((content(boxes[id]).y0 + content(boxes[id]).y1) / 2 - (top + bot) / 2);
+
+  // ... while the boxes the boundary moved stay where separation put them.
+  assert.ok(centre('client') < 2, `Client is ${centre('client')}px off centre`);
+  assert.ok(centre('ext') < 2, `Payments is ${centre('ext')}px off centre`);
+  assert.ok(boxes.auth.y < boxes.client.y, 'Auth stays where the boundary put it, above Client');
+  assert.ok(boxes.q.y < boxes.client.y, 'Events stays where the boundary put it, above Client');
 });
 
 await atest('no tag is drawn under a node', async () => {
