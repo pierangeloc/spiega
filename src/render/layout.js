@@ -570,6 +570,40 @@ function separate(groups, boxes) {
       if (!indegree.get(to)) ready.push(to);
     }
   }
+
+  /* The longest path gives every box its earliest position, which packs the
+     board to the top. A column that no boundary touches has no reason to be
+     packed: layout() centres every column against the tallest one, and those
+     columns lost that the moment separation ran. Within a column the boxes are
+     chained so they already move as one; the constraint that crosses a column
+     boundary is what pins a column, so a column whose boxes take part in no
+     cross-column edge is free to be centred again. Centring it can never grow
+     the board — a column's height is at most the tallest column's — and a box
+     with no cross-column edge is a box no group's rectangle reaches, so it can
+     neither become an intruder nor drag a wall over one. */
+
+  /** @param {string} id */
+  const colOf = id => boxes[id].col ?? 0;
+  /** @type {Map<string, boolean>} */
+  const free = new Map(ids.map(id => [id, true]));
+  for (const [from, tos] of graph)
+    for (const to of tos.keys())
+      if (colOf(from) !== colOf(to)) { free.set(from, false); free.set(to, false); }
+
+  let contentBottom = PAD;
+  for (const id of ids) contentBottom = Math.max(contentBottom, y[id] + span(id));
+
+  /** @type {Record<number, string[]>} */
+  const colIds = {};
+  for (const id of ids) (colIds[colOf(id)] ||= []).push(id);
+  for (const members of Object.values(colIds)) {
+    if (!members.every(id => free.get(id))) continue;
+    const top = Math.min(...members.map(id => y[id]));
+    const bot = Math.max(...members.map(id => y[id] + span(id)));
+    const h = bot - top;
+    const shift = PAD + (contentBottom - PAD - h) / 2 - top;
+    for (const id of members) y[id] += shift;
+  }
   return done === ids.length ? y : null;
 }
 

@@ -1,0 +1,26 @@
+{
+  "title": "backlog: members spread over columns and rows",
+  "nodes": [
+    { "id": "client", "kind": "client", "label": "Client" },
+    { "id": "gw", "kind": "gateway", "label": "Gateway" },
+    { "id": "auth", "kind": "service", "label": "Auth" },
+    { "id": "orders", "kind": "service", "label": "Orders" },
+    { "id": "billing", "kind": "service", "label": "Billing" },
+    { "id": "q", "kind": "queue", "label": "Events" },
+    { "id": "db", "kind": "datastore", "label": "Orders DB" },
+    { "id": "ext", "kind": "external", "label": "Payments" }
+  ],
+  "edges": [
+    { "from": "client", "to": "gw" },
+    { "from": "gw", "to": "auth" },
+    { "from": "gw", "to": "orders" },
+    { "from": "orders", "to": "q" },
+    { "from": "orders", "to": "db" },
+    { "from": "q", "to": "billing" },
+    { "from": "billing", "to": "ext" }
+  ],
+  "boundaries": [
+    { "id": "ours", "label": "ours", "members": ["gw", "orders", "db", "billing"] },
+    { "id": "data", "label": "data", "members": ["orders", "db"] }
+  ]
+}

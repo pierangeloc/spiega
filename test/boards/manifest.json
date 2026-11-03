@@ -20,6 +20,11 @@
     "broke": "Not a reported bug, and there is no frozen `-before` picture because this shape did not exist before #58's fix: it is what the fix does when it cannot make a boundary true. Three overlapping boundaries, `{a,b,c}`, `{c,d}` and `{b,d}`, with `d` outside the first, cannot all be one rectangle in any vertical order, since `{c,d}` needs `b` out of the band between `c` and `d` and `{b,d}` needs `c` out of the band between `b` and `d`. Before the fix each of them was one rectangle that enclosed boxes it never named.",
     "fixed": "The boundary that cannot be satisfied is drawn as the fewest rectangles that each enclose only its own members, with its label on each, so the board says less rather than something false. It does not announce that it was split, which is its own open issue."
   },
+  "issue-78-centre-within-slack": {
+    "issue": 78,
+    "broke": "Follow-up to #58. Once a boundary has to separate a non-member from its members, `separate()` placed boxes by longest path, which packs everything to the top. Columns that no boundary touched lost the centring layout() gives every column and sat at the top edge — `Client` and `Payments` were top-aligned with `Auth` and `Events`, which the boundary really had moved.",
+    "fixed": "A column whose boxes take part in no cross-column constraint is centred against the board again after separation. Members and the boxes a boundary moved stay where the longest path stood them; only the untouched columns come back to the middle, without the boundary re-enclosing a non-member."
+  },
   "issue-49-back-edge": {
     "issue": 49,
     "broke": "A back edge dropped straight from the bottom of its source to the floor and rose straight into the bottom of its target, and nothing asked what else stood in that column. `b>hub` ran down through Store and Upstream API, and `ext>a` rose through Client Z, so each line entered one box and left another and read as an edge between the wrong two.",
