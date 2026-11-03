@@ -37,13 +37,20 @@ const names = fs.readdirSync(BOARDS)
   .map(f => f.replace(/\.json$/, ''))
   .sort();
 
-/* A board with no frozen before is one whose bug is still open: there is
-   nothing to compare it against yet, and its single picture is the bug. */
+/* A board with no frozen before is usually one whose bug is still open: there
+   is nothing to compare it against yet, and its single picture is the bug.
+
+   Not always. A manifest entry can say `"noBefore": true`, meaning no before
+   exists because none can — the board is what a fix does in a case it cannot
+   fully solve, a shape that was never drawn wrongly because it was never drawn
+   at all. That board is not an open bug, and calling it one sends the next
+   person to fix a picture that is already right. */
 const rows = names.map(name => {
   const spec = JSON.parse(fs.readFileSync(path.join(BOARDS, `${name}.json`), 'utf8'));
   return {
     name, spec,
     m: manifest[name] || {},
+    designed: manifest[name]?.noBefore === true,
     before: fs.existsSync(path.join(PICS, `${name}-before.svg`)) ? `regressions/${name}-before.svg` : null,
     after: `regressions/${name}.svg`,
   };
@@ -74,6 +81,15 @@ for (const r of rows) {
   out.push('');
   out.push(`[#${r.m.issue}](${REPO}/${r.m.issue}) · \`test/boards/${r.name}.json\``);
   out.push('');
+  if (r.designed) {
+    out.push(`**Why there is no before.** ${r.m.broke}`);
+    out.push('');
+    out.push(`**What it draws, by design.** ${r.m.fixed}`);
+    out.push('');
+    out.push(link(r.after));
+    out.push('');
+    continue;
+  }
   out.push(`**What was wrong.** ${r.m.broke}`);
   out.push('');
   if (r.before) {
@@ -95,4 +111,4 @@ for (const r of rows) {
 fs.writeFileSync(OUT, out.join('\n'));
 console.log(path.relative(ROOT, OUT));
 for (const r of rows)
-  console.log(`  ${r.name}  ${r.before ? 'before + now' : 'open, one picture'}`);
+  console.log(`  ${r.name}  ${r.before ? 'before + now' : r.designed ? 'by design, one picture' : 'open, one picture'}`);

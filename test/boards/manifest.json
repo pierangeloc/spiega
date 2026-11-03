@@ -16,7 +16,8 @@
   },
   "issue-58-boundary-impossible": {
     "issue": 58,
-    "broke": "Not a reported bug, and there is no frozen `-before` picture because this shape did not exist before #58's fix: it is what the fix does when it cannot make a boundary true. Three overlapping boundaries, `{a,b,c}`, `{c,d}` and `{b,d}`, with `d` outside the first, cannot all be one rectangle in any vertical order, since `{c,d}` needs `b` out of the band between `c` and `d` and `{b,d}` needs `c` out of the band between `b` and `d`. Before the fix each of them was one rectangle that enclosed boxes it never named. (The heading below says `Still open` only because the page has no before to set it against.)",
+    "noBefore": true,
+    "broke": "Not a reported bug, and there is no frozen `-before` picture because this shape did not exist before #58's fix: it is what the fix does when it cannot make a boundary true. Three overlapping boundaries, `{a,b,c}`, `{c,d}` and `{b,d}`, with `d` outside the first, cannot all be one rectangle in any vertical order, since `{c,d}` needs `b` out of the band between `c` and `d` and `{b,d}` needs `c` out of the band between `b` and `d`. Before the fix each of them was one rectangle that enclosed boxes it never named.",
     "fixed": "The boundary that cannot be satisfied is drawn as the fewest rectangles that each enclose only its own members, with its label on each, so the board says less rather than something false. It does not announce that it was split, which is its own open issue."
   }
 }
