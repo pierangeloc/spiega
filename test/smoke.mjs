@@ -2296,6 +2296,57 @@ await atest('back edges leaving one column by the same gutter each get a lane', 
   assert.ok(lower.pts[1][0] < upper.pts[1][0], 'the lower exit keeps the lane nearest the column, so the upper one does not cross it');
 });
 
+/* A blob's vertices wobble independently so it does not read as a clean
+   ellipse, and without scaling each half back to its side of the box the ink
+   sat 10-16px inside left/right and 9-12px inside top/bottom — leaving every
+   routed edge hanging in empty background. */
+test('a blob reaches the edges of its box on all four sides while keeping its wobble', () => {
+  const sample = d => {
+    const out = [];
+    let cx = 0, cy = 0;
+    for (const m of d.matchAll(/([MLQ])\s*([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+)\s+([-\d.]+))?/g)) {
+      if (m[1] === 'Q') {
+        const qx = +m[2], qy = +m[3], ex = +m[4], ey = +m[5];
+        for (let k = 1; k <= 20; k++) {
+          const t = k / 20, u = 1 - t;
+          out.push([u * u * cx + 2 * u * t * qx + t * t * ex, u * u * cy + 2 * u * t * qy + t * t * ey]);
+        }
+        cx = ex; cy = ey;
+      } else {
+        cx = +m[2]; cy = +m[3];
+        out.push([cx, cy]);
+      }
+    }
+    return out;
+  };
+
+  for (const id of ['predict', 'update', 'b', 'region', 'leaf']) {
+    const b = emptyBoard();
+    applyOps(b, [{ op: 'node', id, kind: 'blob', label: id, sub: 'uneven mass' }]);
+    const r = renderSVG(b, { hand: false });
+    const box = r.boxes[id];
+    const m = r.svg.match(/<g class="node" data-node="[^"]+"[^>]*>[\s\S]*?<path class="s" d="([^"]+)"/);
+    assert.ok(m, `${id}: outline stroke should exist`);
+    const pts = sample(m[1]);
+    const left = Math.min(...pts.map(p => p[0])) - box.x;
+    const right = (box.x + box.w) - Math.max(...pts.map(p => p[0]));
+    const top = Math.min(...pts.map(p => p[1])) - box.y;
+    const bottom = (box.y + box.h) - Math.max(...pts.map(p => p[1]));
+    for (const [side, inset] of [['left', left], ['right', right], ['top', top], ['bottom', bottom]]) {
+      assert.ok(inset <= 6, `${id} ${side} ink sits ${inset.toFixed(1)}px inside the box`);
+    }
+    // Not a clean symmetric ellipse: opposite slices across cy differ.
+    const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+    let maxAsym = 0;
+    for (let dx = -50; dx <= 50; dx += 10) {
+      const yTop = Math.max(...pts.filter(p => Math.abs(p[0] - (cx + dx)) < 4 && p[1] < cy).map(p => cy - p[1]));
+      const yBot = Math.max(...pts.filter(p => Math.abs(p[0] - (cx + dx)) < 4 && p[1] > cy).map(p => p[1] - cy));
+      maxAsym = Math.max(maxAsym, Math.abs(yTop - yBot));
+    }
+    assert.ok(maxAsym > 1.5, `${id} should stay asymmetric rather than a clean ellipse (got ${maxAsym.toFixed(2)})`);
+  }
+});
+
 await atest('every gutter is wide enough for the widest tag that crosses it', async () => {
   const r = renderSVG(await drawn(crowded));
   const gs = gutters(r);

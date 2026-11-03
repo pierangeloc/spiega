@@ -278,11 +278,20 @@ function gFormula(box, n, m, seed) {
 function gBlob(box, n, m, seed) {
   const { x, y, w, h } = box;
   const cx = x + w / 2, cy = y + h / 2, r = rng(seed);
-  const pts = Array.from({ length: 10 }, (_, i) => {
+  /* The vertices wobble independently so the mass does not read as a clean
+     ellipse, then each half is scaled out to its side of the box so the ink
+     still meets the box edges where routed lines arrive. */
+  const raw = Array.from({ length: 10 }, (_, i) => {
     const a = (i / 10) * Math.PI * 2;
     const kx = 0.93 + r() * 0.07, ky = 0.78 + r() * 0.22;
-    return [cx + Math.cos(a) * w * 0.46 * kx, cy + Math.sin(a) * h * 0.4 * ky];
+    return [Math.cos(a) * kx, Math.sin(a) * ky];
   });
+  const rx0 = Math.min(...raw.map(p => p[0])), rx1 = Math.max(...raw.map(p => p[0]));
+  const ry0 = Math.min(...raw.map(p => p[1])), ry1 = Math.max(...raw.map(p => p[1]));
+  const pts = raw.map(([rx, ry]) => [
+    cx + (rx < 0 ? rx / -rx0 : rx / rx1) * w * 0.5,
+    cy + (ry < 0 ? ry / -ry0 : ry / ry1) * h * 0.5,
+  ]);
   const body = roughPoly(pts, { seed, amp: 1.1, step: 24 });
   const under = roughPoly(pts.map(([px, py]) => [px, py + 6]), { seed: seed + 2, amp: 1.1, step: 24 });
 
