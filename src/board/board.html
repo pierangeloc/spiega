@@ -100,6 +100,10 @@
   /* ---- the board ---- */
   .stage{grid-column:2;position:relative;overflow:hidden;min-width:0;cursor:grab;-webkit-user-select:none;user-select:none}
   .stage.drag{cursor:grabbing}
+  /* user-select is inherited, so the rule above reaches everything laid over
+     the board too. Those are text somebody has to be able to copy: the command
+     the empty board shows, and the reason a board is not being saved. */
+  .blank code,.warnings,.caption,.steps{-webkit-user-select:text;user-select:text}
   .pan{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform}
   .pan svg{display:block}
   .pan text{font-family:var(--mono)}
@@ -803,7 +807,7 @@ stage.addEventListener('wheel', e => {
 
 let drag = null;
 stage.addEventListener('pointerdown', e => {
-  if (e.target.closest('.steps')) return;
+  if (e.target.closest('.steps, .blank code, .warnings, .caption')) return;
   drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
   stage.classList.add('drag'); stage.setPointerCapture(e.pointerId);
 });
