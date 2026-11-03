@@ -249,4 +249,12 @@ Headless Chrome on a static rendered file; `rsvg-convert` for the docs SVGs.
 
 ## PR
 
-PR_URL_PLACEHOLDER
+**Not opened.** The branch `issue-53-gutter-width` is pushed to origin, but
+`gh pr create` failed: `gh auth status` says "You are not logged into any GitHub
+hosts" (no GH_TOKEN, and `~/.config/gh/hosts.yml` holds no token). I did not pull
+the git keychain credential into `gh` to get round it. The PR body I would have
+used is at `/tmp/prbody.md`. Once `gh auth login` is done:
+
+    gh pr create --head issue-53-gutter-width --base main \
+      --title "Make room for tags: per-boundary gutters, wrapped node text and pills (#53)" \
+      --body-file /tmp/prbody.md
