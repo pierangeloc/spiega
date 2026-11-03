@@ -104,6 +104,24 @@ test('a step whose lights is not an array of string ids is refused, on both rout
   assert.deepEqual(b.flow[0].lights, ['a', 'b'], 'a real list still lands');
 });
 
+/* An op is an object with a string `op`. `[null]` in an ops array is the other
+   thing a client can post by hand, and it used to throw on `op.op` — inside the
+   request handler, so the same dead process as the boundary above. */
+test('a value that is not an op is refused, not thrown', () => {
+  const b = emptyBoard();
+  applyOps(b, [{ op: 'node', id: 'a', label: 'A' }]);
+  const { errors, applied } = applyOps(b, [null, 'node', { op: 5 }, { op: 'say', text: 'still said' }]);
+  assert.equal(errors.length, 3, 'each bad value is its own error');
+  assert.match(errors[0], /not an op: expected an object with a string "op", got null/);
+  assert.match(errors[1], /got string/);
+  assert.match(errors[2], /"op" must be a string/);
+  assert.equal(applied.length, 1, 'the op beside them still landed');
+  assert.deepEqual(b.transcript.map(x => x.text), ['still said']);
+
+  // and nothing reaches the log, so a reload cannot bring it back
+  assert.ok(!b.log.some(e => e == null || typeof e.op !== 'string'));
+});
+
 test('columns come from the edges', () => {
   const b = emptyBoard();
   applyOps(b, [
@@ -1247,6 +1265,61 @@ await atest('a board that cannot be drawn says so with a 500, and the server sta
     const st = await fetch(U + '/state');
     assert.equal(st.status, 200, 'the server is still answering afterwards');
     assert.equal((await st.json()).nodes.length, 1, 'and the board is still there');
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise(r => server.close(r));
+  }
+});
+
+/* `/op` is the route a model posts to continuously, mid-sentence, so it is the
+   one where a bad op actually arrives: `[null]` in the array, or a body that is
+   `null` outright. Both used to throw on `op.op` inside this handler — the same
+   dead process as the boundary in #65, and every other board with it. The door
+   refuses them now, and the route keeps any throw it cannot foresee. */
+await atest('a malformed POST /op costs the request, not the server', async () => {
+  const { createServer } = await import('../src/board/server.js');
+  const { server, board } = createServer();
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const U = `http://127.0.0.1:${server.address().port}/b/default`;
+  const post = body => fetch(U + '/op', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  try {
+    applyOps(board, [{ op: 'node', id: 'a', label: 'A' }]);
+
+    const r = await post({ ops: [null, 'node', { op: 5 }, { op: 'say', text: 'still said' }] });
+    assert.equal(r.status, 207);
+    const answer = await r.json();
+    assert.equal(answer.ok, false);
+    assert.equal(answer.errors.length, 3, 'each bad value is reported');
+    assert.match(answer.errors[0], /not an op/);
+    assert.equal(answer.nodes, 1, 'and the good op beside them is not lost');
+
+    const st = await fetch(U + '/state');
+    assert.equal(st.status, 200, 'the server is still answering');
+    assert.deepEqual((await st.json()).transcript.map(x => x.text), ['still said'],
+      'the op beside the bad ones landed');
+
+    const nullBody = await fetch(U + '/op', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: 'null',
+    });
+    assert.equal(nullBody.status, 207, 'a null body is one refused op, not a dead server');
+
+    /* And the catch itself. applyOps refuses everything it can see is wrong, so
+       a throw has to be forced to prove the route keeps it: a board whose log
+       cannot take a line is a way the handler can still throw after the guard. */
+    const push = board.log.push;
+    board.log.push = () => { throw new Error('the log is not taking lines'); };
+    try {
+      const thrown = await post({ ops: [{ op: 'say', text: 'into a broken log' }] });
+      assert.equal(thrown.status, 500);
+      const body = await thrown.json();
+      assert.equal(body.ok, false);
+      assert.match(body.error, /could not apply these ops: the log is not taking lines/);
+    } finally {
+      board.log.push = push;
+    }
+    assert.equal((await fetch(U + '/state')).status, 200, 'the server is still up afterwards');
   } finally {
     server.closeAllConnections?.();
     await new Promise(r => server.close(r));

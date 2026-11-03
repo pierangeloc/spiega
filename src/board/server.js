@@ -74,6 +74,14 @@ const failedRender = (res, e) => {
   return res.end(`spiega could not draw this board: ${message}\n`);
 };
 
+/* The same rule for the route a model actually posts to, mid-sentence. Its
+   callers parse the answer, so a failed batch answers in the shape they expect
+   rather than as plain text they would choke on. */
+const failedOp = (res, e) => {
+  const message = e && e.message ? e.message : String(e);
+  return json(res, 500, { ok: false, error: `spiega could not apply these ops: ${message}` });
+};
+
 const readBody = req => new Promise((resolve, reject) => {
   let b = '';
   req.on('data', c => { b += c; if (b.length > 4e6) reject(new Error('body too large')); });
@@ -306,7 +314,13 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
       let ops;
       try { ops = JSON.parse(await readBody(req)); }
       catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + e.message }); }
-      const { fresh, errors, applied } = applyOps(board, ops.ops || ops);
+      let result;
+      /* applyOps refuses what it can see is wrong; this is for what it cannot,
+         so a malformed batch still costs one request rather than the process.
+         The body itself can be `null`, so even reading `ops.ops` is in here. */
+      try { result = applyOps(board, ops && ops.ops ? ops.ops : ops); }
+      catch (e) { return failedOp(res, e); }
+      const { fresh, errors, applied } = result;
       /* No file I/O and no await here: the ops go into the log writer's buffer
          and the flush happens on its own timer. This route is on the critical
          path of somebody talking. */
