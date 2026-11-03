@@ -76,8 +76,11 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   const nodes = spec.nodes || [];
   const edges = spec.edges || [];
   const place = assign({ nodes, edges }, placed || {});
-  const { boxes, width, height } = layout({ nodes, edges }, place);
   const { stepOf, steps } = indexFlow(spec);
+  /** @param {{e: any, key: string}} r */
+  const stepFor = r => (r.e.step != null ? r.e.step : (stepOf[r.key] ?? null));
+  // the gutters are sized for the tags that cross them, step numbers included
+  const { boxes, width, height } = layout({ nodes, edges }, place, e => stepFor({ e, key: edgeKey(e) }));
   const focus = focusAt(spec, steps, active);
 
   /* Callouts are planned before the canvas is sized, because a label can sit
@@ -104,8 +107,6 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   }
 
   const planned = planEdges(edges, boxes);
-  /** @param {{e: any, key: string}} r */
-  const stepFor = r => (r.e.step != null ? r.e.step : (stepOf[r.key] ?? null));
   // every tag resolved against every other before any is drawn, or two edges
   // leaving the same box land their pills on the same spot
   const tags = planTags(planned, stepFor);

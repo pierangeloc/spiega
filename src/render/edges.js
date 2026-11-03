@@ -9,10 +9,10 @@
    ============================================================ */
 
 import { INK, MUTED, ACCENT, PANEL, PAPER } from './theme.js';
-import { roughLine, roughPoly, roughRect, roughEllipse, stroke, fill, text, arrowHead, hashSeed, lettering } from './ink.js';
-import { backEdges } from './layout.js';
+import { roughLine, roughPoly, roughRect, roughEllipse, stroke, fill, text, arrowHead, hashSeed, lettering, tagLines, pillSize } from './ink.js';
+import { backEdges, KNEE, EDGE_GAP } from './layout.js';
 
-const GAP = 8;             // breathing room between a box edge and its line
+const GAP = EDGE_GAP;      // breathing room between a box edge and its line
 const FAN = 0.52;          // how much of a side's length the fan may spread over
 
 export const center = b => [b.x + b.w / 2, b.y + b.h / 2];
@@ -95,7 +95,7 @@ function route({ a, b, sa, sb, ta = 0, tb = 0, e, back, floor }) {
   if (horiz) {
     // Through the gutter: out, down (or up), in. The knee sits closer to the
     // source so a long fan stays readable near its origin.
-    const gx = A[0] + (B[0] - A[0]) * 0.42;
+    const gx = A[0] + (B[0] - A[0]) * KNEE;
     return [A, [gx, A[1]], [gx, B[1]], B];
   }
   const gy = A[1] + (B[1] - A[1]) * 0.5;
@@ -121,25 +121,28 @@ function tagSpot(pts) {
 }
 
 /* A small paper-backed pill — edge tags, and anything else that needs to sit
-   legibly on top of a line. */
+   legibly on top of a line. `label` is a string, or the lines it has already
+   been wrapped into; a long tag is two short lines rather than one wide one,
+   because the gutter it has to sit in is only so wide. */
 export function pill(cx, cy, label, {
   size = 10.5, bg = PANEL, fg = INK, border = INK, seed = 1, padX = 9, h = 19,
   weight = 700, spacing = 0.09,
 } = {}) {
-  const s = lettering(label);
-  const w = s.length * size * 0.62 + padX * 2;
-  const d = roughRect(cx - w / 2, cy - h / 2, w, h, h / 2, { seed, amp: 0.6, step: 16 });
+  const lines = (Array.isArray(label) ? label : [lettering(label)]);
+  const box = pillSize(lines, { size, padX, h });
+  const lh = size * 1.2;
+  const d = roughRect(cx - box.w / 2, cy - box.h / 2, box.w, box.h, h / 2, { seed, amp: 0.6, step: 16 });
+  const first = cy - (lines.length - 1) * lh / 2 + size * 0.36;
   return fill(d, bg) + stroke(d, { w: 1.2, color: border }) +
-    text(cx, cy + size * 0.36, s, { size, color: fg, weight, spacing });
+    lines.map((s, i) => text(cx, first + i * lh, s, { size, color: fg, weight, spacing })).join('');
 }
 
 /* The step number and the label travel together as one tag, so they can never
    land on top of each other. */
 function edgeTag(at, step, label, { lit, seed }) {
-  const txt = label ? String(label) : '';
-  const full = step != null ? (txt ? `${step}  ${txt}` : String(step)) : txt;
-  if (!full) return '';
-  return pill(at[0], at[1], full, {
+  const lines = tagLines(label, step);
+  if (!lines.length) return '';
+  return pill(at[0], at[1], lines, {
     seed, bg: lit ? ACCENT : PANEL,
     fg: lit ? PAPER : INK, border: lit ? ACCENT : INK,
     size: 10.5, padX: 10,
@@ -159,24 +162,23 @@ function edgeTag(at, step, label, { lit, seed }) {
  */
 export function tagBox(r, step) {
   const { e } = r;
-  const label = (step != null ? String(step) + '  ' : '') + (e.label || '');
   const spot = tagSpot(r.pts);
-  const w = lettering(label).length * 6.51 + 20;
+  const { w, h } = pillSize(tagLines(e.label, step));
   let at = spot.at, away = 0;
   if (w > spot.len * 0.95) {
     const { a, b } = r;
     if (!spot.vertical) {
       away = b.x >= a.x ? -1 : 1;
       at = away < 0
-        ? [spot.at[0], Math.min(a.y, b.y) - 13]
-        : [spot.at[0], Math.max(a.y + a.h, b.y + b.h) + 13];
+        ? [spot.at[0], Math.min(a.y, b.y) - (h / 2 + 3.5)]
+        : [spot.at[0], Math.max(a.y + a.h, b.y + b.h) + h / 2 + 3.5];
     } else {
       at = b.y >= a.y
         ? [Math.max(a.x + a.w, b.x + b.w) + w / 2 + 10, spot.at[1]]
         : [Math.min(a.x, b.x) - w / 2 - 10, spot.at[1]];
     }
   }
-  return { at, w, h: 19, away };
+  return { at, w, h, away };
 }
 
 /* Tags are placed one edge at a time, which is exactly why they collide: a

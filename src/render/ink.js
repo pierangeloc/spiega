@@ -247,4 +247,67 @@ export function wrapText(s, max = 24, maxLines = 5) {
   return [...lines.slice(0, maxLines - 1), '\u2026'];
 }
 
+/* How much text a node may carry on one line before it wraps.
+
+   A box used to be as wide as its longest line, so a `sub` that was a sentence
+   made a 300px box out of a one-word label, and every gutter next to it had to
+   be wider to match. The measure is set by what a box should look like, not by
+   what was typed: about two hundred pixels of lettering at each size, which is
+   the width the standard boxes already have. A single word longer than that is
+   left whole, since a name cut in half is a different name. */
+export const NODE_TITLE_CHARS = 22;
+export const NODE_SUB_CHARS = 30;
+export const NODE_TEXT_LINES = 3;
+export const NODE_TITLE_LH = 16;
+export const NODE_SUB_LH = 12;
+
+/* A node's label and sub as lines, and how far the block grows past the one
+   title line and one sub line that every box is already tall enough for. The
+   glyphs draw from these lines and layout sizes the box from the same ones, so
+   the two cannot disagree about how tall the text is. */
+/**
+ * @param {string} [label]
+ * @param {string} [sub]
+ * @returns {{title: string[], sub: string[], extra: number}}
+ */
+export function nodeText(label, sub) {
+  const title = label ? wrapText(label, NODE_TITLE_CHARS, NODE_TEXT_LINES) : [];
+  const subs = sub ? wrapText(sub, NODE_SUB_CHARS, NODE_TEXT_LINES) : [];
+  const extra = Math.max(0, title.length - 1) * NODE_TITLE_LH + Math.max(0, subs.length - 1) * NODE_SUB_LH;
+  return { title, sub: subs, extra };
+}
+
+/* An edge tag is a pill of lettering. These are the numbers it is measured by,
+   kept here so the pill that draws it and the layout that must leave room for
+   it cannot drift apart. */
+export const TAG_SIZE = 10.5;
+export const TAG_PAD_X = 10;
+export const TAG_CHARS = 16;
+export const TAG_LINES = 3;
+export const TAG_H = 19;
+
+/* The lines a tag is lettered in. The step number rides on the first line so
+   it can never be separated from the words it numbers. */
+/**
+ * @param {string} [label]
+ * @param {number|null} [step]
+ * @returns {string[]}
+ */
+export function tagLines(label, step = null) {
+  const words = [step != null ? String(step) : '', label ? String(label) : ''].filter(Boolean).join(' ');
+  if (!words) return [];
+  return wrapText(lettering(words), TAG_CHARS, TAG_LINES);
+}
+
+/* How wide a pill is, and how tall, for these lines. */
+/**
+ * @param {string[]} lines
+ * @param {{size?: number, padX?: number, h?: number}} [o]
+ * @returns {{w: number, h: number}}
+ */
+export function pillSize(lines, { size = TAG_SIZE, padX = TAG_PAD_X, h = TAG_H } = {}) {
+  const longest = Math.max(0, ...lines.map(l => l.length));
+  return { w: longest * size * 0.62 + padX * 2, h: h + Math.max(0, lines.length - 1) * size * 1.2 };
+}
+
 export { esc, f as round2 };

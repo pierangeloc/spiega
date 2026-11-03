@@ -9,7 +9,8 @@
 import { INK, MUTED, SHADOW, ACCENT, bodyOf, mix } from './theme.js';
 import {
   roughRect, roughLine, roughEllipse, roughArc, roughPoly, roundedPts,
-  stroke, fill, text, hashSeed, rng, wrapText, NOTE_LINES, lettering } from './ink.js';
+  stroke, fill, text, hashSeed, rng, wrapText, NOTE_LINES, lettering,
+  nodeText, NODE_TITLE_LH, NODE_SUB_LH } from './ink.js';
 import { measureMath, drawMath } from './math.js';
 
 const SH_DX = 5, SH_DY = 6;          // the cast shadow sits down and to the left-ish
@@ -20,11 +21,19 @@ const R = 12;                         // default corner radius
 const castShadow = (d, dx = SH_DX, dy = SH_DY) =>
   `<g class="shadow" transform="translate(${dx} ${dy})">${fill(d, SHADOW, { opacity: 0.17 })}</g>`;
 
+/* A title and a sub, each wrapped (see nodeText), the block centred on `cy`. A
+   title of one line over a sub of one line lands exactly where it always did;
+   every extra line moves the block up by half a line so it grows both ways. */
 const labelBlock = (cx, cy, title, subtitle, { titleSize = 13.5, color = INK } = {}) => {
   if (!title) return '';
-  const dy = subtitle ? -3 : 4.5;
-  return text(cx, cy + dy, title, { size: titleSize, color, upper: true, spacing: 0.06 }) +
-    (subtitle ? text(cx, cy + 13, subtitle, { size: 10, color: MUTED, weight: 500, spacing: 0.04 }) : '');
+  const t = nodeText(title, subtitle);
+  const top = cy + (subtitle ? -3 : 4.5) - t.extra / 2;
+  let out = t.title.map((ln, i) =>
+    text(cx, top + i * NODE_TITLE_LH, ln, { size: titleSize, color, upper: true, spacing: 0.06 })).join('');
+  const subTop = top + 16 + (t.title.length - 1) * NODE_TITLE_LH;
+  out += t.sub.map((ln, j) =>
+    text(cx, subTop + j * NODE_SUB_LH, ln, { size: 10, color: MUTED, weight: 500, spacing: 0.04 })).join('');
+  return out;
 };
 
 /* The band along the bottom edge that gives a flat shape its thickness.
@@ -79,6 +88,18 @@ function gDatastore(box, n, m, seed) {
     labelBlock(cx, y + h / 2 + ry / 2, n.label, n.sub);
 }
 
+/* A queue's words sit under the slots, not in them, so it is the strip below
+   that grows when they wrap. */
+function queueLabel(cx, bottom, n) {
+  const t = nodeText(n.label, n.sub);
+  const title = t.title.length ? t.title : [''];
+  return title.map((ln, i) =>
+      text(cx, bottom + 17 + i * NODE_TITLE_LH, ln, { size: 12, upper: true, spacing: 0.06 })).join('') +
+    t.sub.map((ln, j) =>
+      text(cx, bottom + 30 + (title.length - 1) * NODE_TITLE_LH + j * NODE_SUB_LH, ln,
+        { size: 10, color: MUTED, weight: 500 })).join('');
+}
+
 /* A queue shows its slots, and fills a few of them, so depth is visible at a
    glance. The filled count is cosmetic unless the spec sets n.depth. */
 function gQueue(box, n, m, seed) {
@@ -99,8 +120,7 @@ function gQueue(box, n, m, seed) {
     }
   }
   return castShadow(body) + fill(body, m.l) + inner + stroke(body, { w: 2 }) +
-    text(x + w / 2, y + h + 17, n.label || '', { size: 12, upper: true, spacing: 0.06 }) +
-    (n.sub ? text(x + w / 2, y + h + 30, n.sub, { size: 10, color: MUTED, weight: 500 }) : '');
+    queueLabel(x + w / 2, y + h, n);
 }
 
 /* A cache is inked twice — the doubled outline is the visual shorthand for
