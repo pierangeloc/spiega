@@ -64,7 +64,25 @@ thing once and then rots.
 ```sh
 node tools/example.js test/boards/issue-53-crowding.json \
   docs/regressions/issue-53-crowding.svg
+node tools/regressions.js        # rewrites docs/regressions.md
 ```
+
+Describe the board in `test/boards/manifest.json` — what broke, and what the
+fix changed. `tools/regressions.js` refuses to write the page for a board that
+is not in there, because a picture of a board nobody explains is a puzzle.
+
+**When you fix one, freeze the wrong picture first:**
+
+```sh
+cp docs/regressions/issue-52-fan-out.svg \
+   docs/regressions/issue-52-fan-out-before.svg
+```
+
+`<board>-before.svg` is the state the bug was reported in. Nothing regenerates
+it, ever. That is the whole point: a before-and-after made of two commits on
+one file is destroyed the moment its pull request is squashed, and the first
+time that happened the comparison survived only as a URL into a closed PR. Two
+files in the tree survive any merge strategy anyone picks later.
 
 Do not put these in `examples/`. Those three are the showcase and are meant to
 look good; these are meant to be the boards that once looked wrong.
