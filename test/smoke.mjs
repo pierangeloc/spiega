@@ -2034,6 +2034,35 @@ const gutters = r => {
   });
 };
 
+/* A queue is the one glyph whose name lives outside it, in a strip below the
+   drawing. Everything that routes against a node used the box, and the strip
+   is not in the box. */
+await atest('a line leaves below the words written under a box', async () => {
+  const boards = [
+    ...fs.readdirSync(path.join(ROOT, 'test/boards')).filter(f => f.endsWith('.json'))
+      .map(f => [`test/boards/${f}`, path.join(ROOT, 'test/boards', f)]),
+    ...fs.readdirSync(path.join(ROOT, 'examples')).filter(f => f.endsWith('.json'))
+      .map(f => [`examples/${f}`, path.join(ROOT, 'examples', f)]),
+  ];
+
+  const through = [];
+  for (const [name, file] of boards) {
+    const r = renderSVG(await drawn(JSON.parse(fs.readFileSync(file, 'utf8'))));
+    for (const [id, b] of Object.entries(r.boxes)) {
+      if (!b.labelBelow) continue;
+      /* The band the words occupy, inset so a line grazing the corner of a
+         wide strip is not called a strike through the middle of a short name. */
+      const top = b.y + b.h, bot = top + b.labelBelow;
+      const x0 = b.x + b.w * 0.25, x1 = b.x + b.w * 0.75;
+      for (const p of r.planned)
+        for (const [x, y] of p.pts || [])
+          if (y > top && y < bot && x > x0 && x < x1)
+            through.push(`${name}: the line on ${p.key} turns inside ${id}'s label`);
+    }
+  }
+  assert.deepEqual(through, []);
+});
+
 await atest('every gutter is wide enough for the widest tag that crosses it', async () => {
   const r = renderSVG(await drawn(crowded));
   const gs = gutters(r);
