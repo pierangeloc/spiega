@@ -98,7 +98,7 @@
   @keyframes in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
 
   /* ---- the board ---- */
-  .stage{grid-column:2;position:relative;overflow:hidden;min-width:0;cursor:grab}
+  .stage{grid-column:2;position:relative;overflow:hidden;min-width:0;cursor:grab;-webkit-user-select:none;user-select:none}
   .stage.drag{cursor:grabbing}
   .pan{position:absolute;top:0;left:0;transform-origin:0 0;will-change:transform}
   .pan svg{display:block}
