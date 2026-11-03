@@ -21,15 +21,15 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps, boardOps } from './state.js';
 import { restoreBoard, createLog, boardLogFile } from './log.js';
+import { home } from '../home.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
-const SESSION_DIR = path.join(os.homedir(), '.spiega');
+const SESSION_DIR = path.join(home(), '.spiega');
 
 /* The old name's variables still work.
 

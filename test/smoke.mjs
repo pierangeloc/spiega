@@ -3185,6 +3185,54 @@ await atest('boards persist across a restart, and POST /op keeps its latency bud
   process.stdout.write(stdout);
 });
 
+/* The state directory belongs to HOME, not to the runtime's idea of home.
+
+   Bun resolves the home directory once at startup and never re-reads HOME, so
+   a suite that isolates itself by reassigning HOME wrote into the developer's
+   real ~/.spiega — and the next run appended to a board file already there,
+   which read as a persistence bug. Node happens to agree with HOME, so only
+   Bun showed it.
+
+   Assert the resolution rather than the runtime: the child is given a temp
+   HOME and an os.homedir() that still answers the real one, exactly what Bun
+   does. The runtime's cached answer has to lose to HOME. */
+await atest('the state directory follows HOME, not the runtime\'s cached home', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-state-home-'));
+  const decoy = path.join(tmpHome, 'not-the-home');
+  const server = JSON.stringify(path.join(ROOT, 'src', 'board', 'server.js'));
+
+  const resolved = async env => {
+    const { stdout } = await promisify(execFile)(process.execPath,
+      ['--input-type=module', '-e',
+        `import os from 'node:os';
+         os.homedir = () => ${JSON.stringify(decoy)};
+         const { SESSION_FILE, BOARDS_DIR } = await import(${server});
+         console.log(JSON.stringify({ session: SESSION_FILE, boards: BOARDS_DIR }));`],
+      { env, maxBuffer: 1 << 20 });
+    return JSON.parse(stdout.trim());
+  };
+
+  try {
+    const both = await resolved(isolatedEnv(tmpHome));
+    assert.equal(both.session, path.join(tmpHome, '.spiega', 'session.json'));
+    assert.equal(both.boards, path.join(tmpHome, '.spiega', 'boards'));
+
+    // Windows: USERPROFILE is the home when HOME is not set
+    const winEnv = { ...process.env, USERPROFILE: tmpHome };
+    delete winEnv.HOME;
+    delete winEnv.PI_CODING_AGENT_DIR;
+    delete winEnv.XDG_CONFIG_HOME;
+    const win = await resolved(winEnv);
+    assert.equal(win.session, path.join(tmpHome, '.spiega', 'session.json'),
+      'USERPROFILE is the home when HOME is not set');
+    assert.equal(win.boards, path.join(tmpHome, '.spiega', 'boards'));
+  } finally {
+    fs.rmSync(tmpHome, { recursive: true, force: true });
+  }
+});
+
 /* The browser loads these modules off disk, unbundled, so anything they import
    must exist in a browser. A `node:` builtin anywhere in that graph does not
    fail a test or a lint — it fails silently at runtime, the module graph never

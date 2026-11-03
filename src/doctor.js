@@ -20,17 +20,17 @@
    ============================================================ */
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { START, END, BLOCK } from './agents-block.js';
 import { c, sym, pad, heading } from './term.js';
 import { piDir, piInstructionsFile, piMcpEntry } from './pi.js';
+import { home } from './home.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
-const HOME = os.homedir();
+const HOME = home();
 const MCP_ENTRY = path.join(ROOT, 'src', 'mcp', 'server.js');
 // honoured, not assumed — see the note in install.js; a profile sets it per launch
 const CONFIG = process.env.XDG_CONFIG_HOME || path.join(HOME, '.config');

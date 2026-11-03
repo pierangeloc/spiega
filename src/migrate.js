@@ -19,12 +19,12 @@
    ============================================================ */
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { dropTable } from './toml.js';
+import { home } from './home.js';
 
-const HOME = os.homedir();
+const HOME = home();
 const OLD = 'handwave';
 const NEW = 'spiega';
 

@@ -8,7 +8,6 @@
    ============================================================ */
 
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -16,6 +15,7 @@ import { upsertBlock } from './agents-block.js';
 import { upsertTable } from './toml.js';
 import { piDir, piInstructionsFile, piMcpEntry } from './pi.js';
 import { c, sym, pad, shortPath } from './term.js';
+import { home } from './home.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -23,7 +23,7 @@ const MCP_ENTRY = path.join(ROOT, 'src', 'mcp', 'server.js');
 /* The sh launcher, not cli.js: it resolves a node that clears the engines
    floor instead of trusting whatever `env node` happens to be. */
 const LAUNCHER = path.join(ROOT, 'bin', 'spiega');
-const HOME = os.homedir();
+const HOME = home();
 /* The node the launcher should try before it starts guessing, written by
    recordNode() below and read by bin/spiega. */
 const NODE_FILE = path.join(HOME, '.spiega', 'node');
