@@ -1,0 +1,18 @@
+{
+  "title": "crowding repro",
+  "nodes": [
+    { "id": "endpoints", "kind": "service", "label": "endpoints", "sub": "HTTP contract + required-right metadata" },
+    { "id": "api", "kind": "service", "label": "api", "sub": "authenticate + enforce declared access" },
+    { "id": "docs", "kind": "service", "label": "endpointsDocumentation", "sub": "generate OpenAPI + rights matrix" },
+    { "id": "frontend", "kind": "client", "label": "frontend", "sub": "Opladen + confirmation" },
+    { "id": "partners", "kind": "service", "label": "service-partners-api" },
+    { "id": "invoice", "kind": "service", "label": "invoicing", "sub": "finalize + franking" }
+  ],
+  "edges": [
+    { "from": "endpoints", "to": "api", "label": "read declared access" },
+    { "from": "endpoints", "to": "docs", "label": "read same metadata" },
+    { "from": "frontend", "to": "partners", "label": "finalize run + triggering user" },
+    { "from": "partners", "to": "invoice" }
+  ],
+  "flow": [ { "edge": "frontend>partners", "step": "POST /invoice-runs/{id}/payments/send" } ]
+}

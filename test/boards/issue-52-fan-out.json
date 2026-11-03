@@ -1,0 +1,21 @@
+{
+  "title": "fan-out labels",
+  "nodes": [
+    { "id": "client", "kind": "client",    "label": "Client" },
+    { "id": "worker", "kind": "compute",   "label": "Worker" },
+    { "id": "db",     "kind": "datastore", "label": "Postgres" },
+    { "id": "dlq",    "kind": "queue",     "label": "DLQ" }
+  ],
+  "edges": [
+    { "from": "client", "to": "worker", "label": "submit" },
+    { "from": "worker", "to": "db",     "label": "commit" },
+    { "from": "worker", "to": "dlq",    "label": "park", "async": true },
+    { "from": "dlq",    "to": "client", "label": "alert", "async": true }
+  ],
+  "flow": [
+    { "edge": "client>worker", "step": "Client submits" },
+    { "edge": "worker>db",     "step": "Worker commits" },
+    { "edge": "worker>dlq",    "step": "Or parks the job" },
+    { "edge": "dlq>client",    "step": "Client is alerted" }
+  ]
+}

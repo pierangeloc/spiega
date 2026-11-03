@@ -28,6 +28,13 @@ function sides(a, b) {
 }
 
 /* A point on one side of a box, `t` from -1 (top/left) to 1 (bottom/right). */
+/* A queue keeps its name in a strip under the glyph rather than inside it, so
+   the bottom of the box is not the bottom of the node. A line that left at
+   box.y + box.h ran down through its own label: the closing edge of a cycle
+   left the DLQ and struck its name through, which read as `D|Q`. Every other
+   side clears the drawing by GAP, and this one has to clear the words too. */
+const bottomOf = box => box.y + box.h + (box.labelBelow || 0);
+
 function sidePoint(box, side, t = 0) {
   const [cx, cy] = center(box);
   const hx = box.w / 2, hy = box.h / 2;
@@ -35,7 +42,7 @@ function sidePoint(box, side, t = 0) {
     case 'right':  return [box.x + box.w + GAP, cy + hy * FAN * t];
     case 'left':   return [box.x - GAP,         cy + hy * FAN * t];
     case 'top':    return [cx + hx * FAN * t,   box.y - GAP];
-    default:       return [cx + hx * FAN * t,   box.y + box.h + GAP];
+    default:       return [cx + hx * FAN * t,   bottomOf(box) + GAP];
   }
 }
 
@@ -47,7 +54,7 @@ export function planEdges(edges, boxes) {
      because that is what a loop looks like. Routed like any other edge it
      would run right-to-left straight through every box between its ends. */
   const back = backEdges(Object.keys(boxes).map(id => ({ id })), edges);
-  const floor = Math.max(0, ...Object.values(boxes).map(b => b.y + b.h)) + 46;
+  const floor = Math.max(0, ...Object.values(boxes).map(bottomOf)) + 46;
 
   const rec = edges.map(e => {
     const a = boxes[e.from], b = boxes[e.to];
