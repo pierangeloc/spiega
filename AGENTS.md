@@ -46,6 +46,29 @@ tray, and a warning banner that ran off the edge of the pane mid-sentence.
 If you changed a glyph, the layout, or anything in `board.html`'s stylesheet,
 render it and put your eyes on it before saying it works.
 
+### A board that broke once is kept
+
+`test/boards/*.json` are the specs from reported rendering bugs and
+`docs/regressions/*.svg` are their pictures, regenerated and byte-checked by
+the suite like the gallery is. A board goes in whether or not its bug is fixed
+yet: a committed picture of a board that is still wrong is the thing the fix
+will be read against.
+
+Fixing a rendering bug means adding its repro spec there, named for its issue,
+and committing the picture alongside your change. The picture is the point:
+GitHub rich-diffs an SVG two-up, so the diff *is* the before-and-after of the
+board, and the next person to touch the renderer sees what they did to every
+board that has ever been wrong. A screenshot pasted into a PR says the same
+thing once and then rots.
+
+```sh
+node tools/example.js test/boards/issue-53-crowding.json \
+  docs/regressions/issue-53-crowding.svg
+```
+
+Do not put these in `examples/`. Those three are the showcase and are meant to
+look good; these are meant to be the boards that once looked wrong.
+
 ### Glyphs
 
 ```sh
