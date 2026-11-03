@@ -2223,6 +2223,79 @@ await atest('a line leaves below the words written under a box', async () => {
   assert.deepEqual(through, []);
 });
 
+/* A back edge used to drop from the bottom of its source to the floor and rise
+   into the bottom of its target without asking what stood in the column. A box
+   below either end had the line run straight through it, and the board read as
+   an edge between the wrong two things. Walk every route and ask the one thing
+   that matters: does any stretch of it lie inside a box that is not one of its
+   own two ends? */
+const THROUGH_INSET = 6;
+const crossings = r => {
+  const hit = [];
+  for (const p of r.planned) {
+    for (const [id, b] of Object.entries(r.boxes)) {
+      if (id === p.e.from || id === p.e.to) continue;
+      for (let i = 1; i < p.pts.length; i++) {
+        const [x0, y0] = p.pts[i - 1], [x1, y1] = p.pts[i];
+        const inside = Array.from({ length: 101 }, (_, k) => k / 100).some(t => {
+          const x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
+          return x > b.x + THROUGH_INSET && x < b.x + b.w - THROUGH_INSET
+            && y > b.y + THROUGH_INSET && y < b.y + b.h - THROUGH_INSET;
+        });
+        if (inside) { hit.push(`${p.key} runs through ${id}`); break; }
+      }
+    }
+  }
+  return hit;
+};
+
+await atest('no back edge runs through a box that is not one of its ends', async () => {
+  const boards = [
+    ...boardSpecs().map(f => [`test/boards/${f}`, path.join(ROOT, 'test/boards', f)]),
+    ...fs.readdirSync(path.join(ROOT, 'examples')).filter(f => f.endsWith('.json'))
+      .map(f => [`examples/${f}`, path.join(ROOT, 'examples', f)]),
+  ];
+  const found = [];
+  for (const [name, file] of boards) {
+    const r = renderSVG(await drawn(JSON.parse(fs.readFileSync(file, 'utf8'))));
+    for (const h of crossings({ ...r, planned: r.planned.filter(p => p.back) })) found.push(`${name}: ${h}`);
+  }
+  assert.deepEqual(found, []);
+});
+
+await atest('a back edge with nothing below either end still runs along the floor', async () => {
+  const r = renderSVG(await drawn({
+    nodes: [{ id: 'a', kind: 'service', label: 'A' }, { id: 'b', kind: 'service', label: 'B' }],
+    edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'a' }],
+  }));
+  const back = r.planned.find(p => p.back);
+  assert.equal(back.sa, 'bottom');
+  assert.equal(back.sb, 'bottom');
+  assert.equal(back.pts.length, 4, 'down, along, up: the shape it always had');
+});
+
+await atest('back edges leaving one column by the same gutter each get a lane', async () => {
+  const r = renderSVG(await drawn({
+    nodes: [
+      { id: 'hub', kind: 'service', label: 'Hub' },
+      { id: 'b', kind: 'client', label: 'B' },
+      { id: 'c', kind: 'client', label: 'C' },
+      { id: 'd', kind: 'client', label: 'D' },
+    ],
+    edges: [
+      { from: 'hub', to: 'b' }, { from: 'hub', to: 'c' }, { from: 'hub', to: 'd' },
+      { from: 'b', to: 'hub' }, { from: 'c', to: 'hub' },
+    ],
+  }));
+  const back = r.planned.filter(p => p.back);
+  assert.equal(back.length, 2);
+  assert.deepEqual(crossings(r).filter(h => back.some(p => h.startsWith(p.key))), []);
+  const lanes = back.map(p => p.pts[1][0]);
+  assert.notEqual(lanes[0], lanes[1], 'both drop down one vertical and read as a single line');
+  const [lower, upper] = [...back].sort((p, q) => q.pts[0][1] - p.pts[0][1]);
+  assert.ok(lower.pts[1][0] < upper.pts[1][0], 'the lower exit keeps the lane nearest the column, so the upper one does not cross it');
+});
+
 await atest('every gutter is wide enough for the widest tag that crosses it', async () => {
   const r = renderSVG(await drawn(crowded));
   const gs = gutters(r);

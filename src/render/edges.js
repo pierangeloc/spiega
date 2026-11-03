@@ -60,8 +60,19 @@ export function planEdges(edges, boxes) {
     const a = boxes[e.from], b = boxes[e.to];
     if (!a || !b) return null;
     const isBack = back.has(`${e.from}>${e.to}`);
-    const [sa, sb] = isBack ? ['bottom', 'bottom'] : sides(a, b);
-    const r = { e, a, b, sa, sb, key: edgeKey(e), back: isBack, floor };
+    /* A back edge leaves its source from the bottom and rises into its target
+       from the bottom, because a feedback loop runs along the floor. But the
+       two vertical legs are not checked against the boxes in their column: if
+       another box sits below the source or the target in the same column, the
+       straight drop runs through it and the line reads as an edge between the
+       wrong two boxes. Such a leg leaves the column instead — out of the
+       source's right side, or into the target's left — and travels down the
+       gutter beside the column, where there is nothing to cross. */
+    const [sa, sb] = isBack
+      ? [blockedBelow(a, boxes) ? 'right' : 'bottom', blockedBelow(b, boxes) ? 'left' : 'bottom']
+      : sides(a, b);
+    const r = { e, a, b, sa, sb, key: edgeKey(e), back: isBack, floor,
+      gutterA: colEdge(a, boxes, 'right'), gutterB: colEdge(b, boxes, 'left') };
     (groups[`${e.from}|${sa}`] ||= []).push({ r, end: 'a' });
     (groups[`${e.to}|${sb}`]   ||= []).push({ r, end: 'b' });
     return r;
@@ -82,17 +93,58 @@ export function planEdges(edges, boxes) {
     });
   }
 
+  /* Two back edges that both left a column by the gutter would drop down the
+     same vertical and read as one line. Each gets a lane of its own. The one
+     that leaves (or enters) lowest takes the lane nearest the column: the
+     others' horizontal runs pass above it, so nothing crosses on the way out. */
+  for (const [end, side, at] of [['a', 'right', 'gutterA'], ['b', 'left', 'gutterB']]) {
+    const s = end === 'a' ? 'sa' : 'sb', t = end === 'a' ? 'ta' : 'tb';
+    const lane = {};
+    for (const r of rec.filter(r => r.back && r[s] === side)
+      .sort((p, q) => sidePoint(q[end], side, q[t])[1] - sidePoint(p[end], side, p[t])[1])) {
+      const n = lane[r[end].col ?? 0] = (lane[r[end].col ?? 0] ?? -1) + 1;
+      r[at] += (side === 'right' ? 1 : -1) * n * BACK_LANE;
+    }
+  }
+
   for (const r of rec) r.pts = route(r);
   return rec;
 }
 
-function route({ a, b, sa, sb, ta = 0, tb = 0, e, back, floor }) {
+/* Is there another box below this one, in its column, overlapping it across?
+   The leg of a back edge drops (or rises) straight through its column; only a
+   box that overlaps it across is in the way. A neighbour elsewhere in the
+   column does not block it. */
+function blockedBelow(box, boxes) {
+  return Object.values(boxes).some(o => o !== box && (o.col ?? 0) === (box.col ?? 0)
+    && o.y > box.y && o.x < box.x + box.w && o.x + o.w > box.x);
+}
+
+/* A vertical line just outside a column: right of its widest box, or left of
+   it. A back edge whose leg is blocked below travels here, clear of everything
+   the column owns. */
+const BACK_GUTTER = 22;
+const BACK_LANE = 12;      // between two back edges sharing one gutter
+function colEdge(box, boxes, side) {
+  const col = Object.values(boxes).filter(o => (o.col ?? 0) === (box.col ?? 0));
+  return side === 'right'
+    ? Math.max(...col.map(o => o.x + o.w)) + BACK_GUTTER
+    : Math.min(...col.map(o => o.x)) - BACK_GUTTER;
+}
+
+function route({ a, b, sa, sb, ta = 0, tb = 0, e, back, floor, gutterA, gutterB }) {
   const A = sidePoint(a, sa, ta);
   const B = sidePoint(b, sb, tb);
 
   /* Down, back along the floor, and up into the target: the shape every
      control diagram uses for feedback, and the reason the loop reads as one. */
-  if (back) return [A, [A[0], floor], [B[0], floor], B];
+  if (back) {
+    /* A leg that leaves the column runs out to the gutter first, then drops
+       (or rises) there; one that is not blocked just drops in place. */
+    const out = sa === 'right' ? [[gutterA, A[1]], [gutterA, floor]] : [[A[0], floor]];
+    const into = sb === 'left' ? [[gutterB, floor], [gutterB, B[1]]] : [[B[0], floor]];
+    return [A, ...out, ...into, B];
+  }
 
   const horiz = sa === 'left' || sa === 'right';
 

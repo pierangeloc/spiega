@@ -19,5 +19,10 @@
     "noBefore": true,
     "broke": "Not a reported bug, and there is no frozen `-before` picture because this shape did not exist before #58's fix: it is what the fix does when it cannot make a boundary true. Three overlapping boundaries, `{a,b,c}`, `{c,d}` and `{b,d}`, with `d` outside the first, cannot all be one rectangle in any vertical order, since `{c,d}` needs `b` out of the band between `c` and `d` and `{b,d}` needs `c` out of the band between `b` and `d`. Before the fix each of them was one rectangle that enclosed boxes it never named.",
     "fixed": "The boundary that cannot be satisfied is drawn as the fewest rectangles that each enclose only its own members, with its label on each, so the board says less rather than something false. It does not announce that it was split, which is its own open issue."
+  },
+  "issue-49-back-edge": {
+    "issue": 49,
+    "broke": "A back edge dropped straight from the bottom of its source to the floor and rose straight into the bottom of its target, and nothing asked what else stood in that column. `b>hub` ran down through Store and Upstream API, and `ext>a` rose through Client Z, so each line entered one box and left another and read as an edge between the wrong two.",
+    "fixed": "An end with a box below it now leaves (or enters) by the side instead and travels down a gutter beside its column, clear of everything in it. Ends with nothing below keep the old route to the floor, and back edges sharing a column's gutter take a lane each."
   }
 }
