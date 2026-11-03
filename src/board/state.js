@@ -392,6 +392,10 @@ function applyOne(board, op, sweep) {
     case 'note':
     case 'node': {
       const { op: _op, ...fields } = op;
+      // `lines` is text, not ids, but the same two callers read it as a list
+      if (fields.lines !== undefined && !stringIds(fields.lines)) {
+        return { ok: false, error: `${op.op}: "lines" must be an array of strings`, fresh };
+      }
       const id = fields.id || (fields.label || 'n').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       /** @type {Node} */
       const n = { ...fields, id, kind: op.op === 'note' ? 'note' : (fields.kind || 'service') };
