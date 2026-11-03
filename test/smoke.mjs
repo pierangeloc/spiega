@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps } from '../src/board/state.js';
 import { renderSVG } from '../src/render/render.js';
+import { tagBox, planTags } from '../src/render/edges.js';
 import { snapshotHTML } from '../src/board/snapshot.js';
 import { KINDS } from '../src/render/glyphs.js';
 import { scriptSteps, linesFor, lineStates, clickStep, tagReport } from '../src/board/script.js';
@@ -1966,6 +1967,108 @@ test('a cycle keeps its order, and the closing edge goes round', async () => {
   ]);
   assert.equal(backEdges(plain.nodes, plain.edges).size, 0);
   assert.equal(renderSVG(plain).planned[0].back, false);
+});
+
+/* The gutter between two columns has to be wide enough for the tags that cross
+   it. It was a constant, and a tag is as wide as its words, so on a board of
+   real names the pills were wider than the space there was for them and were
+   drawn under the next column's boxes. This is the layout-level half: pure
+   geometry, checked before anything is placed. */
+const crowded = {
+  title: 'crowding repro',
+  nodes: [
+    { id: 'endpoints', kind: 'service', label: 'endpoints', sub: 'HTTP contract + required-right metadata' },
+    { id: 'api', kind: 'service', label: 'api', sub: 'authenticate + enforce declared access' },
+    { id: 'docs', kind: 'service', label: 'endpointsDocumentation', sub: 'generate OpenAPI + rights matrix' },
+    { id: 'frontend', kind: 'client', label: 'frontend', sub: 'Opladen + confirmation' },
+    { id: 'partners', kind: 'service', label: 'service-partners-api' },
+    { id: 'invoice', kind: 'service', label: 'invoicing', sub: 'finalize + franking' },
+  ],
+  edges: [
+    { from: 'endpoints', to: 'api', label: 'read declared access' },
+    { from: 'endpoints', to: 'docs', label: 'read same metadata' },
+    { from: 'frontend', to: 'partners', label: 'finalize run + triggering user' },
+    { from: 'partners', to: 'invoice' },
+  ],
+  flow: [{ edge: 'frontend>partners', step: 'POST /invoice-runs/{id}/payments/send' }],
+};
+
+const drawn = async spec => {
+  const { specToOps } = await import('../src/spec.js');
+  const b = emptyBoard();
+  applyOps(b, specToOps(spec));
+  return b;
+};
+
+/* Per boundary between neighbouring columns: how wide the gap is, and the
+   widest tag on an edge that crosses it. */
+const gutters = r => {
+  const cols = [...new Set(Object.values(r.boxes).map(b => b.col))].sort((a, b) => a - b);
+  const stepFor = p => (p.e.step != null ? p.e.step : (r.stepOf[p.key] ?? null));
+  return cols.slice(0, -1).map((c, i) => {
+    const next = cols[i + 1];
+    const left = Math.max(...Object.values(r.boxes).filter(b => b.col === c).map(b => b.x + b.w));
+    const right = Math.min(...Object.values(r.boxes).filter(b => b.col === next).map(b => b.x));
+    const crossing = r.planned.filter(p => !p.back && p.a.col <= c && p.b.col >= next &&
+      (p.e.label || stepFor(p) != null));
+    const widest = Math.max(0, ...crossing.map(p => tagBox(p, stepFor(p)).w));
+    return { c, next, gap: right - left, widest };
+  });
+};
+
+await atest('every gutter is wide enough for the widest tag that crosses it', async () => {
+  const r = renderSVG(await drawn(crowded));
+  const gs = gutters(r);
+  assert.ok(gs.some(g => g.widest > 0), 'the board has tags to fit');
+  for (const g of gs)
+    assert.ok(g.gap >= g.widest,
+      `columns ${g.c} and ${g.next}: a ${Math.round(g.widest)}px tag has a ${Math.round(g.gap)}px gutter`);
+
+  // per boundary: the long tag on the left must not push the right-hand side out
+  assert.ok(gs[1].gap < gs[0].gap, 'a boundary with short tags keeps its narrow gutter');
+
+  for (const f of fs.readdirSync(path.join(ROOT, 'examples')).filter(f => f.endsWith('.json'))) {
+    const ex = renderSVG(await drawn(JSON.parse(fs.readFileSync(path.join(ROOT, 'examples', f), 'utf8'))));
+    for (const g of gutters(ex))
+      assert.ok(g.gap >= g.widest, `examples/${f}: columns ${g.c} and ${g.next} cannot hold their tags`);
+  }
+});
+
+await atest('no tag is drawn under a node', async () => {
+  const hit = async (name, spec) => {
+    const r = renderSVG(await drawn(spec));
+    const stepFor = p => (p.e.step != null ? p.e.step : (r.stepOf[p.key] ?? null));
+    const spots = planTags(r.planned, stepFor);
+    const clipped = [];
+    for (const p of r.planned) {
+      const at = spots.get(p.key);
+      if (!at) continue;
+      const t = tagBox(p, stepFor(p));
+      for (const [id, b] of Object.entries(r.boxes)) {
+        const bh = b.h + (b.labelBelow || 0);
+        if (Math.abs(at[0] - (b.x + b.w / 2)) < (t.w + b.w) / 2 && Math.abs(at[1] - (b.y + bh / 2)) < (t.h + bh) / 2)
+          clipped.push(`${name}: the tag on ${p.key} is under ${id}`);
+      }
+    }
+    return clipped;
+  };
+  const found = await hit('crowded', crowded);
+  for (const f of fs.readdirSync(path.join(ROOT, 'examples')).filter(f => f.endsWith('.json')))
+    found.push(...await hit(f, JSON.parse(fs.readFileSync(path.join(ROOT, 'examples', f), 'utf8'))));
+  assert.deepEqual(found, []);
+});
+
+test('a sentence of sub does not make a wide box, and the box grows to hold it', async () => {
+  const { sizeOf } = await import('../src/render/layout.js');
+  const one = sizeOf({ id: 'a', kind: 'service', label: 'api', sub: 'short' });
+  const long = sizeOf({ id: 'a', kind: 'service', label: 'api', sub: 'HTTP contract + required-right metadata' });
+  assert.ok(long.w <= 260, `a wrapped sub makes a ${long.w}px box`);
+  assert.ok(long.h > one.h, 'the second line has somewhere to go');
+
+  const q = sizeOf({ id: 'q', kind: 'queue', label: 'q', sub: 'HTTP contract + required-right metadata' });
+  const q1 = sizeOf({ id: 'q', kind: 'queue', label: 'q', sub: 'short' });
+  assert.equal(q.h, q1.h, 'a queue keeps its slots the same height');
+  assert.ok(q.labelBelow > q1.labelBelow, 'and grows the strip its words are under');
 });
 
 /* The narrator lights the word being spoken. The synthesiser reports how far

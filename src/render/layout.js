@@ -40,7 +40,7 @@
  * @property {string[]} [lines]
  */
 
-/** @typedef {{from: string, to: string}} LayoutEdge */
+/** @typedef {{from: string, to: string, label?: string, step?: number|null}} LayoutEdge */
 
 /** @typedef {{w: number, h: number, labelBelow?: number}} Size */
 
@@ -49,11 +49,20 @@
  *   labelBelow?: number, col?: number, row?: number
  * }} Box */
 
+/* COL_GAP is the least a gutter is ever given. What a gutter actually gets is
+   decided per boundary by gutterFor(), from the tags that have to sit in it. */
 const COL_GAP = 132;
 const ROW_GAP = 54;
 const PAD = 64;
 
-import { wrapText, NOTE_LINES } from './ink.js';
+/* Where an edge runs in a gutter, which is what decides how much gutter a tag
+   needs. A line leaves its box EDGE_GAP clear of it, and drops KNEE of the way
+   across. edges.js draws with the same two numbers. */
+const EDGE_GAP = 8;
+const KNEE = 0.42;
+const TAG_AIR = 10;
+
+import { wrapText, NOTE_LINES, nodeText, tagLines, pillSize } from './ink.js';
 import { measureMath } from './math.js';
 
 /** @type {Record<string, (n: LayoutNode, tw: number) => Size>} */
@@ -87,15 +96,48 @@ const SIZES = {
  */
 const textWidth = (s, size = 13.5) => String(s || '').length * size * 0.66;
 
+/* These three set their own text, so the wrap that keeps a box the width of the
+   thing it names does not apply to them. */
+const OWN_TEXT = new Set(['note', 'formula', 'blob']);
+
 /**
  * @param {LayoutNode} n
  * @returns {{w: number, h: number, labelBelow: number}}
  */
 export function sizeOf(n) {
   const fn = SIZES[n.kind || ''] || SIZES.service;
-  const tw = Math.max(textWidth(n.label), textWidth(n.sub, 10));
+  if (OWN_TEXT.has(n.kind || '')) {
+    const s = fn(n, Math.max(textWidth(n.label), textWidth(n.sub, 10)));
+    return { w: n.w || s.w, h: n.h || s.h, labelBelow: s.labelBelow || 0 };
+  }
+  /* The box is as wide as the wrapped text, not the typed text, and as much
+     taller as the wrapping added. A queue keeps its text underneath the slots,
+     so there it is the strip below that grows. */
+  const t = nodeText(n.label, n.sub);
+  const tw = Math.max(0, ...t.title.map(l => textWidth(l)), ...t.sub.map(l => textWidth(l, 10)));
   const s = fn(n, tw);
-  return { w: n.w || s.w, h: n.h || s.h, labelBelow: s.labelBelow || 0 };
+  const below = s.labelBelow ? s.labelBelow + t.extra : 0;
+  return { w: n.w || s.w, h: n.h || (s.labelBelow ? s.h : s.h + t.extra), labelBelow: below };
+}
+
+/* How wide the gutter must be for a tag that wide to sit in it.
+
+   A tag hangs on the middle of the longest stretch of its line, which for a
+   route that drops through the gutter is the run into the target, a little
+   over two thirds of the way across. That is the side with the least room
+   behind it: the pill reaches half its width past that point, towards the next
+   column, and the line itself stopped EDGE_GAP short of the box. So the gutter
+   is sized for that side, and the other falls out, with a little air so the
+   pill does not touch the box it stops short of. Sizing it to the tag's own
+   width instead leaves the pill's far end under the next column's boxes. */
+/**
+ * @param {number} tagW
+ * @returns {number}
+ */
+export function gutterFor(tagW) {
+  const hang = KNEE + (1 - KNEE) / 2;
+  const span = (tagW / 2 + TAG_AIR - EDGE_GAP) / (1 - hang);
+  return Math.max(COL_GAP, Math.ceil(span + EDGE_GAP * 2));
 }
 
 /* Assign a column and row to every node that does not have one yet.
@@ -218,12 +260,15 @@ export function assign(spec, placed = {}) {
 }
 
 /* Turn column/row assignments into pixel boxes. */
+/* `stepFor` says which step number rides on an edge's tag, since the tag is as
+   wide as the number and the words together. Layout has no flow of its own. */
 /**
  * @param {{nodes: LayoutNode[], edges?: LayoutEdge[]}} spec
  * @param {Placed} placed
+ * @param {(e: LayoutEdge) => number|null|undefined} [stepFor]
  * @returns {{boxes: Record<string, Box>, width: number, height: number}}
  */
-export function layout(spec, placed) {
+export function layout(spec, placed, stepFor = e => e.step) {
   /** @type {Record<string, {n: LayoutNode, p: Placement, s: {w: number, h: number, labelBelow: number}}[]>} */
   const cols = {};
   for (const n of spec.nodes) {
@@ -245,10 +290,32 @@ export function layout(spec, placed) {
   }
   const tallest = Math.max(0, ...Object.values(colH));
 
+  /* The gutter after each column is as wide as the widest tag that has to cross
+     it — per boundary, so one long tag does not push the far side of the board
+     out. Done after columns are assigned and before anything is placed: there
+     is no placing a tag into a gap it cannot fit. A loop's return runs along
+     the floor and never enters a gutter, so it asks for nothing. */
+  const back = backEdges(spec.nodes, spec.edges);
+  /** @type {number[]} */
+  const crossing = colKeys.map(() => 0);
+  for (const e of spec.edges || []) {
+    if (back.has(`${e.from}>${e.to}`)) continue;
+    const a = placed[e.from], b = placed[e.to];
+    if (!a || !b || a.col === b.col) continue;
+    const step = stepFor(e);
+    if (!e.label && step == null) continue;
+    const { w } = pillSize(tagLines(e.label, step));
+    const lo = Math.min(a.col, b.col), hi = Math.max(a.col, b.col);
+    colKeys.forEach((c, i) => {
+      if (i + 1 < colKeys.length && lo <= c && hi >= colKeys[i + 1]) crossing[i] = Math.max(crossing[i], w);
+    });
+  }
+  const gap = crossing.map(w => (w ? gutterFor(w) : COL_GAP));
+
   /** @type {Record<string, Box>} */
   const boxes = {};
   let x = PAD;
-  for (const c of colKeys) {
+  colKeys.forEach((c, i) => {
     let y = PAD + (tallest - colH[c]) / 2;
     for (const e of cols[c]) {
       boxes[e.n.id] = {
@@ -258,10 +325,10 @@ export function layout(spec, placed) {
       };
       y += e.s.h + e.s.labelBelow + ROW_GAP;
     }
-    x += colW[c] + COL_GAP;
-  }
+    x += colW[c] + (gap[i] ?? COL_GAP);
+  });
 
-  const width = Math.round(x - COL_GAP + PAD);
+  const width = Math.round(x - (gap[colKeys.length - 1] ?? COL_GAP) + PAD);
   const height = Math.round(PAD * 2 + tallest);
   return { boxes, width, height };
 }
@@ -283,4 +350,4 @@ export function boundaryBox(members, boxes, pad = 26) {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
-export { COL_GAP, ROW_GAP, PAD };
+export { COL_GAP, ROW_GAP, PAD, EDGE_GAP, KNEE };
