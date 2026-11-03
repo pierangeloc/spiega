@@ -24,5 +24,10 @@
     "issue": 49,
     "broke": "A back edge dropped straight from the bottom of its source to the floor and rose straight into the bottom of its target, and nothing asked what else stood in that column. `b>hub` ran down through Store and Upstream API, and `ext>a` rose through Client Z, so each line entered one box and left another and read as an edge between the wrong two.",
     "fixed": "An end with a box below it now leaves (or enters) by the side instead and travels down a gutter beside its column, clear of everything in it. Ends with nothing below keep the old route to the floor, and back edges sharing a column's gutter take a lane each."
+  },
+  "issue-80-blob-edge-gap": {
+    "issue": 80,
+    "broke": "`gBlob` drew its outline at `0.46 * w * kx` and `0.4 * h * ky` from the centre (`kx` in 0.93..1.0, `ky` in 0.78..1.0), leaving the ink 10 to 16px inside the left/right of its box and 9 to 12px inside the top/bottom. Edges stop 8px outside the box, so every arrow into or out of a blob ended in empty background.",
+    "fixed": "The ten vertices still wobble independently with `kx` and `ky`, then each half is scaled out to its side of the box (`0.5 * w` and `0.5 * h`), so the outline keeps its uneven hand-drawn mass while reaching the box edges on all four sides."
   }
 }

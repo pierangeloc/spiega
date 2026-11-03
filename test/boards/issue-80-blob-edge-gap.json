@@ -1,0 +1,18 @@
+{
+  "title": "edges reach the ink of a blob on all four sides",
+  "nodes": [
+    { "id": "left1",  "kind": "service", "label": "Source A", "sub": "fan in" },
+    { "id": "left2",  "kind": "service", "label": "Source B", "sub": "fan in" },
+    { "id": "above",  "kind": "source",  "label": "Signal",   "sub": "from above", "col": 1, "row": 0 },
+    { "id": "region", "kind": "blob",    "label": "Region",   "sub": "uneven mass of ink", "col": 1, "row": 1 },
+    { "id": "below",  "kind": "vessel",  "label": "Pool",     "sub": "from below", "col": 1, "row": 2 },
+    { "id": "right",  "kind": "service", "label": "Sink",     "col": 2, "row": 1 }
+  ],
+  "edges": [
+    { "from": "left1",  "to": "region" },
+    { "from": "left2",  "to": "region" },
+    { "from": "above",  "to": "region" },
+    { "from": "below",  "to": "region" },
+    { "from": "region", "to": "right", "label": "out" }
+  ]
+}
