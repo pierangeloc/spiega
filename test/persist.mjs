@@ -136,12 +136,12 @@ await test('a corrupt or half-written last line is skipped, and the next op stil
 
 /* ---------- a bad op already in the file is not a poison pill ---------- */
 
-/* `boundary.members` was not checked at the door, so an op the renderer cannot
-   draw could be written to the log. A persisted board replayed it on the next
-   start and died again on the first render — a board that could never be
-   opened again, and a server that took its neighbours with it. Restore is
-   applyOps over the lines, so guarding the door is also the tolerance on the
-   way back in: the line is refused there too. */
+/* `boundary.members` and `node.lines` were not checked at the door, so an op
+   the renderer cannot draw could be written to the log. A persisted board
+   replayed it on the next start and died again on the first render — a board
+   that could never be opened again, and a server that took its neighbours with
+   it. Restore is applyOps over the lines, so guarding the door is also the
+   tolerance on the way back in: the line is refused there too. */
 await test('a log written before the door was guarded still opens, and draws', async () => {
   const name = 'poison';
   const file = boardFile(name);
@@ -150,12 +150,14 @@ await test('a log written before the door was guarded still opens, and draws', a
     { op: 'node', id: 'a', label: 'A' },
     { op: 'node', id: 'b', label: 'B' },
     { op: 'boundary', label: 'oops', members: '["a","b"]' },
+    { op: 'node', id: 'badlines', kind: 'note', label: 'oops', lines: 'a string' },
   ].map(op => JSON.stringify(op)).join('\n') + '\n');
 
   const s = await listen(name);
   const st = await state(s.U);
   assert.deepEqual(st.nodes.map(x => x.id), ['a', 'b'], 'the good ops still replay');
   assert.equal(st.boundaries.length, 0, 'the undrawable boundary is refused, not restored');
+  assert.ok(!st.nodes.some(x => x.id === 'badlines'), 'the undrawable note is refused, not restored');
 
   const svg = await fetch(s.U + '/snapshot.svg');
   assert.equal(svg.status, 200, 'the board can be drawn');

@@ -105,6 +105,35 @@ test('a step whose lights is not an array of string ids is refused, on both rout
   assert.deepEqual(b.flow[0].lights, ['a', 'b'], 'a real list still lands');
 });
 
+/* `"lines": "[\"a\",\"b\"]"` is the same hand-written JSON-in-JSON as members,
+   and a plain string is what the issue reported. The note glyph takes
+   `n.lines || wrapText(...)` and then iterates it, and layout calls `.map` on
+   it first — so it used to be stored and then made the board undrawable.
+   Refused at the door, like the two fields above. */
+test('a node or note whose lines is not an array of strings is refused, not stored', () => {
+  const b = emptyBoard();
+  const { errors, applied } = applyOps(b, [
+    { op: 'node', id: 'a', label: 'A' },
+    { op: 'node', id: 'n', kind: 'note', label: 'hi', lines: 'a string' },
+    { op: 'note', id: 'm', label: 'aside', lines: '["a","b"]' },
+    { op: 'note', id: 'k', label: 'aside', lines: ['a', 2] },
+  ]);
+  assert.equal(errors.length, 3, 'a string, a JSON string and a non-string element are each refused');
+  assert.match(errors[0], /node: "lines" must be an array of strings/);
+  assert.match(errors[1], /note: "lines" must be an array of strings/);
+  assert.match(errors[2], /note: "lines" must be an array of strings/);
+  assert.deepEqual(b.nodes.map(x => x.id), ['a'], 'none of the refused ops reached the board');
+  assert.equal(applied.length, 1, 'the op before them still landed');
+  assert.ok(!b.log.some(e => e.lines !== undefined && !Array.isArray(e.lines)),
+    'and nothing bad reached the log, so a reload cannot bring it back');
+  assert.doesNotThrow(() => renderSVG(b), 'and what was accepted still draws');
+
+  const good = emptyBoard();
+  applyOps(good, [{ op: 'note', id: 'n', label: 'hi', lines: ['one', 'two'] }]);
+  assert.deepEqual(good.nodes[0].lines, ['one', 'two'], 'a real list is unchanged');
+  assert.doesNotThrow(() => renderSVG(good));
+});
+
 /* An op is an object with a string `op`. `[null]` in an ops array is the other
    thing a client can post by hand, and it used to throw on `op.op` — inside the
    request handler, so the same dead process as the boundary above. */
