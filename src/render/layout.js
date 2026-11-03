@@ -42,6 +42,8 @@
 
 /** @typedef {{from: string, to: string, label?: string, step?: number|null}} LayoutEdge */
 
+/** @typedef {{members?: string[]}} LayoutBoundary */
+
 /** @typedef {{w: number, h: number, labelBelow?: number}} Size */
 
 /** @typedef {{
@@ -61,6 +63,14 @@ const PAD = 64;
 const EDGE_GAP = 8;
 const KNEE = 0.42;
 const TAG_AIR = 10;
+
+/* A boundary's wall stands BOUNDARY_PAD outside its members and its name rides
+   a tab TAB_RISE above that. A box that is not a member has to clear the wall,
+   and above the boundary the tab as well, or it is drawn inside the enclosure
+   or under its name — which says the same false thing. */
+const BOUNDARY_PAD = 26;
+const TAB_RISE = 11;
+const WALL_AIR = 16;
 
 import { wrapText, NOTE_LINES, nodeText, tagLines, pillSize } from './ink.js';
 import { measureMath } from './math.js';
@@ -263,7 +273,7 @@ export function assign(spec, placed = {}) {
 /* `stepFor` says which step number rides on an edge's tag, since the tag is as
    wide as the number and the words together. Layout has no flow of its own. */
 /**
- * @param {{nodes: LayoutNode[], edges?: LayoutEdge[]}} spec
+ * @param {{nodes: LayoutNode[], edges?: LayoutEdge[], boundaries?: LayoutBoundary[]}} spec
  * @param {Placed} placed
  * @param {(e: LayoutEdge) => number|null|undefined} [stepFor]
  * @returns {{boxes: Record<string, Box>, width: number, height: number}}
@@ -329,7 +339,24 @@ export function layout(spec, placed, stepFor = e => e.step) {
   });
 
   const width = Math.round(x - (gap[colKeys.length - 1] ?? COL_GAP) + PAD);
-  const height = Math.round(PAD * 2 + tallest);
+  let height = Math.round(PAD * 2 + tallest);
+
+  /* Columns come from the flow and are left alone; what a boundary may still
+     ask for is height. Only when some enclosure would take in a box that is
+     not its member, so a board whose boundaries were already honest is drawn
+     exactly as it always was. */
+  const groups = (spec.boundaries || []).map(b => b.members || []);
+  if (groups.some(m => intruders(m, boxes).length)) {
+    const ys = separate(groups, boxes);
+    if (ys) {
+      let bottom = 0;
+      for (const [id, y] of Object.entries(ys)) {
+        boxes[id].y = Math.round(y);
+        bottom = Math.max(bottom, boxes[id].y + boxes[id].h + (boxes[id].labelBelow || 0));
+      }
+      height = Math.round(bottom + PAD);
+    }
+  }
   return { boxes, width, height };
 }
 
@@ -340,7 +367,7 @@ export function layout(spec, placed, stepFor = e => e.step) {
  * @param {number} [pad]
  * @returns {Box|null}
  */
-export function boundaryBox(members, boxes, pad = 26) {
+export function boundaryBox(members, boxes, pad = BOUNDARY_PAD) {
   const bs = members.map(id => boxes[id]).filter(Boolean);
   if (!bs.length) return null;
   const x0 = Math.min(...bs.map(b => b.x)) - pad;
@@ -348,6 +375,202 @@ export function boundaryBox(members, boxes, pad = 26) {
   const x1 = Math.max(...bs.map(b => b.x + b.w)) + pad;
   const y1 = Math.max(...bs.map(b => b.y + b.h + (b.labelBelow || 0))) + pad;
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/* The boxes that fall inside the enclosure of `members` without belonging to
+   it. A dashed enclosure is an assertion — everything in here is one thing —
+   so a box in there that was never named is the board saying something false,
+   and clearly. The tab is part of the enclosure, and is checked with it. */
+/**
+ * @param {string[]} members
+ * @param {Record<string, Box>} boxes
+ * @returns {string[]}
+ */
+export function intruders(members, boxes) {
+  const r = boundaryBox(members, boxes);
+  if (!r) return [];
+  const mine = new Set(members);
+  return Object.keys(boxes).filter(id => {
+    if (mine.has(id)) return false;
+    const b = boxes[id];
+    return b.x < r.x + r.w && b.x + b.w > r.x &&
+      b.y < r.y + r.h && b.y + b.h + (b.labelBelow || 0) > r.y - TAB_RISE;
+  });
+}
+
+/* What to draw for a boundary: one enclosure when one tells the truth, and
+   otherwise the fewest that do.
+
+   Separating members from their neighbours is done by layout() and mostly
+   succeeds, but two boundaries can ask for opposite things of the same box,
+   and then no placement makes both rectangles honest. A boundary that cannot
+   be one true rectangle is drawn as several: every member starts alone, and
+   two pieces merge only while the box around both still holds nothing else. A
+   member that is left alone is drawn alone — the board says less rather than
+   something it does not mean. */
+/**
+ * @param {string[]} members
+ * @param {Record<string, Box>} boxes
+ * @returns {Box[]}
+ */
+export function boundaryShapes(members, boxes) {
+  const whole = boundaryBox(members, boxes);
+  if (!whole) return [];
+  if (!intruders(members, boxes).length) return [whole];
+
+  /** @type {string[][]} */
+  let pieces = members.filter(id => boxes[id]).map(id => [id]);
+  const clean = (/** @type {string[]} */ ids) => !intruders(ids, boxes).length;
+  for (let merged = true; merged;) {
+    merged = false;
+    for (let i = 0; i < pieces.length && !merged; i++)
+      for (let j = i + 1; j < pieces.length && !merged; j++) {
+        const both = [...pieces[i], ...pieces[j]];
+        if (!clean(both)) continue;
+        pieces = pieces.filter((_, k) => k !== i && k !== j).concat([both]);
+        merged = true;
+      }
+  }
+  return pieces.map(ids => /** @type {Box} */ (boundaryBox(ids, boxes)));
+}
+
+/* Where each box must stand for every group's enclosure to hold only its own.
+
+   Each box that an enclosure would otherwise swallow has to go wholly above it
+   or wholly below it. That is a set of "this one is at least so far below that
+   one" constraints, which is the same shape as the order of boxes within a
+   column, so both go into one graph and the smallest y that satisfies all of it
+   is a longest path. Nothing here changes a column: the flow decided those, and
+   a box that sits between two members in the flow is not moved next to them,
+   it is stood clear of the band they share.
+
+   Which side is decided box by box, preferring where it already is, and a
+   choice is kept only if it leaves the graph without a cycle — a cycle being
+   exactly two enclosures that want opposite things. A group that cannot be
+   satisfied is given up whole (boundaryShapes draws it as pieces); returning
+   null means nothing could be placed at all. */
+/**
+ * @param {string[][]} groups
+ * @param {Record<string, Box>} boxes
+ * @returns {Record<string, number>|null}
+ */
+function separate(groups, boxes) {
+  const ids = Object.keys(boxes);
+  /** @param {string} id */
+  const span = id => boxes[id].h + (boxes[id].labelBelow || 0);
+
+  /** @typedef {Map<string, Map<string, number>>} Graph */
+  /** @type {Graph} */
+  const graph = new Map(ids.map(id => [id, new Map()]));
+  /** @param {string} from @param {string} to @returns {boolean} */
+  const reaches = (from, to) => {
+    const seen = new Set([from]);
+    const todo = [from];
+    while (todo.length) {
+      const at = /** @type {string} */ (todo.pop());
+      if (at === to) return true;
+      for (const next of graph.get(at)?.keys() || [])
+        if (!seen.has(next)) { seen.add(next); todo.push(next); }
+    }
+    return false;
+  };
+  /** @param {string} above @param {string} below @param {number} by @returns {() => void} */
+  const stack = (above, below, by) => {
+    const edges = /** @type {Map<string, number>} */ (graph.get(above));
+    const before = edges.get(below);
+    edges.set(below, Math.max(by, before ?? 0));
+    return () => { if (before === undefined) edges.delete(below); else edges.set(below, before); };
+  };
+
+  /* Every (group, box) pair that needs a side, with the side it would rather
+     have: where it already is. Inside the rectangle, a box in a member's own
+     column keeps its order against that member, and any other goes to whichever
+     half it is nearer, below if it cannot tell. */
+  /** @type {{g: number, id: string, mine: string[], prefer: boolean}[]} */
+  const asks = [];
+  groups.forEach((members, g) => {
+    const mine = members.filter(id => boxes[id]);
+    if (!mine.length) return;
+    const rect = /** @type {Box} */ (boundaryBox(mine, boxes));
+    for (const id of ids) {
+      const b = boxes[id];
+      if (mine.includes(id) || !(b.x < rect.x + rect.w && b.x + b.w > rect.x)) continue;
+      const top = b.y, bottom = b.y + span(id);
+      const beside = mine.filter(m => boxes[m].col === b.col);
+      const prefer = bottom <= rect.y ? true
+        : top >= rect.y + rect.h ? false
+        : beside.length ? (b.row ?? 0) < Math.min(...beside.map(m => boxes[m].row ?? 0))
+        : (top + bottom) / 2 < rect.y + rect.h / 2;
+      asks.push({ g, id, mine, prefer });
+    }
+  });
+
+  /* Choose a side for each ask, backing up when a choice strands a later one:
+     two groups can each be satisfiable alone and only one of the four ways to
+     combine them works, and taking the first that fits and moving on misses it.
+     The search is capped, because a board with a dozen overlapping groups could
+     otherwise be asked to try every combination; running out is just failure,
+     and failure is what gives a group up. */
+  /** @type {Set<number>} */
+  let given = new Set();
+  let budget = 0;
+  /** @param {number} k @returns {boolean} */
+  const settle = k => {
+    if (k === asks.length) return true;
+    const { g, id, mine, prefer } = asks[k];
+    if (given.has(g)) return settle(k + 1);
+    if (--budget < 0) return false;
+    for (const above of [prefer, !prefer]) {
+      if (!mine.every(m => above ? !reaches(m, id) : !reaches(id, m))) continue;
+      const undo = mine.map(m => above
+        ? stack(id, m, span(id) + BOUNDARY_PAD + TAB_RISE + WALL_AIR)
+        : stack(m, id, span(m) + BOUNDARY_PAD + WALL_AIR));
+      if (settle(k + 1)) return true;
+      undo.reverse().forEach(u => u());
+    }
+    return false;
+  };
+  /* Everything if it can be had, else give up the last group and try again. */
+  for (let drop = groups.length; drop >= 0; drop--) {
+    given = new Set(groups.map((_, g) => g).slice(drop));
+    budget = 4000;
+    if (settle(0)) break;
+  }
+
+  /* Order within each column: the plain row order, except where a constraint
+     above says otherwise. A box is taken as soon as nothing still waiting must
+     come before it, lowest row first. */
+  /** @type {Record<number, string[]>} */
+  const byCol = {};
+  for (const id of ids) (byCol[boxes[id].col ?? 0] ||= []).push(id);
+  for (const col of Object.values(byCol)) {
+    const waiting = col.sort((p, q) => (boxes[p].row ?? 0) - (boxes[q].row ?? 0));
+    const order = [];
+    while (waiting.length) {
+      const k = waiting.findIndex(id => !waiting.some(other => other !== id && reaches(other, id)));
+      order.push(...waiting.splice(Math.max(k, 0), 1));
+    }
+    for (let i = 1; i < order.length; i++) stack(order[i - 1], order[i], span(order[i - 1]) + ROW_GAP);
+  }
+
+  /* Longest path, in topological order. A cycle here is two columns ordered
+     against each other by constraints that were each fine alone. */
+  const indegree = new Map(ids.map(id => [id, 0]));
+  for (const tos of graph.values()) for (const to of tos.keys()) indegree.set(to, (indegree.get(to) || 0) + 1);
+  /** @type {Record<string, number>} */
+  const y = Object.fromEntries(ids.map(id => [id, PAD]));
+  const ready = ids.filter(id => !indegree.get(id));
+  let done = 0;
+  while (ready.length) {
+    const id = /** @type {string} */ (ready.shift());
+    done++;
+    for (const [to, by] of graph.get(id) || []) {
+      y[to] = Math.max(y[to], y[id] + by);
+      indegree.set(to, (indegree.get(to) || 0) - 1);
+      if (!indegree.get(to)) ready.push(to);
+    }
+  }
+  return done === ids.length ? y : null;
 }
 
 export { COL_GAP, ROW_GAP, PAD, EDGE_GAP, KNEE };

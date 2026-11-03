@@ -12,7 +12,7 @@ import { roughRect, stroke, fill, text, hashSeed } from './ink.js';
 import { drawNode, drawBoundary } from './glyphs.js';
 import { drawEdge, planEdges, planTags, edgeKey } from './edges.js';
 import { planCallouts, drawCallout } from './callout.js';
-import { assign, layout, boundaryBox } from './layout.js';
+import { assign, layout, boundaryShapes } from './layout.js';
 
 /** @typedef {import('../board/state.js').Board} Board */
 /** @typedef {import('../board/state.js').FlowStep} FlowStep */
@@ -80,7 +80,7 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   /** @param {{e: any, key: string}} r */
   const stepFor = r => (r.e.step != null ? r.e.step : (stepOf[r.key] ?? null));
   // the gutters are sized for the tags that cross them, step numbers included
-  const { boxes, width, height } = layout({ nodes, edges }, place, e => stepFor({ e, key: edgeKey(e) }));
+  const { boxes, width, height } = layout({ nodes, edges, boundaries: spec.boundaries }, place, e => stepFor({ e, key: edgeKey(e) }));
   const focus = focusAt(spec, steps, active);
 
   /* Callouts are planned before the canvas is sized, because a label can sit
@@ -102,8 +102,8 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   let body = '';
 
   for (const b of spec.boundaries || []) {
-    const bb = boundaryBox(b.members || [], boxes);
-    if (bb) body += `<g data-boundary="${b.id}">${drawBoundary(b, bb)}</g>`;
+    const shapes = boundaryShapes(b.members || [], boxes);
+    if (shapes.length) body += `<g data-boundary="${b.id}">${shapes.map(bb => drawBoundary(b, bb)).join('')}</g>`;
   }
 
   const planned = planEdges(edges, boxes);

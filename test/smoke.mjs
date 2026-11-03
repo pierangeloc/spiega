@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps } from '../src/board/state.js';
 import { renderSVG } from '../src/render/render.js';
+import { boundaryShapes } from '../src/render/layout.js';
 import { tagBox, planTags } from '../src/render/edges.js';
 import { snapshotHTML } from '../src/board/snapshot.js';
 import { KINDS } from '../src/render/glyphs.js';
@@ -2238,6 +2239,116 @@ await atest('every gutter is wide enough for the widest tag that crosses it', as
     for (const g of gutters(ex))
       assert.ok(g.gap >= g.widest, `examples/${f}: columns ${g.c} and ${g.next} cannot hold their tags`);
   }
+});
+
+/* A dashed enclosure is an assertion: everything inside is one thing. So the
+   check is geometric and made on what is drawn, not on how it was arrived at —
+   no box lies inside an enclosure unless the boundary named it. The tab that
+   carries the boundary's name stands 11px above the wall and is part of the
+   enclosure, so a box under the name is inside it too. */
+const swallowed = async (name, spec) => {
+  const b = await drawn(spec);
+  const r = renderSVG(b);
+  const lies = [];
+  for (const bd of b.boundaries) {
+    const mine = new Set(bd.members);
+    for (const s of boundaryShapes(bd.members, r.boxes))
+      for (const [id, x] of Object.entries(r.boxes))
+        if (!mine.has(id) && x.x < s.x + s.w && x.x + x.w > s.x &&
+            x.y < s.y + s.h && x.y + x.h + (x.labelBelow || 0) > s.y - 11)
+          lies.push(`${name}: "${id}" is drawn inside "${bd.label}" and is not a member`);
+  }
+  return { lies, shapes: b.boundaries.map(bd => boundaryShapes(bd.members, r.boxes).length) };
+};
+
+/* #58, and part 3 of #52, which is the same bug from a second board. */
+const nonAdjacent = {
+  title: 'A boundary over two non-adjacent members',
+  nodes: [
+    { id: 'a', kind: 'service', label: 'In the boundary' },
+    { id: 'b', kind: 'service', label: 'NOT a member' },
+    { id: 'c', kind: 'service', label: 'NOT a member either' },
+    { id: 'd', kind: 'service', label: 'Also in the boundary' },
+  ],
+  edges: [{ from: 'a', to: 'd' }],
+  boundaries: [{ label: 'members: a and d only', members: ['a', 'd'] }],
+};
+/* Here no column assignment can help: b is between a and c in the flow. */
+const betweenInTheFlow = {
+  title: 'boundary over non-members',
+  nodes: [
+    { id: 'a', kind: 'service',   label: 'A', sub: 'inside' },
+    { id: 'b', kind: 'service',   label: 'B', sub: 'outside' },
+    { id: 'c', kind: 'datastore', label: 'C', sub: 'inside' },
+  ],
+  edges: [
+    { from: 'a', to: 'b', label: 'call' },
+    { from: 'b', to: 'c', label: 'write' },
+  ],
+  boundaries: [{ id: 'vm', label: 'the VM', members: ['a', 'c'] }],
+};
+
+await atest('a boundary does not enclose a box that is not its member', async () => {
+  for (const [name, spec] of [['#58', nonAdjacent], ['#52 part 3', betweenInTheFlow]]) {
+    const { lies, shapes } = await swallowed(name, spec);
+    assert.deepEqual(lies, []);
+    assert.deepEqual(shapes, [1], `${name}: one true rectangle, not a boundary given up`);
+  }
+
+  // what the gallery and the boards that once broke already draw stays honest
+  const files = [
+    ...boardSpecs().map(f => [`test/boards/${f}`, path.join(ROOT, 'test/boards', f)]),
+    ...fs.readdirSync(path.join(ROOT, 'examples')).filter(f => f.endsWith('.json'))
+      .map(f => [`examples/${f}`, path.join(ROOT, 'examples', f)]),
+  ];
+  for (const [name, file] of files)
+    assert.deepEqual((await swallowed(name, JSON.parse(fs.readFileSync(file, 'utf8')))).lies, []);
+});
+
+/* Where the truth cannot be had, the board says less. d has to be outside
+   {a,b,c}, {c,d} needs b out of the band between c and d, and {b,d} needs c out
+   of the band between b and d: in one vertical order they cannot all hold. */
+await atest('a boundary that cannot be one true rectangle is drawn as true pieces', async () => {
+  const { lies, shapes } = await swallowed('impossible', {
+    title: 'three boundaries that cannot all be true',
+    nodes: ['a', 'b', 'c', 'd'].map(id => ({ id, kind: 'service', label: id })),
+    edges: [{ from: 'd', to: 'a' }],
+    boundaries: [
+      { id: 'abc', label: 'a b c', members: ['a', 'b', 'c'] },
+      { id: 'cd', label: 'c d', members: ['c', 'd'] },
+      { id: 'bd', label: 'b d', members: ['b', 'd'] },
+    ],
+  });
+  assert.deepEqual(lies, []);
+  assert.ok(shapes.some(n => n > 1), 'one of them is given up, and drawn as more than one piece');
+});
+
+/* The invariant is the point, so it is also asked of boards nobody wrote:
+   random flows with random, overlapping, nested boundaries. Seeded, so a
+   failure is the same failure next time. */
+await atest('no random board draws an enclosure around a non-member', async () => {
+  let seed = 58;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+  const pick = k => Math.floor(rnd() * k);
+  const lies = [];
+  for (let i = 0; i < 300; i++) {
+    const size = 3 + pick(7);
+    const ids = Array.from({ length: size }, (_, k) => `n${k}`);
+    const edges = [];
+    for (let k = 0; k < size + pick(4); k++) {
+      const from = pick(size), to = pick(size);
+      if (from !== to) edges.push({ from: ids[from], to: ids[to] });
+    }
+    const boundaries = [];
+    for (let k = 0; k < 1 + pick(3); k++) {
+      const members = ids.filter(() => rnd() < 0.4);
+      if (members.length) boundaries.push({ label: `b${k}`, members });
+    }
+    lies.push(...(await swallowed(`random board ${i}`, {
+      title: 'random', nodes: ids.map(id => ({ id, kind: 'service', label: id })), edges, boundaries,
+    })).lies);
+  }
+  assert.deepEqual(lies, []);
 });
 
 await atest('no tag is drawn under a node', async () => {
