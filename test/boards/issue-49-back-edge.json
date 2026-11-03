@@ -1,0 +1,20 @@
+{
+  "title": "a back edge runs through the boxes below its ends",
+  "nodes": [
+    { "id": "a",     "kind": "client",    "label": "Client A" },
+    { "id": "hub",   "kind": "service",   "label": "Hub" },
+    { "id": "b",     "kind": "client",    "label": "Client B" },
+    { "id": "store", "kind": "datastore", "label": "Store" },
+    { "id": "ext",   "kind": "external",  "label": "Upstream API" },
+    { "id": "z",     "kind": "client",    "label": "Client Z" }
+  ],
+  "edges": [
+    { "from": "a",   "to": "hub",   "label": "connect" },
+    { "from": "hub", "to": "b",     "label": "push" },
+    { "from": "hub", "to": "store", "label": "write" },
+    { "from": "hub", "to": "ext",   "label": "call" },
+    { "from": "b",   "to": "hub",   "label": "pull" },
+    { "from": "z",   "to": "hub",   "label": "connect" },
+    { "from": "ext", "to": "a",     "label": "back" }
+  ]
+}

@@ -88,8 +88,13 @@ line points at what they are about.
 ```
 
 `at` is a node id or an edge (`from>to`). `side` is `below` (the default),
-`above`, `left` or `right`. There are **no coordinates** — the point is
-derived, and the canvas grows if a label falls outside the board.
+`above`, `left` or `right`, or a corner of the node: `above-left`,
+`above-right`, `below-left`, `below-right`. The compass letters `n` `s` `e`
+`w` `ne` `nw` `se` `sw` mean the same eight. `side` is a preference: when
+that side would put the words or the leader on a routed line, the callout
+takes the nearest side that is clear, and keeps yours if none is. There are
+**no coordinates** — the point is derived, and the canvas grows if a label
+falls outside the board.
 
 Use it for the caveat that would otherwise be crammed into an edge label, or
 exiled to a note that points at nothing. A callout dims with its target when

@@ -2223,6 +2223,79 @@ await atest('a line leaves below the words written under a box', async () => {
   assert.deepEqual(through, []);
 });
 
+/* A back edge used to drop from the bottom of its source to the floor and rise
+   into the bottom of its target without asking what stood in the column. A box
+   below either end had the line run straight through it, and the board read as
+   an edge between the wrong two things. Walk every route and ask the one thing
+   that matters: does any stretch of it lie inside a box that is not one of its
+   own two ends? */
+const THROUGH_INSET = 6;
+const crossings = r => {
+  const hit = [];
+  for (const p of r.planned) {
+    for (const [id, b] of Object.entries(r.boxes)) {
+      if (id === p.e.from || id === p.e.to) continue;
+      for (let i = 1; i < p.pts.length; i++) {
+        const [x0, y0] = p.pts[i - 1], [x1, y1] = p.pts[i];
+        const inside = Array.from({ length: 101 }, (_, k) => k / 100).some(t => {
+          const x = x0 + (x1 - x0) * t, y = y0 + (y1 - y0) * t;
+          return x > b.x + THROUGH_INSET && x < b.x + b.w - THROUGH_INSET
+            && y > b.y + THROUGH_INSET && y < b.y + b.h - THROUGH_INSET;
+        });
+        if (inside) { hit.push(`${p.key} runs through ${id}`); break; }
+      }
+    }
+  }
+  return hit;
+};
+
+await atest('no back edge runs through a box that is not one of its ends', async () => {
+  const boards = [
+    ...boardSpecs().map(f => [`test/boards/${f}`, path.join(ROOT, 'test/boards', f)]),
+    ...fs.readdirSync(path.join(ROOT, 'examples')).filter(f => f.endsWith('.json'))
+      .map(f => [`examples/${f}`, path.join(ROOT, 'examples', f)]),
+  ];
+  const found = [];
+  for (const [name, file] of boards) {
+    const r = renderSVG(await drawn(JSON.parse(fs.readFileSync(file, 'utf8'))));
+    for (const h of crossings({ ...r, planned: r.planned.filter(p => p.back) })) found.push(`${name}: ${h}`);
+  }
+  assert.deepEqual(found, []);
+});
+
+await atest('a back edge with nothing below either end still runs along the floor', async () => {
+  const r = renderSVG(await drawn({
+    nodes: [{ id: 'a', kind: 'service', label: 'A' }, { id: 'b', kind: 'service', label: 'B' }],
+    edges: [{ from: 'a', to: 'b' }, { from: 'b', to: 'a' }],
+  }));
+  const back = r.planned.find(p => p.back);
+  assert.equal(back.sa, 'bottom');
+  assert.equal(back.sb, 'bottom');
+  assert.equal(back.pts.length, 4, 'down, along, up: the shape it always had');
+});
+
+await atest('back edges leaving one column by the same gutter each get a lane', async () => {
+  const r = renderSVG(await drawn({
+    nodes: [
+      { id: 'hub', kind: 'service', label: 'Hub' },
+      { id: 'b', kind: 'client', label: 'B' },
+      { id: 'c', kind: 'client', label: 'C' },
+      { id: 'd', kind: 'client', label: 'D' },
+    ],
+    edges: [
+      { from: 'hub', to: 'b' }, { from: 'hub', to: 'c' }, { from: 'hub', to: 'd' },
+      { from: 'b', to: 'hub' }, { from: 'c', to: 'hub' },
+    ],
+  }));
+  const back = r.planned.filter(p => p.back);
+  assert.equal(back.length, 2);
+  assert.deepEqual(crossings(r).filter(h => back.some(p => h.startsWith(p.key))), []);
+  const lanes = back.map(p => p.pts[1][0]);
+  assert.notEqual(lanes[0], lanes[1], 'both drop down one vertical and read as a single line');
+  const [lower, upper] = [...back].sort((p, q) => q.pts[0][1] - p.pts[0][1]);
+  assert.ok(lower.pts[1][0] < upper.pts[1][0], 'the lower exit keeps the lane nearest the column, so the upper one does not cross it');
+});
+
 await atest('every gutter is wide enough for the widest tag that crosses it', async () => {
   const r = renderSVG(await drawn(crowded));
   const gs = gutters(r);
@@ -2455,6 +2528,108 @@ test('a callout points at a node or an edge, and the canvas grows to hold it', (
   const c = emptyBoard();
   applyOps(c, [{ op: 'node', id: 'a', label: 'A' }, { op: 'callout', at: 'nope', label: 'x' }]);
   assert.equal(renderSVG(c).callouts.length, 0, 'a callout with no target is dropped');
+});
+
+/* Eight sides, and the corners are the part nobody can check by eye. A diagonal
+   written as [1, 1] is 1.41 times as long as a face's [1, 0], so a corner label
+   would sit visibly further out than the rest, and anchoring it at a face's
+   midpoint would aim it at nothing in particular. */
+test('a callout can be set at a corner, as far out as at a face', () => {
+  const at = side => {
+    const b = emptyBoard();
+    applyOps(b, [{ op: 'node', id: 'a', kind: 'service', label: 'A' },
+      { op: 'callout', at: 'a', side, label: 'about A' }]);
+    const r = renderSVG(b);
+    return { p: r.callouts[0], box: r.boxes.a };
+  };
+  /* How far the words are from the point they are about: the nearest point of
+     the text's box, which on a face is the middle of its near side and on a
+     corner is the corner nearest. */
+  const gap = p => Math.hypot(
+    Math.max(p.box.x - p.tip.x, 0, p.tip.x - (p.box.x + p.box.w)),
+    Math.max(p.box.y - p.tip.y, 0, p.tip.y - (p.box.y + p.box.h)));
+
+  const { box } = at('below');
+  const corners = {
+    'above-left': [box.x, box.y], 'above-right': [box.x + box.w, box.y],
+    'below-left': [box.x, box.y + box.h], 'below-right': [box.x + box.w, box.y + box.h],
+  };
+  const faces = {
+    above: [box.x + box.w / 2, box.y], below: [box.x + box.w / 2, box.y + box.h],
+    left: [box.x, box.y + box.h / 2], right: [box.x + box.w, box.y + box.h / 2],
+  };
+  const axis = gap(at('below').p);
+  assert.ok(axis > 40 && axis < 70, `an axis label sits a lead's length out (${axis})`);
+
+  for (const [side, [x, y]] of Object.entries({ ...faces, ...corners })) {
+    const { p } = at(side);
+    assert.equal(p.side, side);
+    assert.ok(Math.abs(p.tip.x - x) < 1e-9 && Math.abs(p.tip.y - y) < 1e-9,
+      `${side} points at (${x}, ${y}), not (${p.tip.x}, ${p.tip.y})`);
+    assert.ok(Math.abs(gap(p) - axis) < 1e-6,
+      `${side} sits ${gap(p).toFixed(2)} out; a face sits ${axis.toFixed(2)}`);
+  }
+
+  // the compass letters are the same eight, not eight more
+  const names = { n: 'above', s: 'below', e: 'right', w: 'left',
+    ne: 'above-right', nw: 'above-left', se: 'below-right', sw: 'below-left' };
+  for (const [alias, side] of Object.entries(names)) {
+    const a = at(alias).p, c = at(side).p;
+    assert.equal(a.side, side, `${alias} is ${side}`);
+    assert.deepEqual([a.cx, a.cy, a.tip.x, a.tip.y], [c.cx, c.cy, c.tip.x, c.tip.y]);
+  }
+  assert.equal(at('NW').p.side, 'below', 'a name that is not one of the eight is the default, as before');
+  assert.equal(at('constructor').p.side, 'below', 'and so is a name that only exists on every object');
+});
+
+/* The side a callout is given is a preference. It was a command, and a node
+   whose edge leaves the very side the callout was aimed at got a leader laid
+   along that edge and words printed across it. */
+test('a callout gives way to a routed line, and stays put when nothing is in its way', () => {
+  const planned = side => {
+    const b = emptyBoard();
+    applyOps(b, [
+      { op: 'node', id: 'a', kind: 'service', label: 'A' },
+      { op: 'node', id: 'b', kind: 'service', label: 'B' },
+      { op: 'edge', from: 'a', to: 'b' },
+      { op: 'callout', at: 'a', side, label: 'about A, and a good deal more than fits' },
+    ]);
+    return renderSVG(b);
+  };
+  const onLine = r => {
+    const { x, y, w, h } = r.callouts[0].box;
+    return r.planned.some(e => [...(function* () {
+      for (let i = 1; i < e.pts.length; i++) for (let k = 0; k <= 40; k++)
+        yield [e.pts[i - 1][0] + (e.pts[i][0] - e.pts[i - 1][0]) * k / 40,
+               e.pts[i - 1][1] + (e.pts[i][1] - e.pts[i - 1][1]) * k / 40];
+    })()].some(([px, py]) => px > x && px < x + w && py > y && py < y + h));
+  };
+
+  assert.equal(planned('above').callouts[0].side, 'above', 'a clear side is kept');
+  assert.equal(planned('below').callouts[0].side, 'below');
+
+  const r = planned('right');
+  assert.notEqual(r.callouts[0].side, 'right', 'the side the edge leaves by is given up');
+  assert.equal(onLine(r), false, 'and the words are not on the line');
+
+  // fixed order: asking again, or adding a second callout, does not move it
+  assert.equal(planned('right').callouts[0].side, r.callouts[0].side);
+});
+
+await atest('no shipped callout has words over a routed line', async () => {
+  const found = [];
+  for (const f of fs.readdirSync(path.join(ROOT, 'examples')).filter(f => f.endsWith('.json'))) {
+    const r = renderSVG(await drawn(JSON.parse(fs.readFileSync(path.join(ROOT, 'examples', f), 'utf8'))));
+    for (const p of r.callouts) for (const e of r.planned) for (let i = 1; i < e.pts.length; i++)
+      for (let k = 0; k <= 40; k++) {
+        const x = e.pts[i - 1][0] + (e.pts[i][0] - e.pts[i - 1][0]) * k / 40;
+        const y = e.pts[i - 1][1] + (e.pts[i][1] - e.pts[i - 1][1]) * k / 40;
+        if (x > p.box.x && x < p.box.x + p.box.w && y > p.box.y && y < p.box.y + p.box.h) {
+          found.push(`examples/${f}: "${p.c.label}" is over ${e.key}`); k = 41; i = e.pts.length;
+        }
+      }
+  }
+  assert.deepEqual(found, []);
 });
 
 test('removing a node takes its callouts with it', () => {
