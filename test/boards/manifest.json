@@ -1,0 +1,12 @@
+{
+  "issue-53-crowding": {
+    "issue": 53,
+    "broke": "The gutter between two columns was a constant 132px and a tag was as wide as its text, so a 235px pill was drawn clipped behind the next column's boxes. Node boxes reached 300px because a `sub` that was a sentence never wrapped.",
+    "fixed": "Each boundary is now as wide as the widest tag crossing it, and node text and tag pills both wrap."
+  },
+  "issue-52-fan-out": {
+    "issue": 52,
+    "broke": "Two things at once. The labels of a fan-out landed on the wrong lines — the board read as if Worker parked into Postgres — and the edge closing the loop left the DLQ through its own name, which rendered as `D|Q`.",
+    "fixed": "The gutter work for #53 gave the fan-out tags their own lines. The loop's anchor and floor now clear the strip a queue keeps its name in."
+  }
+}

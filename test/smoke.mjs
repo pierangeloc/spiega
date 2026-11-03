@@ -905,9 +905,9 @@ test('the generated pictures match the specs they come from', async () => {
     ['tools/example.js', ['examples/webhook-retry.json', 'docs/examples/webhook-retry.svg']],
     ['tools/example.js', ['examples/kalman.json', 'docs/examples/kalman.svg']],
     ['tools/compare.js', []],
-    ...fs.readdirSync(path.join(ROOT, 'test/boards')).filter(f => f.endsWith('.json'))
-      .map(f => ['tools/example.js',
-        [`test/boards/${f}`, `docs/regressions/${f.replace(/\.json$/, '.svg')}`]]),
+    ...boardSpecs().map(f => ['tools/example.js',
+      [`test/boards/${f}`, `docs/regressions/${f.replace(/\.json$/, '.svg')}`]]),
+    ['tools/regressions.js', []],
   ];
 
   /* Byte comparison rather than `git status`, which was the first version of
@@ -915,10 +915,10 @@ test('the generated pictures match the specs they come from', async () => {
      and read that as drift, and it would have said nothing at all about a file
      that git was not tracking. What is being asked is whether re-running the
      tool changes the file, so read it, run the tool, read it again. */
-  const watched = ['docs/gallery', 'docs/examples', 'docs/regressions']
+  const watched = [...['docs/gallery', 'docs/examples', 'docs/regressions']
     .flatMap(d => fs.existsSync(path.join(ROOT, d))
       ? fs.readdirSync(path.join(ROOT, d)).filter(f => f.endsWith('.svg')).map(f => path.join(d, f))
-      : []);
+      : []), 'docs/regressions.md'];
   const before = new Map(watched.map(f => [f, fs.readFileSync(path.join(ROOT, f))]));
 
   for (const [tool, args] of gen)
@@ -2011,6 +2011,13 @@ const crowded = {
   flow: [{ edge: 'frontend>partners', step: 'POST /invoice-runs/{id}/payments/send' }],
 };
 
+/* manifest.json sits beside the specs and is not one: it carries what each
+   board broke on, for the page tools/regressions.js writes. */
+function boardSpecs() {
+  return fs.readdirSync(path.join(ROOT, 'test/boards'))
+    .filter(f => f.endsWith('.json') && f !== 'manifest.json');
+}
+
 const drawn = async spec => {
   const { specToOps } = await import('../src/spec.js');
   const b = emptyBoard();
@@ -2039,8 +2046,7 @@ const gutters = r => {
    is not in the box. */
 await atest('a line leaves below the words written under a box', async () => {
   const boards = [
-    ...fs.readdirSync(path.join(ROOT, 'test/boards')).filter(f => f.endsWith('.json'))
-      .map(f => [`test/boards/${f}`, path.join(ROOT, 'test/boards', f)]),
+    ...boardSpecs().map(f => [`test/boards/${f}`, path.join(ROOT, 'test/boards', f)]),
     ...fs.readdirSync(path.join(ROOT, 'examples')).filter(f => f.endsWith('.json'))
       .map(f => [`examples/${f}`, path.join(ROOT, 'examples', f)]),
   ];
