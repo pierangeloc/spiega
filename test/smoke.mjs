@@ -56,6 +56,54 @@ test('an unknown op is reported, not thrown', () => {
   assert.equal(errors.length, 1);
 });
 
+/* `"members": "[\"a\",\"b\"]"` is the plausible mistake, not a fuzz case: the
+   op body is JSON inside a tool argument, so a model hand-writing it encodes
+   the list twice. It used to be stored, and the renderer then called `.map` on
+   a string inside a request handler, which killed the process and every board
+   in it. The door refuses it, as it already refused an unknown op. */
+test('a boundary whose members is not an array of string ids is refused, not stored', () => {
+  const b = emptyBoard();
+  const { errors, applied } = applyOps(b, [
+    { op: 'node', id: 'a', label: 'A' }, { op: 'node', id: 'b', label: 'B' },
+    { op: 'boundary', label: 'oops', members: '["a","b"]' },
+  ]);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /boundary: "members" must be an array of string ids/);
+  assert.equal(b.boundaries.length, 0, 'the op must not reach the board');
+  assert.equal(applied.length, 2, 'the ops before it still landed');
+  assert.doesNotThrow(() => renderSVG(b), 'and what was accepted still draws');
+
+  const good = emptyBoard();
+  const ok = applyOps(good, [
+    { op: 'node', id: 'a', label: 'A' }, { op: 'node', id: 'b', label: 'B' },
+    { op: 'boundary', id: 'vpc', label: 'our vpc', members: ['a', 'b'] },
+  ]);
+  assert.deepEqual(ok.errors, []);
+  assert.deepEqual(good.boundaries[0].members, ['a', 'b'], 'a real list is unchanged');
+});
+
+test('a step whose lights is not an array of string ids is refused, on both routes in', () => {
+  const b = emptyBoard();
+  applyOps(b, [{ op: 'node', id: 'a', label: 'A' }, { op: 'node', id: 'b', label: 'B' }]);
+
+  // A number throws in `new Set(...)`; a string does not — it becomes the
+  // characters, lights nothing and says nothing, which is harder to notice.
+  for (const lights of [5, '["a","b"]']) {
+    const { errors } = applyOps(b, [{ op: 'step', edge: 'a>b', lights }]);
+    assert.equal(errors.length, 1, `${JSON.stringify(lights)} should be refused`);
+    assert.match(errors[0], /step: "lights" must be an array of string ids/);
+  }
+  assert.equal(b.flow.length, 0, 'the refused steps were not stored');
+
+  const whole = applyOps(b, [{ op: 'flow', steps: [{ edge: 'a>b' }, { edge: 'b>a', lights: 5 }] }]);
+  assert.equal(whole.errors.length, 1, 'a flow carries the same field');
+  assert.match(whole.errors[0], /flow: steps\[1\]\.lights/);
+  assert.equal(b.flow.length, 0, 'and a refused flow is not half-applied');
+
+  applyOps(b, [{ op: 'step', edge: 'a>b', lights: ['a', 'b'] }]);
+  assert.deepEqual(b.flow[0].lights, ['a', 'b'], 'a real list still lands');
+});
+
 test('columns come from the edges', () => {
   const b = emptyBoard();
   applyOps(b, [
@@ -1170,6 +1218,38 @@ await atest('a replay can be asked for remotely, and re-sends nothing', async ()
   } finally {
     server.close();
     await new Promise(r => server.closeAllConnections ? (server.closeAllConnections(), r()) : r());
+  }
+});
+
+/* A throw while drawing must cost that render, not the process. One process
+   holds every board, so an unhandled rejection in a request handler is not one
+   broken picture: it is every explanation on the machine going silent at once.
+   The op door refuses a non-array `members`, but a log written before that
+   guard can still carry one (test/persist.mjs reopens exactly that file), so
+   the render route is the last place it can land. */
+await atest('a board that cannot be drawn says so with a 500, and the server stays up', async () => {
+  const { createServer } = await import('../src/board/server.js');
+  const { server, board } = createServer();
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const U = `http://127.0.0.1:${server.address().port}/b/default`;
+  try {
+    applyOps(board, [{ op: 'node', id: 'a', label: 'A' },
+      { op: 'boundary', id: 'ok', label: 'ok', members: ['a'] }]);
+    // what a log written by an older version can hold: the op went straight in
+    board.boundaries.push({ id: 'bad', label: 'bad', members: '["a"]' });
+
+    for (const route of ['/snapshot.svg', '/snapshot']) {
+      const r = await fetch(U + route);
+      assert.equal(r.status, 500, `${route} should cost that render, not the process`);
+      assert.match(await r.text(), /could not draw this board/);
+    }
+
+    const st = await fetch(U + '/state');
+    assert.equal(st.status, 200, 'the server is still answering afterwards');
+    assert.equal((await st.json()).nodes.length, 1, 'and the board is still there');
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise(r => server.close(r));
   }
 });
 

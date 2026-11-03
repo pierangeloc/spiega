@@ -284,6 +284,19 @@ const upsert = (list, item, keyOf, index = null) => {
 /** @param {Edge} e @returns {string} */
 const edgeId = e => `${e.from}>${e.to}`;
 
+/* The array-valued fields a model writes by hand.
+
+   `"members": "[\"a\",\"b\"]"` is not a fuzz case. The op body is JSON inside a
+   tool argument, so an agent hand-writing an op has every reason to encode the
+   list twice, and there is no parser on the far side to undo it. Nothing
+   downstream recovers either: the renderer calls `.map` on whatever it is
+   given, and a throw there happens inside a request handler, which takes the
+   process — and every other board in it — down. So the door refuses it, the
+   way an unknown op is refused. `flow.steps` already survives a non-array; a
+   string where the elements are read is the inconsistency this closes. */
+/** @param {unknown} value */
+const stringIds = value => Array.isArray(value) && value.every(v => typeof v === 'string');
+
 /* Applying an op returns the keys of whatever is new, so the client knows what
    to animate on and what was already on the board. It also returns the ops it
    accepted, which is exactly what the log writer buffers. */
@@ -388,6 +401,9 @@ function applyOne(board, op, sweep) {
 
     case 'boundary': {
       const { op: _op, ...fields } = op;
+      if (fields.members !== undefined && !stringIds(fields.members)) {
+        return { ok: false, error: 'boundary: "members" must be an array of string ids', fresh };
+      }
       const id = fields.id || (fields.label || 'b').toLowerCase().replace(/[^a-z0-9]+/g, '-');
       /** @type {Boundary} */
       const b = { ...fields, id };
@@ -397,13 +413,26 @@ function applyOne(board, op, sweep) {
 
     case 'step': {
       const { op: _op, ...step } = op;
+      /* A string here would not throw — `new Set('ab')` is the two characters —
+         it would light nothing and say nothing, which is the harder failure to
+         notice. Refused for the same reason as members. */
+      if (step.lights !== undefined && !stringIds(step.lights)) {
+        return { ok: false, error: 'step: "lights" must be an array of string ids', fresh };
+      }
       board.flow.push(step);
       break;
     }
 
-    case 'flow':
-      board.flow = Array.isArray(op.steps) ? op.steps.slice() : [];
+    case 'flow': {
+      const steps = Array.isArray(op.steps) ? op.steps : [];
+      // a whole flow arrives through this op, so it carries the same field
+      const bad = steps.findIndex(s => s && s.lights !== undefined && !stringIds(s.lights));
+      if (bad >= 0) {
+        return { ok: false, error: `flow: steps[${bad}].lights must be an array of string ids`, fresh };
+      }
+      board.flow = steps.slice();
       break;
+    }
 
     case 'focus':
       board.active = op.step == null ? null
