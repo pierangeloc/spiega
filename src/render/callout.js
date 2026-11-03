@@ -22,6 +22,7 @@ import { INK, ACCENT, MUTED } from './theme.js';
 const LEAD = 52;          // how far the label sits from the point
 const LINE = 15;          // line height of the label
 const CHAR = 6.6;         // advance at the label's size, for the box
+const DOT = 4;            // radius of the ball the leader ends in
 
 /* Where the leader points, and from which direction. A node is aimed at the
    middle of one of its sides; an edge at the middle of its longest segment,
@@ -79,7 +80,10 @@ export function planCallouts(callouts, boxes, planned) {
   }).filter(Boolean);
 }
 
-/* A leader line, a mark where it lands, and the words.
+/* A leader line, a dot where it lands, and the words. The mark is a ball
+   because a ball has no direction: the wedge it replaced was one fixed shape,
+   so it pointed the same way whichever side the leader came from, and on most
+   of them it read as an arrowhead aimed the wrong way.
 
    The line wavers like every other line on the board, and it is the accent
    colour: a callout is an aside, and it should be findable without being
@@ -99,7 +103,7 @@ export function drawCallout(p, { state = 'idle' } = {}) {
 
   return `<g data-callout="${p.c.id}" opacity="${dim}">` +
     stroke(smooth(lead, false), { w: 1.5, color: ACCENT }) +
-    fill(`M${tip.x.toFixed(1)} ${tip.y.toFixed(1)} m-4 -4 l8 0 l-4 8 z`, ACCENT) +
+    fill(`M${(tip.x - DOT).toFixed(1)} ${tip.y.toFixed(1)} a${DOT} ${DOT} 0 1 0 ${DOT * 2} 0 a${DOT} ${DOT} 0 1 0 ${-DOT * 2} 0z`, ACCENT) +
     lines.map((ln, i) =>
       text(cx, top + i * LINE, ln, { size: 11.5, color: INK, weight: 600, spacing: 0.02 })
     ).join('') +
