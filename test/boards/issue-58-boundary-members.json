@@ -1,0 +1,11 @@
+{
+  "title": "A boundary over two non-adjacent members",
+  "nodes": [
+    { "id": "a", "kind": "service", "label": "In the boundary" },
+    { "id": "b", "kind": "service", "label": "NOT a member" },
+    { "id": "c", "kind": "service", "label": "NOT a member either" },
+    { "id": "d", "kind": "service", "label": "Also in the boundary" }
+  ],
+  "edges": [{ "from": "a", "to": "d" }],
+  "boundaries": [{ "label": "members: a and d only", "members": ["a", "d"] }]
+}

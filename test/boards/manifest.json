@@ -8,5 +8,16 @@
     "issue": 52,
     "broke": "Two things at once. The labels of a fan-out landed on the wrong lines — the board read as if Worker parked into Postgres — and the edge closing the loop left the DLQ through its own name, which rendered as `D|Q`.",
     "fixed": "The gutter work for #53 gave the fan-out tags their own lines. The loop's anchor and floor now clear the strip a queue keeps its name in."
+  },
+  "issue-58-boundary-members": {
+    "issue": 58,
+    "broke": "A boundary was drawn as the bounding box of its members, so when the members were not adjacent in the layout the dashed enclosure also took in every box between them. `NOT A MEMBER` was drawn inside a box labelled `MEMBERS: A AND D ONLY`, and `NOT A MEMBER EITHER` stayed outside only because it happened to fall below the rectangle. #52 part 3 is the same bug, where `b` sits between `a` and `c` in the flow and no column assignment can make them adjacent.",
+    "fixed": "Columns are still the flow's, but a box inside a boundary's columns that is not a member is now stood wholly above or wholly below the enclosure, so the rectangle is true by construction. A boundary that two others make impossible is drawn as the smallest set of true pieces instead of one false rectangle."
+  },
+  "issue-58-boundary-impossible": {
+    "issue": 58,
+    "noBefore": true,
+    "broke": "Not a reported bug, and there is no frozen `-before` picture because this shape did not exist before #58's fix: it is what the fix does when it cannot make a boundary true. Three overlapping boundaries, `{a,b,c}`, `{c,d}` and `{b,d}`, with `d` outside the first, cannot all be one rectangle in any vertical order, since `{c,d}` needs `b` out of the band between `c` and `d` and `{b,d}` needs `c` out of the band between `b` and `d`. Before the fix each of them was one rectangle that enclosed boxes it never named.",
+    "fixed": "The boundary that cannot be satisfied is drawn as the fewest rectangles that each enclose only its own members, with its label on each, so the board says less rather than something false. It does not announce that it was split, which is its own open issue."
   }
 }
