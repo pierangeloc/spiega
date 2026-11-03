@@ -1,5 +1,7 @@
 # Issue #78 — columns that no boundary touches lose their centring once separation runs
 
+PR: https://github.com/pierangeloc/spiega/pull/83
+
 ## What was broken
 
 #58 (PR #76) made `separate()` in `src/render/layout.js` stand a non-member box
