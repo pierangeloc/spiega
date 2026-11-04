@@ -18,11 +18,12 @@
 
 import { roughLine, stroke, fill, text, waver, smooth, wrapText } from './ink.js';
 import { INK, ACCENT, MUTED } from './theme.js';
+import { wireCuts, toLine } from './geom.js';
 
 const LEAD = 52;          // how far the label sits from the point
 const LINE = 15;          // line height of the label
 const CHAR = 6.6;         // advance at the label's size, for the box
-const DOT = 4;            // radius of the ball the leader ends in
+export const DOT = 4;     // radius of the ball the leader ends in
 
 /* The four faces keep the names boards already use. The corners are named the
    same way, and the compass letters are accepted for all eight because that is
@@ -47,7 +48,7 @@ export const sideName = s => {
 /* Where the leader points, and from which direction. A node is aimed at the
    middle of one of its sides; an edge at the middle of its longest segment,
    offset from the middle, where its own label already sits. */
-function target(c, boxes, planned, side) {
+export function target(c, boxes, planned, side) {
   const at = String(c.at || '');
 
   const r = planned.find(p => p.key === at);
@@ -84,7 +85,7 @@ function target(c, boxes, planned, side) {
    occupies. The words sit so that their nearest point is LEAD from the target,
    on a face or a corner alike. `slide` moves them along a face, so the leader
    comes in on a slant instead of straight. */
-function place(c, boxes, planned, side, slide = 0) {
+function place(c, boxes, planned, side, slide = 0, lead = LEAD) {
   const tip = target(c, boxes, planned, side);
   if (!tip) return null;
 
@@ -93,8 +94,8 @@ function place(c, boxes, planned, side, slide = 0) {
   const h = lines.length * LINE;
 
   const dir = DIRS[side];
-  const cx = tip.x + dir[0] * LEAD + Math.sign(dir[0]) * w / 2 + (dir[0] ? 0 : slide);
-  const cy = tip.y + dir[1] * LEAD + Math.sign(dir[1]) * h / 2 + (dir[0] ? slide : 0);
+  const cx = tip.x + dir[0] * lead + Math.sign(dir[0]) * w / 2 + (dir[0] ? 0 : slide);
+  const cy = tip.y + dir[1] * lead + Math.sign(dir[1]) * h / 2 + (dir[0] ? slide : 0);
 
   return {
     c, tip, side, lines, w, h, cx, cy,
@@ -123,49 +124,45 @@ function* along(pts, step = 3) {
   }
 }
 
-const TEXT_PAD = 4;       // how near a routed line may come to the words
+export const TEXT_PAD = 4;   // how near a routed line may come to the words
 const LEAD_CLEAR = 6;     // how near one may run beside the leader
 const TIP_SKIP = 18;      // the leader ends where a node's own edges begin, so its last stretch is exempt
 
-/* Does this placement sit on a routed line? Both halves are asked, because the
-   words and the leader are separate ways to be read as part of an edge: a line
-   through a word, and a leader that runs alongside a line of another meaning
-   down the same corridor. A leader necessarily meets the thing it points at,
-   and a node's own edges start a few pixels from its side, so the last
-   stretch before the point is not held against it. */
-function onAnEdge(p, planned) {
+/* How many routed lines this placement sits on. Both halves are asked,
+   because the words and the leader are separate ways to be read as part of an
+   edge: a line through a word, and a leader that runs alongside a line of
+   another meaning down the same corridor. A line through the words counts
+   whole. A leader is only mistaken for a line it runs beside, not one it cuts
+   straight across, so it counts by how far it runs within reach of one, up to
+   a whole line for LEAD_RUN of it. A leader necessarily meets the thing it
+   points at, and a node's own edges start a few pixels from its side, so the
+   last stretch before the point is not held against it. */
+const LEAD_RUN = 40;
+export function onEdges(p, planned) {
   const { x, y, w, h } = p.box;
-  const lead = leaderPts(p);
-  const near = [...along(lead, 2)].filter(([px, py]) => Math.hypot(px - p.tip.x, py - p.tip.y) > TIP_SKIP);
+  const words = { x: x - TEXT_PAD, y: y - TEXT_PAD, w: w + TEXT_PAD * 2, h: h + TEXT_PAD * 2 };
+  const near = leaderNear(p);
+  let n = 0;
   for (const r of planned) {
     if (!r.pts || r.pts.length < 2) continue;
-    for (const [px, py] of along(r.pts)) {
-      if (px > x - TEXT_PAD && px < x + w + TEXT_PAD && py > y - TEXT_PAD && py < y + h + TEXT_PAD) return true;
-      if (near.some(([qx, qy]) => Math.hypot(px - qx, py - qy) < LEAD_CLEAR)) return true;
-    }
+    if (wireCuts(r.pts, words)) { n++; continue; }
+    // the leader is sampled every 2px, so each sample near the line is 2px of it
+    const run = near.filter(q => toLine(q, r.pts) < LEAD_CLEAR).length * 2;
+    n += Math.min(1, run / LEAD_RUN);
   }
-  return false;
+  return n;
 }
 
-/* Landing on a node is as bad as landing on an edge, so a side tried in place
-   of the one asked for is also held to being clear of every box. The side
-   asked for is not: it stays where it is whatever stands there, so a board
-   that is fine today does not move. */
-function onANode(p, boxes) {
-  const { x, y, w, h } = p.box;
-  const lead = [...along(leaderPts(p), 2)];
-  return Object.values(boxes).some(b =>
-    (x < b.x + b.w + TEXT_PAD && x + w > b.x - TEXT_PAD && y < b.y + b.h + (b.labelBelow || 0) + TEXT_PAD && y + h > b.y - TEXT_PAD) ||
-    lead.some(([qx, qy]) => Math.hypot(qx - p.tip.x, qy - p.tip.y) > TIP_SKIP
-      && qx > b.x && qx < b.x + b.w && qy > b.y && qy < b.y + b.h + (b.labelBelow || 0)));
+/* The points of the leader that are held to anything: all of it but the last
+   stretch into the point, which is where a node's own edges begin. */
+export function leaderNear(p) {
+  return [...along(leaderPts(p), 2)].filter(([px, py]) => Math.hypot(px - p.tip.x, py - p.tip.y) > TIP_SKIP);
 }
 
-/* The side asked for is a preference, not a command: keep it when it is
-   clear, otherwise take the first of these that is, and when none is, keep
-   what was asked for rather than guess at something worse. The order is fixed
-   and does not depend on the other callouts, so adding one does not move the
-   rest: the four faces in the order below, above, right, left, then the four
-   corners in the order below-right, below-left, above-right, above-left. */
+/* The order sides are tried in when the one asked for is not clear. It is
+   fixed and does not depend on the other callouts, so adding one does not move
+   the rest: the four faces in the order below, above, right, left, then the
+   four corners in the order below-right, below-left, above-right, above-left. */
 const SIDES = ['below', 'above', 'right', 'left', 'below-right', 'below-left', 'above-right', 'above-left'];
 
 /* A node with an edge leaving the very side a callout is aimed at has no clear
@@ -175,24 +172,33 @@ const SIDES = ['below', 'above', 'right', 'left', 'below-right', 'below-left', '
    straight before any is tried slid. */
 const SLIDES = [0, 40, -40];
 
-/* Everything a callout needs, including the box it occupies — the caller has
-   to grow the canvas to fit labels that fall outside the nodes' bounds. */
-export function planCallouts(callouts, boxes, planned) {
-  return (callouts || []).map(c => {
-    const side = sideName(c.side) || 'below';
-    const asked = place(c, boxes, planned, side);
-    if (!asked) return null;
-    if (!onAnEdge(asked, planned)) return asked;
+/* A callout aimed into a crowd — a fan of edges through one corridor — has
+   nowhere clear at arm's length on any side. Nearly as far again, and so out
+   past the crowd, is tried before giving up and printing over it; every place
+   at the usual distance is tried first. */
+const REACH = [LEAD, LEAD * 1.9];
+
+/* Every place a callout could go, best first: the side asked for, then every
+   other side straight, then slid, then all of that again further out. The
+   side asked for is a preference, not a command; which of these is taken is
+   decided with everything else that floats on the board, in
+   render/floating.js. An empty list means the callout points at nothing that
+   is drawn. */
+export function calloutCandidates(c, boxes, planned) {
+  const side = sideName(c.side) || 'below';
+  const asked = place(c, boxes, planned, side);
+  if (!asked) return [];
+  const out = [asked];
+  for (const lead of REACH)
     for (const slide of SLIDES) {
       for (const s of [side, ...SIDES.filter(s => s !== side)]) {
-        if (s === side && !slide) continue;
+        if (s === side && !slide && lead === LEAD) continue;
         if (slide && DIRS[s][0] && DIRS[s][1]) continue;   // a corner is already on a slant
-        const p = place(c, boxes, planned, s, slide);
-        if (p && !onAnEdge(p, planned) && !onANode(p, boxes)) return p;
+        const p = place(c, boxes, planned, s, slide, lead);
+        if (p) out.push(p);
       }
     }
-    return asked;
-  }).filter(Boolean);
+  return out;
 }
 
 /* A leader line, a dot where it lands, and the words. The mark is a ball

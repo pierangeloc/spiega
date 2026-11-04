@@ -91,8 +91,10 @@ line points at what they are about.
 `above`, `left` or `right`, or a corner of the node: `above-left`,
 `above-right`, `below-left`, `below-right`. The compass letters `n` `s` `e`
 `w` `ne` `nw` `se` `sw` mean the same eight. `side` is a preference: when
-that side would put the words or the leader on a routed line, the callout
-takes the nearest side that is clear, and keeps yours if none is. There are
+that side would put the words on a box, a note, an edge's tag or another
+callout, or the words or the leader on a routed line, the callout takes the
+first side that is clear. When none is, it takes the one that covers least,
+and it will sit across a line before it sits on anybody's words. There are
 **no coordinates** — the point is derived, and the canvas grows if a label
 falls outside the board.
 

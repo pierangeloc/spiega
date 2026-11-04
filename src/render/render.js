@@ -10,8 +10,9 @@
 import { PAPER, INK, MUTED, ACCENT, PANEL, handFilter } from './theme.js';
 import { roughRect, stroke, fill, text, hashSeed } from './ink.js';
 import { drawNode, drawBoundary } from './glyphs.js';
-import { drawEdge, planEdges, planTags, edgeKey } from './edges.js';
-import { planCallouts, drawCallout } from './callout.js';
+import { drawEdge, planEdges, edgeKey } from './edges.js';
+import { drawCallout } from './callout.js';
+import { planFloating } from './floating.js';
 import { assign, layout, boundaryShapes } from './layout.js';
 
 /** @typedef {import('../board/state.js').Board} Board */
@@ -83,16 +84,23 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   const { boxes, width, height } = layout({ nodes, edges, boundaries: spec.boundaries }, place, e => stepFor({ e, key: edgeKey(e) }));
   const focus = focusAt(spec, steps, active);
 
-  /* Callouts are planned before the canvas is sized, because a label can sit
-     outside the nodes' bounds and would otherwise be cropped. Whatever falls
-     past an edge becomes extra canvas, and content shifts to make room. */
-  const calls = planCallouts(spec.callouts, boxes, planEdges(edges, boxes));
+  /* Everything that floats is placed before the canvas is sized, in one pass
+     against one set of obstacles (render/floating.js): tags and callouts
+     resolved against each other, the boxes, the notes and the routed lines,
+     or two edges leaving the same box land their pills on the same spot and a
+     callout prints across a neighbour's name. A label can end up outside the
+     nodes' bounds and would otherwise be cropped, so whatever falls past an
+     edge becomes extra canvas, and content shifts to make room. */
+  const planned = planEdges(edges, boxes);
+  const { tags, callouts: calls } = planFloating({ planned, boxes, callouts: spec.callouts, stepFor });
+  const floats = [...calls.map(p => p.box),
+    ...[...tags.values()].map(t => ({ x: t.at[0] - t.w / 2, y: t.at[1] - t.h / 2, w: t.w, h: t.h }))];
   let padL = 0, padT = 0, extraR = 0, extraB = 0;
-  for (const p of calls) {
-    padL = Math.max(padL, -(p.box.x - 10));
-    padT = Math.max(padT, -(p.box.y - 10));
-    extraR = Math.max(extraR, p.box.x + p.box.w + 10 - width);
-    extraB = Math.max(extraB, p.box.y + p.box.h + 10 - height);
+  for (const b of floats) {
+    padL = Math.max(padL, -(b.x - 10));
+    padT = Math.max(padT, -(b.y - 10));
+    extraR = Math.max(extraR, b.x + b.w + 10 - width);
+    extraB = Math.max(extraB, b.y + b.h + 10 - height);
   }
   padL = Math.max(0, padL); padT = Math.max(0, padT);
   const W = width + padL + Math.max(0, extraR) + margin * 2;
@@ -106,13 +114,9 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
     if (shapes.length) body += `<g data-boundary="${b.id}">${shapes.map(bb => drawBoundary(b, bb)).join('')}</g>`;
   }
 
-  const planned = planEdges(edges, boxes);
-  // every tag resolved against every other before any is drawn, or two edges
-  // leaving the same box land their pills on the same spot
-  const tags = planTags(planned, stepFor);
   for (const r of planned) {
     const state = !focus ? 'idle' : focus.edges.has(r.key) ? 'lit' : 'dim';
-    body += drawEdge(r, { step: stepFor(r), state, place: tags.get(r.key) || null });
+    body += drawEdge(r, { step: stepFor(r), state, place: tags.get(r.key)?.at || null });
   }
 
   for (const n of nodes) {
@@ -153,7 +157,7 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
      caller aiming a camera at a box needs both. */
   const offset = { x: margin + padL, y: margin + padT };
 
-  return { svg, width: W, height: H, boxes, offset, place, steps, stepOf, planned, callouts: calls };
+  return { svg, width: W, height: H, boxes, offset, place, steps, stepOf, planned, tags, callouts: calls };
 }
 
 export { edgeKey };

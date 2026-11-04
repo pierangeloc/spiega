@@ -1,4 +1,9 @@
 {
+  "issue-40-tag-through-label": {
+    "issue": 40,
+    "broke": "Reported as the `name them` tag on `rel>ops` printing under `What it holds`. Every kind of floating text was placed against its own kind only: tags against tags, callouts against callouts, nothing against node text, note cards or the routed lines. As quoted in the issue this spec no longer prints through a label — #53's wider gutters and wrapped pills had already given both tags room — but both pills were sized into their gutters so that they ran up to their arrowheads, and the gap that caused the report was still there: the same pass put `examples/kalman.json`'s callout across `INNOVATION` when it was asked for `above`, which is why that example had been moved to `right` by hand.",
+    "fixed": "Tags and callouts are now placed in one pass (`src/render/floating.js`) against one obstacle set: every node box with its words, every note card, every arrowhead, every routed line, and each label as soon as it is placed. A word on a word costs far more than a pill across a line, so when nothing is clear the line is what gets crossed. Here both tags move a few pixels back along their own lines, clear of their arrowheads."
+  },
   "issue-53-crowding": {
     "issue": 53,
     "broke": "The gutter between two columns was a constant 132px and a tag was as wide as its text, so a 235px pill was drawn clipped behind the next column's boxes. Node boxes reached 300px because a `sub` that was a sentence never wrapped.",

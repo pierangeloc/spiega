@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps } from '../src/board/state.js';
 import { renderSVG } from '../src/render/render.js';
 import { boundaryShapes, intruders } from '../src/render/layout.js';
-import { tagBox, planTags } from '../src/render/edges.js';
+import { tagBox } from '../src/render/edges.js';
 import { snapshotHTML } from '../src/board/snapshot.js';
 import { KINDS } from '../src/render/glyphs.js';
 import { scriptSteps, linesFor, lineStates, clickStep, tagReport } from '../src/board/script.js';
@@ -2558,14 +2558,161 @@ await atest('a boundary separates, and a column it never touched stays centred',
   assert.ok(boxes.q.y < boxes.client.y, 'Events stays where the boundary put it, above Client');
 });
 
+/* #48, and #40 inside it. Every kind of floating text used to be resolved
+   against its own kind and nothing else, so a tag landed under a box or on a
+   note, and a callout printed across a neighbour's name. The check is the crude
+   one #48 asks for, made on the drawing rather than on the planner's own idea
+   of where things went: no tag or callout over a node's words, a note card, a
+   box it is painted beneath, or another of its kind. See test/readable.mjs.
+
+   The synthetic board is not the one #48 was reported from, which is not
+   available. It has the shape the report describes — one store fanning out to
+   seven rules that reconverge on two budgets, a note among them and a callout
+   aimed into the fan — and it is here because it broke in the same ways. */
+const sevenWayFan = {
+  title: 'seven rules, two budgets (synthetic, the shape of #48)',
+  nodes: [
+    { id: 'store', kind: 'datastore', label: 'cohort store', sub: 'daily snapshots' },
+    { id: 'r1', kind: 'service', label: 'rule 1', sub: 'tenure bands' },
+    { id: 'r2', kind: 'service', label: 'rule 2', sub: 'first vs second month' },
+    { id: 'r3', kind: 'service', label: 'rule 3', sub: 'dormancy bands' },
+    { id: 'r4', kind: 'service', label: 'rule 4', sub: 'span ladder' },
+    { id: 'r5', kind: 'service', label: 'rule 5', sub: 'speed' },
+    { id: 'r6', kind: 'service', label: 'rule 6', sub: 'drift' },
+    { id: 'r7', kind: 'service', label: 'rule 7', sub: 'convergence' },
+    { id: 'cost', kind: 'service', label: 'cost budget', sub: '0.15 per account' },
+    { id: 'risk', kind: 'service', label: 'risk budget', sub: 'two sigma' },
+    { id: 'ext', kind: 'service', label: 'extremes de-risk', sub: 'clip the tails' },
+    { id: 'out', kind: 'datastore', label: 'decisions' },
+    { id: 'n1', kind: 'note', label: 'every rule reads the same snapshot', col: 1, row: 7 },
+    { id: 'n2', kind: 'note', label: 'budgets are checked after every rule', col: 2, row: 2 },
+  ],
+  edges: [
+    { from: 'store', to: 'r1', label: '40 / 160 / 320 days' },
+    { from: 'store', to: 'r2', label: 'first month vs second month' },
+    { from: 'store', to: 'r3', label: '0 / 120 / 240 days' },
+    { from: 'store', to: 'r4', label: '3 spans 8 16 32 64' },
+    { from: 'store', to: 'r5', label: 'speed' },
+    { from: 'store', to: 'r6', label: 'drift' },
+    { from: 'store', to: 'r7', label: 'convergent' },
+    { from: 'r1', to: 'cost' },
+    { from: 'r2', to: 'cost' },
+    { from: 'r3', to: 'cost', label: 'over budget' },
+    { from: 'r4', to: 'risk' },
+    { from: 'r5', to: 'cost', label: 'too fast' },
+    { from: 'r6', to: 'risk', label: 'divergent' },
+    { from: 'r7', to: 'ext', label: 'convergent' },
+    { from: 'cost', to: 'ext', label: 'within budget' },
+    { from: 'risk', to: 'ext', label: 'within sigma' },
+    { from: 'ext', to: 'out' },
+  ],
+  callouts: [{ at: 'store>r5', side: 'below', label: 'cost gate drops any speed past the 0.15 budget' }],
+};
+
+await atest('no tag or callout prints over words, a note, or a box it is drawn under', async () => {
+  const { overprints } = await import('./readable.mjs');
+  const kalman = JSON.parse(fs.readFileSync(path.join(ROOT, 'examples/kalman.json'), 'utf8'));
+  const boards = [
+    ...boardSpecs().map(f => [`test/boards/${f}`, JSON.parse(fs.readFileSync(path.join(ROOT, 'test/boards', f), 'utf8'))]),
+    ...fs.readdirSync(path.join(ROOT, 'examples')).filter(f => f.endsWith('.json'))
+      .map(f => [`examples/${f}`, JSON.parse(fs.readFileSync(path.join(ROOT, 'examples', f), 'utf8'))]),
+    // #40: the side it was meant to have, before it was moved by hand to dodge a label
+    ...['above', 'below', 'left', 'right'].map(side => [`kalman, gain callout ${side}`,
+      { ...kalman, callouts: kalman.callouts.map((c, i) => (i ? c : { ...c, side })) }]),
+    ['crowded', crowded],
+    ['seven-way fan', sevenWayFan],
+  ];
+  const found = [];
+  for (const [name, spec] of boards)
+    for (const s of overprints(spec, renderSVG(await drawn(spec))).text) found.push(`${name}: ${s}`);
+  assert.deepEqual(found, []);
+});
+
+/* The same check over boards nobody wrote: random flows of every software
+   kind, tags of every length, notes dropped into the columns and callouts on
+   random sides of random things. Seeded, so a failure is the same failure next
+   time. Before the shared pass, 160 of these 300 boards had a label over words, a
+   note, a box or another label: 246 of them, 118 being a tag hidden under a box. */
+await atest('no random board prints a label over words, a note, or a box', async () => {
+  const { overprints } = await import('./readable.mjs');
+  let seed = 48;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+  const pick = k => Math.floor(rnd() * k);
+  const kinds = ['service', 'datastore', 'queue', 'cache', 'client', 'gateway', 'blob', 'external'];
+  const words = ['read', 'write', 'retry', 'name them', 'flatten', 'events', 'gRPC', 'ack',
+    '40 / 160 / 320 days', 'first month vs second month', 'over budget'];
+  const found = [];
+  for (let i = 0; i < 300; i++) {
+    const size = 3 + pick(8);
+    const nodes = Array.from({ length: size }, (_, k) => ({
+      id: `n${k}`, kind: kinds[pick(kinds.length)], label: `node ${k}`, sub: rnd() < 0.5 ? 'a short sub line' : undefined }));
+    const edges = [], seen = new Set();
+    for (let k = 0; k < size + pick(5); k++) {
+      const a = pick(size), b = pick(size);
+      if (a === b || seen.has(`${a}>${b}`)) continue;
+      seen.add(`${a}>${b}`);
+      edges.push({ from: `n${a}`, to: `n${b}`, label: rnd() < 0.8 ? words[pick(words.length)] : undefined });
+    }
+    const notes = Array.from({ length: pick(3) }, (_, k) => ({
+      id: `note${k}`, kind: 'note', label: 'a note about the thing next to it', col: pick(4), row: pick(4) }));
+    const at = [...nodes.map(n => n.id), ...edges.map(e => `${e.from}>${e.to}`)];
+    const callouts = Array.from({ length: pick(3) }, (_, k) => ({
+      id: `c${k}`, at: at[pick(at.length)], side: ['above', 'below', 'left', 'right'][pick(4)], label: 'a callout that says something' }));
+    const spec = { title: 'random', nodes: [...nodes, ...notes], edges, callouts };
+    for (const s of overprints(spec, renderSVG(await drawn(spec))).text) found.push(`random board ${i}: ${s}`);
+  }
+  assert.deepEqual(found, []);
+});
+
+/* Placement is resolved left to right, so an edge added on the right of a
+   board must not move a tag on its left — the board is drawn while someone is
+   talking, and a label that jumps when something unrelated arrives loses them. */
+await atest('an edge added on the right does not move the tags on the left', async () => {
+  const left = {
+    nodes: [
+      { id: 'a', kind: 'service', label: 'A' }, { id: 'b', kind: 'service', label: 'B' },
+      { id: 'c', kind: 'service', label: 'C' }, { id: 'd', kind: 'service', label: 'D' },
+    ],
+    edges: [{ from: 'a', to: 'b', label: 'first' }, { from: 'a', to: 'c', label: 'second' },
+      { from: 'c', to: 'd', label: 'third' }],
+  };
+  const before = renderSVG(await drawn(left)).tags;
+  const after = renderSVG(await drawn({ ...left, edges: [...left.edges, { from: 'b', to: 'd', label: 'later' }] })).tags;
+  for (const key of ['a>b', 'a>c'])
+    assert.deepEqual(after.get(key)?.at, before.get(key)?.at, `the tag on ${key} moved`);
+});
+
+/* When nowhere is clear, a pill crossing a line is still legible and a word
+   printed on a word is not. Laid out by hand, so the corner is real: a short
+   hop between two boxes, another edge dropping straight through the middle of
+   it, and a note above and below where the old pass would have stepped the
+   tag out of the way. Every spot either crosses that line or lands on a card
+   or a box, and it has to be the line. */
+await atest('a tag with nowhere clear sits on a line rather than on words', async () => {
+  const { planFloating } = await import('../src/render/floating.js');
+  const boxes = {
+    a: { x: 0, y: 0, w: 100, h: 60, col: 0 }, b: { x: 200, y: 0, w: 100, h: 60, col: 1 },
+    over: { x: 100, y: -90, w: 100, h: 70, col: 1 }, under: { x: 100, y: 80, w: 100, h: 70, col: 1 },
+  };
+  const planned = [
+    { e: { from: 'a', to: 'b', label: 'between' }, key: 'a>b', a: boxes.a, b: boxes.b, pts: [[108, 30], [192, 30]] },
+    { e: { from: 'over', to: 'under' }, key: 'over>under', a: boxes.over, b: boxes.under, pts: [[150, -12], [150, 72]] },
+  ];
+  const { tags } = planFloating({ planned, boxes });
+  const t = tags.get('a>b');
+  const r = { x: t.at[0] - t.w / 2, y: t.at[1] - t.h / 2, w: t.w, h: t.h };
+  for (const [id, b] of Object.entries(boxes))
+    assert.ok(!(r.x < b.x + b.w && r.x + r.w > b.x && r.y < b.y + b.h && r.y + r.h > b.y), `the tag landed on ${id}`);
+  assert.ok(r.x < 150 && r.x + r.w > 150 && r.y < 72 && r.y + r.h > -12, 'it sits across the other line');
+});
+
 await atest('no tag is drawn under a node', async () => {
   const hit = async (name, spec) => {
     const r = renderSVG(await drawn(spec));
     const stepFor = p => (p.e.step != null ? p.e.step : (r.stepOf[p.key] ?? null));
-    const spots = planTags(r.planned, stepFor);
     const clipped = [];
     for (const p of r.planned) {
-      const at = spots.get(p.key);
+      const at = r.tags.get(p.key)?.at;
       if (!at) continue;
       const t = tagBox(p, stepFor(p));
       for (const [id, b] of Object.entries(r.boxes)) {
