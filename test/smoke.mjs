@@ -2558,6 +2558,56 @@ await atest('a boundary separates, and a column it never touched stays centred',
   assert.ok(boxes.q.y < boxes.client.y, 'Events stays where the boundary put it, above Client');
 });
 
+/* #86. #83 centres a column only when every box in it is free, so a column with
+   one box the boundary pinned and three it never touched stays packed to the
+   top as a whole. The fix is per box: centre each box inside its own slack, its
+   earliest position from the longest path and its latest from the same graph run
+   backwards from the board's height. The three free boxes come back toward the
+   middle rather than being abandoned at the top with the pinned one, and the
+   boundary still encloses only its own members. */
+await atest('a box is centred in its own slack, not with a pinned neighbour', async () => {
+  const spec = {
+    title: 'one pinned box, three that nothing pins',
+    nodes: [
+      { id: 'a', kind: 'service', label: 'A', col: 0, row: 0 },
+      { id: 'x', kind: 'service', label: 'X (member)', col: 1, row: 0 },
+      { id: 'b', kind: 'service', label: 'B (intruder)', col: 1, row: 1 },
+      { id: 'c', kind: 'service', label: 'C (free)', col: 1, row: 2 },
+      { id: 'd', kind: 'service', label: 'D (free)', col: 1, row: 3 },
+      { id: 'tall', kind: 'service', label: 'Tall 1', col: 2, row: 0 },
+      { id: 'tall2', kind: 'service', label: 'Tall 2', col: 2, row: 1 },
+      { id: 'tall3', kind: 'service', label: 'Tall 3', col: 2, row: 2 },
+      { id: 'tall4', kind: 'service', label: 'Tall 4', col: 2, row: 3 },
+      { id: 'tall5', kind: 'service', label: 'Tall 5', col: 2, row: 4 },
+      { id: 'lone', kind: 'client', label: 'Lone', col: 3, row: 0 },
+    ],
+    edges: [{ from: 'a', to: 'x' }],
+    boundaries: [{ id: 'ax', label: 'a x', members: ['a', 'x'] }],
+  };
+
+  const { boxes } = renderSVG(await drawn(spec));
+
+  // the boundary still encloses only its own members, after the centring
+  for (const b of spec.boundaries)
+    assert.deepEqual(intruders(b.members, boxes), [], `${b.id}: a non-member fell back inside`);
+
+  // the three boxes that share a column with the pinned box come back toward
+  // the middle: their column is centred in the board's height instead of being
+  // packed to the top with the one box the boundary moved ...
+  const bottom = d => d.y + d.h + (d.labelBelow || 0);
+  const top = Math.min(...Object.values(boxes).map(d => d.y));
+  const bot = Math.max(...Object.values(boxes).map(bottom));
+  const col = ['x', 'b', 'c', 'd'].map(id => boxes[id]);
+  const ctop = Math.min(...col.map(d => d.y));
+  const cbot = Math.max(...col.map(bottom));
+  assert.ok(Math.abs((ctop - top) - (bot - cbot)) < 2,
+    `the column shared with the pinned box is centred, not top-aligned (top gap ${ctop - top}, bottom gap ${bot - cbot})`);
+
+  // ... while the box the boundary pinned stays stood clear of the member above it.
+  assert.ok(boxes.b.y >= boxes.x.y + boxes.x.h,
+    'the pinned box stays below the member above it, rather than drifting back into the wall');
+});
+
 /* #48, and #40 inside it. Every kind of floating text used to be resolved
    against its own kind and nothing else, so a tag landed under a box or on a
    note, and a callout printed across a neighbour's name. The check is the crude
