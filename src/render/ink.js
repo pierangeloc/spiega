@@ -310,4 +310,17 @@ export function pillSize(lines, { size = TAG_SIZE, padX = TAG_PAD_X, h = TAG_H }
   return { w: longest * size * 0.62 + padX * 2, h: h + Math.max(0, lines.length - 1) * size * 1.2 };
 }
 
+/* A boundary's name rides a little card on the enclosure's wall. It is
+   measured here for the same reason the tag pill is: the drawing and the
+   placement that has to leave room for it cannot drift apart. */
+export const TAB_H = 22;
+
+/**
+ * @param {string} [label]
+ * @returns {{w: number, h: number}}
+ */
+export function tabSize(label) {
+  return { w: lettering(String(label || '')).length * 7.4 + 20, h: TAB_H };
+}
+
 export { esc, f as round2 };

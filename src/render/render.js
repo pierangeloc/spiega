@@ -9,7 +9,7 @@
 
 import { PAPER, INK, MUTED, ACCENT, PANEL, handFilter } from './theme.js';
 import { roughRect, stroke, fill, text, hashSeed } from './ink.js';
-import { drawNode, drawBoundary } from './glyphs.js';
+import { drawNode, drawBoundary, drawBoundaryCard } from './glyphs.js';
 import { drawEdge, planEdges, edgeKey } from './edges.js';
 import { drawCallout } from './callout.js';
 import { planFloating } from './floating.js';
@@ -18,6 +18,12 @@ import { assign, layout, boundaryShapes } from './layout.js';
 /** @typedef {import('../board/state.js').Board} Board */
 /** @typedef {import('../board/state.js').FlowStep} FlowStep */
 /** @typedef {import('./layout.js').Placed} Placed */
+
+/* Where a boundary's card sits, in the corner-based form the drawing takes.
+   The centre is what the placement pass works in; the card is drawn from its
+   top-left corner. */
+/** @param {{at: number[], w: number, h: number}|undefined} t */
+const tabRect = t => (t ? { x: t.at[0] - t.w / 2, y: t.at[1] - t.h / 2, w: t.w, h: t.h } : null);
 
 /* Flow steps may name an edge ("gw>orders") and/or nodes to light. Numbering
    runs over the steps that name an edge, so the badges on the board match the
@@ -85,16 +91,24 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   const focus = focusAt(spec, steps, active);
 
   /* Everything that floats is placed before the canvas is sized, in one pass
-     against one set of obstacles (render/floating.js): tags and callouts
-     resolved against each other, the boxes, the notes and the routed lines,
-     or two edges leaving the same box land their pills on the same spot and a
-     callout prints across a neighbour's name. A label can end up outside the
-     nodes' bounds and would otherwise be cropped, so whatever falls past an
-     edge becomes extra canvas, and content shifts to make room. */
+     against one set of obstacles (render/floating.js): a boundary's tab, tags
+     and callouts resolved against each other, the boxes, the notes and the
+     routed lines, or two edges leaving the same box land their pills on the
+     same spot and a callout prints across a neighbour's name. A label can end
+     up outside the nodes' bounds and would otherwise be cropped, so whatever
+     falls past an edge becomes extra canvas, and content shifts to make room. */
   const planned = planEdges(edges, boxes);
-  const { tags, callouts: calls } = planFloating({ planned, boxes, callouts: spec.callouts, stepFor });
+  /* The rectangles a boundary is drawn as, and the cards that carry its name.
+     A boundary that cannot be one true rectangle is drawn as several, and each
+     piece carries its own card. */
+  const boundaries = (spec.boundaries || [])
+    .map(b => ({ ...b, shapes: boundaryShapes(b.members || [], boxes) }))
+    .filter(b => b.shapes.length);
+  const { tags, tabs, callouts: calls } = planFloating({
+    planned, boxes, callouts: spec.callouts, boundaries, stepFor });
   const floats = [...calls.map(p => p.box),
-    ...[...tags.values()].map(t => ({ x: t.at[0] - t.w / 2, y: t.at[1] - t.h / 2, w: t.w, h: t.h }))];
+    ...[...tags.values()].map(t => ({ x: t.at[0] - t.w / 2, y: t.at[1] - t.h / 2, w: t.w, h: t.h })),
+    ...[...tabs.values()].map(t => ({ x: t.at[0] - t.w / 2, y: t.at[1] - t.h / 2, w: t.w, h: t.h }))];
   let padL = 0, padT = 0, extraR = 0, extraB = 0;
   for (const b of floats) {
     padL = Math.max(padL, -(b.x - 10));
@@ -109,10 +123,16 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
 
   let body = '';
 
-  for (const b of spec.boundaries || []) {
-    const shapes = boundaryShapes(b.members || [], boxes);
-    if (shapes.length) body += `<g data-boundary="${b.id}">${shapes.map(bb => drawBoundary(b, bb)).join('')}</g>`;
-  }
+  /* Every enclosure first, and the cards that name them after. A card is a
+     label, and a label goes above the structure: a dashed wall drawn over a
+     card strikes the name through it, which is the same failure as a card
+     drawn over a card (#87). */
+  for (const b of boundaries)
+    body += `<g data-boundary="${b.id}">${b.shapes.map(bb => drawBoundary(b, bb)).join('')}</g>`;
+  for (const b of boundaries)
+    body += `<g data-boundary="${b.id}">` +
+      b.shapes.map((bb, i) => drawBoundaryCard(b, bb, tabRect(tabs.get(`${b.id}#${i}`)))).join('') +
+      `</g>`;
 
   for (const r of planned) {
     const state = !focus ? 'idle' : focus.edges.has(r.key) ? 'lit' : 'dim';
@@ -157,7 +177,7 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
      caller aiming a camera at a box needs both. */
   const offset = { x: margin + padL, y: margin + padT };
 
-  return { svg, width: W, height: H, boxes, offset, place, steps, stepOf, planned, tags, callouts: calls };
+  return { svg, width: W, height: H, boxes, offset, place, steps, stepOf, planned, tags, tabs, callouts: calls };
 }
 
 export { edgeKey };

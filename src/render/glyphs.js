@@ -10,7 +10,7 @@ import { INK, MUTED, SHADOW, ACCENT, bodyOf, mix } from './theme.js';
 import {
   roughRect, roughLine, roughEllipse, roughArc, roughPoly, roundedPts,
   stroke, fill, text, hashSeed, rng, wrapText, NOTE_LINES, lettering,
-  nodeText, NODE_TITLE_LH, NODE_SUB_LH } from './ink.js';
+  nodeText, NODE_TITLE_LH, NODE_SUB_LH, tabSize } from './ink.js';
 import { measureMath, drawMath } from './math.js';
 
 const SH_DX = 5, SH_DY = 6;          // the cast shadow sits down and to the left-ish
@@ -403,20 +403,51 @@ export function drawNode(n, box) {
   return GLYPHS[kind](box, n, m, seed);
 }
 
-/* A boundary is drawn under everything it contains: a loose dashed enclosure
-   with its name on a tab, for a VPC, a bounded context, a trust zone. */
+/* A boundary is drawn under everything it contains: a loose dashed enclosure,
+   for a VPC, a bounded context, a trust zone. */
+/**
+ * @param {{id?: string, label?: string, tint?: string}} b
+ * @param {import('./layout.js').Box} box
+ */
 export function drawBoundary(b, box) {
   const { x, y, w, h } = box;
   const seed = hashSeed(b.id || b.label || 'b') % 100000;
   const d = roughRect(x, y, w, h, 16, { seed, amp: 1.4, step: 34 });
-  const lab = lettering(b.label || '');
-  const tw = lab.length * 7.4 + 20;
-  const tab = roughRect(x + 16, y - 11, tw, 22, 7, { seed: seed + 3, amp: 0.8 });
   return `<g class="boundary">` +
     fill(d, '#ffffff', { opacity: 0.35 }) +
     stroke(d, { w: 1.5, color: MUTED, dash: '10 8' }) +
-    fill(tab, b.tint || '#f8f6f0') + stroke(tab, { w: 1.3, color: MUTED }) +
-    text(x + 16 + tw / 2, y + 4.5, lab, { size: 10.5, color: MUTED, weight: 700, spacing: 0.12 }) +
+    `</g>`;
+}
+
+/* And its name rides a card on the wall.
+
+   The card slides along the top of the wall it belongs to, so the place it
+   occupies is not a constant: render/floating.js places it against everything
+   else that floats, and passes back where it went. Without that, two walls
+   starting at the same height put their names in the same place and one of
+   them was painted over the other: a boundary on the board that was named
+   nowhere (#87).
+
+   The cards are drawn after every wall, not with the wall they belong to. A
+   dashed wall drawn over a card strikes the name through it, which is the
+   same failure as a card drawn over a card, and two enclosures that share a
+   wall are exactly where it happens. */
+/**
+ * @param {{id?: string, label?: string, tint?: string}} b
+ * @param {import('./layout.js').Box} box
+ * @param {{x: number, y: number, w: number, h: number}|null} [tab]
+ */
+export function drawBoundaryCard(b, box, tab = null) {
+  const { x, y } = box;
+  const seed = hashSeed(b.id || b.label || 'b') % 100000;
+  const lab = lettering(b.label || '');
+  const { w: tw, h: th } = tabSize(b.label);
+  const tx = tab ? tab.x : x + 16;
+  const ty = tab ? tab.y : y - 11;
+  const card = roughRect(tx, ty, tw, th, 7, { seed: seed + 3, amp: 0.8 });
+  return `<g class="boundary-card">` +
+    fill(card, b.tint || '#f8f6f0') + stroke(card, { w: 1.3, color: MUTED }) +
+    text(tx + tw / 2, ty + th / 2 + 4.5, lab, { size: 10.5, color: MUTED, weight: 700, spacing: 0.12 }) +
     `</g>`;
 }
 

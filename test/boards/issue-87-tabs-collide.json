@@ -1,0 +1,14 @@
+{
+  "title": "Three pairs of three boxes",
+  "nodes": [
+    { "id": "a", "kind": "service", "label": "A" },
+    { "id": "b", "kind": "service", "label": "B" },
+    { "id": "c", "kind": "service", "label": "C" }
+  ],
+  "edges": [],
+  "boundaries": [
+    { "id": "ab", "label": "a b", "members": ["a", "b"] },
+    { "id": "ac", "label": "a c", "members": ["a", "c"] },
+    { "id": "bc", "label": "b c", "members": ["b", "c"] }
+  ]
+}
