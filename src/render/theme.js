@@ -23,6 +23,11 @@ export const BODIES = {
   cobalt:  { l: '#76a0e2', m: '#5a82c6', d: '#1c2948' },
   blush:   { l: '#f3a6bb', m: '#d8869c', d: '#4b2430' },
   slate:   { l: '#c9c3b4', m: '#aaa392', d: '#3d3935' },
+  /* A field is a quiet thing and there are usually many of them on a board,
+     so it takes its own warm neutral — `linen` reads right beside `paper`
+     and `slate` in the table, sits in the same family, and does not share
+     `slate` with the (much heavier) machinery palette. */
+  linen:   { l: '#dcd8cf', m: '#c2bdb1', d: '#3d3935' },
   paper:   { l: '#f8f6f0', m: '#e3dfd2', d: '#857d6e' },
 };
 export const BODY_NAMES = Object.keys(BODIES);
@@ -40,9 +45,9 @@ export const BODY_FOR_KIND = {
   compute:   'cobalt',
   note:      'paper',
   /* A field is a quiet thing and there are usually many of them, so it takes
-     the muted slate rather than one of the five saturated colours: a column of
+     the muted linen rather than one of the five saturated colours: a column of
      fields is a list, not a set of components. */
-  field:     'slate',
+  field:     'linen',
   // The neutral vocabulary keeps its own readings: green for an organism,
   // blue for a vessel, pink for a particle, yellow for a source.
   blob:      'mint',
