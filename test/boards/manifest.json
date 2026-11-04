@@ -47,8 +47,8 @@
   },
   "issue-85-convex-glyph-arrival": {
     "issue": 85,
-    "broke": "Edges still stop short of a convex glyph when they arrive off the side midpoint, specifically for fanned arrivals on blobs, particles, and vessels. Arrows 4 and 5 into UPDATE in kalman.svg reach the ink with 8px residual at midpoint, ~20px at fanned positions.",
-    "fixed": "Modified sidePoint function to add ink inset per side as a function of fan offset for convex glyphs. Added test to verify edges reach the ink of convex glyphs at fanned arrival positions."
+    "broke": "Follow-up to #80. Scaling a blob's vertices out to the box made a line at a side's midpoint meet the ink, but a convex outline curves away from its box everywhere else. A fanned arrival — `t = ±1`, `0.26 * h` off centre — still stopped at the box, ~20px short of the ink on UPDATE and further on a vessel, a particle or a cloud, in proportion to how far that ink sits inside its box.",
+    "fixed": "A glyph now says how far its ink is inside the box at a station along a side, and the box carries that answer because an edge only ever sees a box. The line stops GAP short of the ink instead of the box. A rectangle answers 0, so a board without one of these glyphs does not move. The hand's wobble is untouched: the inset is taken from the outline, not from the waver on top of it."
   },
   "issue-87-tabs-collide": {
     "issue": 87,

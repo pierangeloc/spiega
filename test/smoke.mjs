@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps } from '../src/board/state.js';
 import { renderSVG } from '../src/render/render.js';
-import { boundaryShapes, intruders } from '../src/render/layout.js';
+import { boundaryShapes, intruders, EDGE_GAP } from '../src/render/layout.js';
 import { tagBox } from '../src/render/edges.js';
 import { snapshotHTML } from '../src/board/snapshot.js';
 import { KINDS } from '../src/render/glyphs.js';
@@ -15,6 +15,7 @@ import { scriptSteps, linesFor, lineStates, clickStep, tagReport } from '../src/
 import { frame, unionBox, litKeys } from '../src/board/camera.js';
 import { registeredAs } from '../src/doctor.js';
 import { lettering, wrapText, NOTE_LINES } from '../src/render/ink.js';
+import { specToOps } from '../src/spec.js';
 import { upsertBlock, removeBlock, START, END, BLOCK } from '../src/agents-block.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -2373,6 +2374,121 @@ test('a blob reaches the edges of its box on all four sides while keeping its wo
       maxAsym = Math.max(maxAsym, Math.abs(yTop - yBot));
     }
     assert.ok(maxAsym > 1.5, `${id} should stay asymmetric rather than a clean ellipse (got ${maxAsym.toFixed(2)})`);
+  }
+});
+
+/* #84 put a blob's vertices on the box, so a line at a side's midpoint stops
+   GAP short of the ink. A line that arrives anywhere else was still aimed at
+   the box, and the outline has curved away from it — on UPDATE that was ~20px
+   at the fanned stations instead of GAP. This is the companion to the outline
+   test above: it measures the gap where an edge actually lands, not the gap
+   between the outline and the box at its widest. The hand's wobble is still
+   on the path, so the residual is GAP plus or minus a couple of pixels, not
+   a clean 8; what it must not be is the old ~20. */
+test('a fanned edge stops GAP short of a convex glyph, not of its box', () => {
+  const sample = d => {
+    const out = [];
+    let cx = 0, cy = 0;
+    for (const m of d.matchAll(/([MLQ])\s*([-\d.]+)\s+([-\d.]+)(?:\s+([-\d.]+)\s+([-\d.]+))?/g)) {
+      if (m[1] === 'Q') {
+        const qx = +m[2], qy = +m[3], ex = +m[4], ey = +m[5];
+        for (let k = 1; k <= 32; k++) {
+          const t = k / 32, u = 1 - t;
+          out.push([u * u * cx + 2 * u * t * qx + t * t * ex, u * u * cy + 2 * u * t * qy + t * t * ey]);
+        }
+        cx = ex; cy = ey;
+      } else { cx = +m[2]; cy = +m[3]; out.push([cx, cy]); }
+    }
+    return out;
+  };
+  const outlineOf = (svg, id) => {
+    const marks = [...svg.matchAll(/<g class="node" data-node="([^"]+)"[^>]*>/g)];
+    const i = marks.findIndex(m => m[1] === id);
+    const start = marks[i].index + marks[i][0].length;
+    const end = i + 1 < marks.length ? marks[i + 1].index : svg.length;
+    const body = svg.slice(start, end).replace(/<g class="shadow"[\s\S]*?<\/g>/, '');
+    return [...body.matchAll(/<path class="s" d="([^"]+)"/g)].flatMap(m => sample(m[1]));
+  };
+  const cross = (pts, horiz, at) => {
+    const hit = [];
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1];
+      const a0 = horiz ? a[1] : a[0], b0 = horiz ? b[1] : b[0];
+      if ((a0 - at) * (b0 - at) > 0 || a0 === b0) continue;
+      const k = (at - a0) / (b0 - a0);
+      if (k < 0 || k > 1) continue;
+      const a1 = horiz ? a[0] : a[1], b1 = horiz ? b[0] : b[1];
+      hit.push(a1 + (b1 - a1) * k);
+    }
+    return hit;
+  };
+  /* Residual between an arrival and the rendered ink on its ray, or null when
+     the ray misses the glyph. `atBox` is how far the tip sits from the box
+     edge: GAP means the line still aims at the box. */
+  const landed = (r, key) => {
+    const p = r.planned.find(x => x.key === key);
+    const tip = p.pts[p.pts.length - 1];
+    const box = p.b, side = p.sb;
+    const horiz = side === 'left' || side === 'right';
+    const at = horiz ? tip[1] : tip[0];
+    const hits = cross(outlineOf(r.svg, p.e.to), horiz, at);
+    const edge = side === 'left' ? box.x : side === 'right' ? box.x + box.w
+      : side === 'top' ? box.y : box.y + box.h;
+    const tipC = horiz ? tip[0] : tip[1];
+    const atBox = side === 'left' || side === 'top' ? edge - tipC : tipC - edge;
+    if (!hits.length) return { residual: null, atBox, t: p.tb, side };
+    const ink = side === 'left' || side === 'top' ? Math.min(...hits) : Math.max(...hits);
+    const residual = side === 'left' || side === 'top' ? ink - tipC : tipC - ink;
+    return { residual, atBox, t: p.tb, side };
+  };
+
+  const fan = (id, kind, extra = {}) => {
+    const b = emptyBoard();
+    applyOps(b, [
+      { op: 'node', id: 'a', kind: 'service', label: 'A' },
+      { op: 'node', id: 'b', kind: 'service', label: 'B' },
+      { op: 'node', id, kind, label: extra.label || id, sub: extra.sub },
+      { op: 'edge', from: 'a', to: id },
+      { op: 'edge', from: 'b', to: id },
+    ]);
+    return renderSVG(b, { hand: false });
+  };
+
+  const nearGap = (got, what) => {
+    assert.ok(got > EDGE_GAP - 4 && got < EDGE_GAP + 4,
+      `${what}: arrow stops ${got.toFixed(1)}px short of the ink, not GAP (${EDGE_GAP})`);
+  };
+
+  /* The reported case: two lines into UPDATE, fanned off the midpoint. */
+  const kalman = JSON.parse(fs.readFileSync(path.join(ROOT, 'examples/kalman.json'), 'utf8'));
+  const kb = emptyBoard();
+  applyOps(kb, specToOps(kalman));
+  const kr = renderSVG(kb, { hand: false });
+  for (const key of ['innov>update', 'gain>update', 'predict>innov', 'meas>innov']) {
+    const g = landed(kr, key);
+    assert.ok(g.residual != null, `kalman ${key} missed the ink`);
+    nearGap(g.residual, `kalman ${key}`);
+  }
+  /* A midpoint arrival on a blob already met the ink. It must stay there. */
+  const mid = landed(kr, 'est>predict');
+  assert.equal(mid.t, 0);
+  assert.ok(Math.abs(mid.atBox - EDGE_GAP) < 0.01, 'a midpoint arrival on a blob still stops at the box');
+
+  for (const [id, kind] of [['region', 'blob'], ['pool', 'vessel'], ['drop', 'particle']]) {
+    const r = fan(id, kind, id === 'region' ? { label: 'Update', sub: 'step K of the way' } : {});
+    for (const key of ['a>' + id, 'b>' + id]) {
+      const g = landed(r, key);
+      assert.ok(Math.abs(g.t) === 1, `${kind} ${key} should fan`);
+      assert.ok(g.residual != null, `${kind} ${key} missed the ink`);
+      nearGap(g.residual, `${kind} ${key}`);
+    }
+  }
+
+  const rect = fan('svc', 'service');
+  for (const key of ['a>svc', 'b>svc']) {
+    const g = landed(rect, key);
+    assert.ok(Math.abs(g.atBox - EDGE_GAP) < 0.01, `${key} moved a rectangle`);
+    nearGap(g.residual, key);
   }
 });
 

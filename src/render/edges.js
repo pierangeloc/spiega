@@ -27,7 +27,6 @@ function sides(a, b) {
   return cb[1] >= ca[1] ? ['bottom', 'top'] : ['top', 'bottom'];
 }
 
-/* A point on one side of a box, `t` from -1 (top/left) to 1 (bottom/right). */
 /* A queue keeps its name in a strip under the glyph rather than inside it, so
    the bottom of the box is not the bottom of the node. A line that left at
    box.y + box.h ran down through its own label: the closing edge of a cycle
@@ -35,25 +34,34 @@ function sides(a, b) {
    side clears the drawing by GAP, and this one has to clear the words too. */
 const bottomOf = box => box.y + box.h + (box.labelBelow || 0);
 
+/* A point on one side of a box, `t` from -1 (top/left) to 1 (bottom/right).
+
+   The line stops GAP short of the ink, not of the box. A rectangle's ink is
+   the box, so it answers nothing and a board without a convex glyph does not
+   move. A convex outline curves away from its box everywhere but the points
+   where it touches, and the glyph says how far, at this station along the
+   side. `along` is the fraction of the half-extent from the centre — the same
+   spread the fan uses — so the glyph does not have to know FAN. The inset is
+   added toward the glyph: the other sign pushes an arrow that already stops
+   short even further into the background.
+
+   A station whose ray misses the ink entirely — a particle's circle lives in
+   the top of its box, so the lower half of a fan points at nothing — slides
+   along the side to the nearest ink. Staying put would leave that arrow at
+   the box while its neighbour lands on the circle. */
 function sidePoint(box, side, t = 0) {
   const [cx, cy] = center(box);
   const hx = box.w / 2, hy = box.h / 2;
-  
-  // For convex glyphs (blob, particle, vessel), add ink inset per side as a function of fan offset
-  let inkInset = 0;
-  if (box.kind === 'blob' || box.kind === 'particle' || box.kind === 'vessel') {
-    // Calculate ink inset based on fan offset
-    // The inset should be proportional to the distance from the center
-    const distanceFromCenter = Math.abs(t);
-    // For fanned positions, we want more inset (up to 8px at midpoint, ~20px at fanned positions)
-    inkInset = distanceFromCenter * 12; // This gives us ~8px at midpoint and ~20px at fanned positions
-  }
-  
+  const along = FAN * t;
+  const span = side === 'left' || side === 'right' ? box.w : box.h;
+  const adj = box.inkAt ? box.inkAt(side, along) : null;
+  const inset = Math.max(0, Math.min(span, adj?.inset || 0));
+  const slide = adj?.slide || 0;
   switch (side) {
-    case 'right':  return [box.x + box.w + GAP + inkInset, cy + hy * FAN * t];
-    case 'left':   return [box.x - GAP - inkInset,         cy + hy * FAN * t];
-    case 'top':    return [cx + hx * FAN * t,   box.y - GAP - inkInset];
-    default:       return [cx + hx * FAN * t,   bottomOf(box) + GAP + inkInset];
+    case 'right': return [box.x + box.w + GAP - inset, cy + hy * along + slide];
+    case 'left':  return [box.x - GAP + inset,         cy + hy * along + slide];
+    case 'top':   return [cx + hx * along + slide, box.y - GAP + inset];
+    default:      return [cx + hx * along + slide, bottomOf(box) + GAP - inset];
   }
 }
 

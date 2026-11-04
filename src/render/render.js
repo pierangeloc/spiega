@@ -9,7 +9,7 @@
 
 import { PAPER, INK, MUTED, ACCENT, PANEL, handFilter } from './theme.js';
 import { roughRect, stroke, fill, text, hashSeed } from './ink.js';
-import { drawNode, drawBoundary, drawBoundaryCard } from './glyphs.js';
+import { drawNode, drawBoundary, drawBoundaryCard, inkAt } from './glyphs.js';
 import { drawEdge, planEdges, edgeKey } from './edges.js';
 import { drawCallout } from './callout.js';
 import { planFloating } from './floating.js';
@@ -97,6 +97,15 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
      same spot and a callout prints across a neighbour's name. A label can end
      up outside the nodes' bounds and would otherwise be cropped, so whatever
      falls past an edge becomes extra canvas, and content shifts to make room. */
+  /* Edges route to a box, and a box has no outline. A convex glyph's ink
+     leaves the box everywhere but the points where it touches, so a line
+     aimed at the box stops short of the ink unless the box can say how far.
+     The glyph declares that; edges stay geometry and ask. A rectangle
+     declares nothing, and its lines do not move. */
+  for (const n of nodes) {
+    const box = boxes[n.id];
+    if (box) box.inkAt = (side, along) => inkAt(n, box, side, along);
+  }
   const planned = planEdges(edges, boxes);
   /* The rectangles a boundary is drawn as, and the cards that carry its name.
      A boundary that cannot be one true rectangle is drawn as several, and each
