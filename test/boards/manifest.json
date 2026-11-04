@@ -30,6 +30,11 @@
     "broke": "Follow-up to #58. Once a boundary has to separate a non-member from its members, `separate()` placed boxes by longest path, which packs everything to the top. Columns that no boundary touched lost the centring layout() gives every column and sat at the top edge — `Client` and `Payments` were top-aligned with `Auth` and `Events`, which the boundary really had moved.",
     "fixed": "A column whose boxes take part in no cross-column constraint is centred against the board again after separation. Members and the boxes a boundary moved stay where the longest path stood them; only the untouched columns come back to the middle, without the boundary re-enclosing a non-member."
   },
+  "issue-86-slack-centring": {
+    "issue": 86,
+    "broke": "Follow-up to #78. The fix that landed (#83) recenters a column only when *every* box in it is free — free meaning no cross-column constraint edge — so a column with one box a boundary pinned and three it never touched is left packed to the top as a whole. `X`, `C` and `D` sit at the top edge with the pinned `B` at y64/312/436 purely because they share a column with it, while `Lone`, alone in its own column, is centred at y301.",
+    "fixed": "Each box is now centred inside its own slack: its earliest position comes from the longest path, and its latest from the same graph run backwards from the board's height. `X`, `C` and `D` come back toward the middle of the tall column's height, `B` stays clear of the `a x` wall below its members, and no boundary re-encloses a non-member."
+  },
   "issue-49-back-edge": {
     "issue": 49,
     "broke": "A back edge dropped straight from the bottom of its source to the floor and rose straight into the bottom of its target, and nothing asked what else stood in that column. `b>hub` ran down through Store and Upstream API, and `ext>a` rose through Client Z, so each line entered one box and left another and read as an edge between the wrong two.",
@@ -44,5 +49,10 @@
     "issue": 85,
     "broke": "Edges still stop short of a convex glyph when they arrive off the side midpoint, specifically for fanned arrivals on blobs, particles, and vessels. Arrows 4 and 5 into UPDATE in kalman.svg reach the ink with 8px residual at midpoint, ~20px at fanned positions.",
     "fixed": "Modified sidePoint function to add ink inset per side as a function of fan offset for convex glyphs. Added test to verify edges reach the ink of convex glyphs at fanned arrival positions."
+  },
+  "issue-87-tabs-collide": {
+    "issue": 87,
+    "broke": "A boundary's name rides a card on its wall, at a fixed offset from the corner, and nothing resolved it against anything. Two enclosures whose walls start at the same height put their cards in the same place and one was painted over the other: the board read `b c`, `a c`, `b c` and `a b` was nowhere on it. Not mislabelled — absent, and nothing on the board said which boundary had gone missing. Three boxes and three boundaries is the floor for it: with no edges every box is in one column, and three pairwise-intersecting sets of members cannot all be made contiguous in one vertical order, so one of the boundaries is drawn as two pieces and the first piece wants the same corner as the first boundary.",
+    "fixed": "The card is placed in the same pass as everything else that floats (`src/render/floating.js`), against the same obstacle set, and it slides along the top of its own wall until it is clear of the cards already placed. It is placed first, because the name of an enclosure is structure and a label riding an edge gives way to it rather than the other way round. The cards are drawn after every wall instead of with the wall they belong to, so a dashed wall cannot strike a name through it."
   }
 }

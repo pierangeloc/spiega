@@ -14,7 +14,9 @@
    - a tag or a callout over a line of a node's text, or over a note card;
    - a tag under a node's box (tags are painted beneath nodes, so it is hidden);
    - a tag or a callout over another tag or callout, or a callout's ball, drawn
-     on top, landing on a tag.
+     on top, landing on a tag;
+   - a boundary's tab over any of those, and over another tab: a boundary whose
+     name is painted over is a boundary that is not named anywhere (#87).
 
    `lines` is reported alongside and not asserted on: a pill crossing a line
    that is not its own is legible, only worse, and it is what the placement
@@ -59,7 +61,7 @@ function pathBox(d, dx, dy) {
    measured by its card. */
 export function measureDrawing(svg) {
   const stack = [];
-  const nodeText = [], tags = new Map(), callouts = new Map(), balls = [];
+  const nodeText = [], tags = new Map(), callouts = new Map(), balls = [], tabs = [];
   // an attribute may hold a `>`: every edge is named `from>to`
   const re = /<(\/?)(g|text|path)\b((?:[^>"]|"[^"]*")*?)\/?>([^<]*)/g;
   for (const m of svg.matchAll(re)) {
@@ -67,7 +69,7 @@ export function measureDrawing(svg) {
     if (tag === 'g') {
       if (close) { stack.pop(); continue; }
       const t = (attr(attrs, 'transform') || '').match(/translate\(([-\d.]+)[ ,]+([-\d.]+)\)/);
-      stack.push({ attrs, dx: t ? Number(t[1]) : 0, dy: t ? Number(t[2]) : 0 });
+      stack.push({ attrs, dx: t ? Number(t[1]) : 0, dy: t ? Number(t[2]) : 0, fills: [] });
       continue;
     }
     if (close) continue;
@@ -76,6 +78,18 @@ export function measureDrawing(svg) {
     const edge = stack.find(g => attr(g.attrs, 'data-edge'));
     const inTag = stack.some(g => attr(g.attrs, 'class') === 'tag');
     const call = stack.find(g => attr(g.attrs, 'data-callout') != null);
+    /* A boundary's name rides a card. The card is what is measured, and it is
+       measured by the card and not by its words: a card over a card hides the
+       name under it, and the words alone would not show that.
+
+       The card is the last thing filled in before the name is written on it.
+       That is how it reads in a drawing, and it reads the same in the frozen
+       pictures of the boards that were wrong, where the card was drawn inside
+       the enclosure's own group and was the second fill in it. */
+    const bgroup = stack.find(g => {
+      const c = attr(g.attrs, 'class');
+      return c === 'boundary' || c === 'boundary-card';
+    });
     if (tag === 'text') {
       const b = textBox(attrs, body, dx, dy);
       if (node) nodeText.push({ id: attr(node.attrs, 'data-node'), text: unescape(body), ...b });
@@ -83,11 +97,19 @@ export function measureDrawing(svg) {
         // keyed by the group itself: two callouts may share an id, or have none
         const prev = callouts.get(call);
         callouts.set(call, prev ? { text: prev.text + ' ' + unescape(body), ...union(prev, b) } : { text: unescape(body), ...b });
+      } else if (bgroup) {
+        const card = bgroup.fills[bgroup.fills.length - 1];
+        if (card) {
+          card.text = (card.text ? card.text + ' ' : '') + unescape(body);
+          tabs.push(card);
+        }
       } else if (edge && inTag) {
         const k = attr(edge.attrs, 'data-edge');
         const t = tags.get(k);
         if (t) t.text = (t.text ? t.text + ' ' : '') + unescape(body);
       }
+    } else if (tag === 'path' && bgroup && attr(attrs, 'class') === 'f') {
+      bgroup.fills.push(pathBox(attr(attrs, 'd') || '', dx, dy));
     } else if (tag === 'path' && call && attr(attrs, 'class') === 'f') {
       // the ball a leader ends in: `M(x - r) y a r r ...`, so its centre is r to the right
       const m = (attr(attrs, 'd') || '').match(/^M(-?[\d.]+) (-?[\d.]+)\s*a([\d.]+)/);
@@ -101,6 +123,7 @@ export function measureDrawing(svg) {
     nodeText,
     tags: [...tags.values()],
     callouts: [...callouts.values()],
+    tabs,
     balls,
   };
 }
@@ -145,6 +168,9 @@ export function overprints(spec, r) {
   const floats = [
     ...drawn.tags.map(t => ({ ...t, what: `tag "${t.text}"` , tag: true })),
     ...drawn.callouts.map(c => ({ ...c, what: `callout "${c.text}"`, tag: false })),
+    /* A boundary's card is painted with the enclosure, which is under the
+       nodes, so a card under a box is hidden the way a tag is. */
+    ...drawn.tabs.map(t => ({ ...t, what: `tab "${t.text}"`, tag: true })),
   ];
   for (const f of floats) {
     for (const t of words) if (meets(f, t)) text.push(`${f.what} prints over ${t.id}'s "${t.text}"`);
@@ -164,6 +190,11 @@ export function overprints(spec, r) {
   for (const c of drawn.callouts)
     for (const p of routes)
       if (crosses(p.pts, c)) lines.push(`callout "${c.text}" sits on ${p.key}`);
+  /* A card is painted under the edges, so a line across it strikes the name
+     through — worse than a pill laid over a line, which only hides the line. */
+  for (const t of drawn.tabs)
+    for (const p of routes)
+      if (crosses(p.pts, t)) lines.push(`tab "${t.text}" sits on ${p.key}`);
   return { text, lines };
 }
 

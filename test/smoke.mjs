@@ -2558,6 +2558,56 @@ await atest('a boundary separates, and a column it never touched stays centred',
   assert.ok(boxes.q.y < boxes.client.y, 'Events stays where the boundary put it, above Client');
 });
 
+/* #86. #83 centres a column only when every box in it is free, so a column with
+   one box the boundary pinned and three it never touched stays packed to the
+   top as a whole. The fix is per box: centre each box inside its own slack, its
+   earliest position from the longest path and its latest from the same graph run
+   backwards from the board's height. The three free boxes come back toward the
+   middle rather than being abandoned at the top with the pinned one, and the
+   boundary still encloses only its own members. */
+await atest('a box is centred in its own slack, not with a pinned neighbour', async () => {
+  const spec = {
+    title: 'one pinned box, three that nothing pins',
+    nodes: [
+      { id: 'a', kind: 'service', label: 'A', col: 0, row: 0 },
+      { id: 'x', kind: 'service', label: 'X (member)', col: 1, row: 0 },
+      { id: 'b', kind: 'service', label: 'B (intruder)', col: 1, row: 1 },
+      { id: 'c', kind: 'service', label: 'C (free)', col: 1, row: 2 },
+      { id: 'd', kind: 'service', label: 'D (free)', col: 1, row: 3 },
+      { id: 'tall', kind: 'service', label: 'Tall 1', col: 2, row: 0 },
+      { id: 'tall2', kind: 'service', label: 'Tall 2', col: 2, row: 1 },
+      { id: 'tall3', kind: 'service', label: 'Tall 3', col: 2, row: 2 },
+      { id: 'tall4', kind: 'service', label: 'Tall 4', col: 2, row: 3 },
+      { id: 'tall5', kind: 'service', label: 'Tall 5', col: 2, row: 4 },
+      { id: 'lone', kind: 'client', label: 'Lone', col: 3, row: 0 },
+    ],
+    edges: [{ from: 'a', to: 'x' }],
+    boundaries: [{ id: 'ax', label: 'a x', members: ['a', 'x'] }],
+  };
+
+  const { boxes } = renderSVG(await drawn(spec));
+
+  // the boundary still encloses only its own members, after the centring
+  for (const b of spec.boundaries)
+    assert.deepEqual(intruders(b.members, boxes), [], `${b.id}: a non-member fell back inside`);
+
+  // the three boxes that share a column with the pinned box come back toward
+  // the middle: their column is centred in the board's height instead of being
+  // packed to the top with the one box the boundary moved ...
+  const bottom = d => d.y + d.h + (d.labelBelow || 0);
+  const top = Math.min(...Object.values(boxes).map(d => d.y));
+  const bot = Math.max(...Object.values(boxes).map(bottom));
+  const col = ['x', 'b', 'c', 'd'].map(id => boxes[id]);
+  const ctop = Math.min(...col.map(d => d.y));
+  const cbot = Math.max(...col.map(bottom));
+  assert.ok(Math.abs((ctop - top) - (bot - cbot)) < 2,
+    `the column shared with the pinned box is centred, not top-aligned (top gap ${ctop - top}, bottom gap ${bot - cbot})`);
+
+  // ... while the box the boundary pinned stays stood clear of the member above it.
+  assert.ok(boxes.b.y >= boxes.x.y + boxes.x.h,
+    'the pinned box stays below the member above it, rather than drifting back into the wall');
+});
+
 /* #48, and #40 inside it. Every kind of floating text used to be resolved
    against its own kind and nothing else, so a tag landed under a box or on a
    note, and a callout printed across a neighbour's name. The check is the crude
@@ -2628,6 +2678,44 @@ await atest('no tag or callout prints over words, a note, or a box it is drawn u
   assert.deepEqual(found, []);
 });
 
+/* #87. A boundary's name rides a card on its wall, and the wall of two
+   enclosures that start at the same height put their cards in the same place:
+   one was painted over the other, and the board carried a boundary that was
+   named nowhere. Not mislabelled — absent, and a reader had no way to know.
+
+   Three boxes and three boundaries is the floor: with no edges every box is in
+   one column, and whether each boundary's members can be made contiguous in
+   one vertical order is the question. Two sets can always be; three
+   pairwise-intersecting sets cannot, so the third is drawn as two pieces and
+   the two pieces want the same corner as the first. */
+await atest('every boundary on the board is named, even where three of them overlap', async () => {
+  const { measureDrawing } = await import('./readable.mjs');
+  const spec = {
+    title: 'three pairs of three boxes',
+    nodes: ['a', 'b', 'c'].map(id => ({ id, kind: 'service', label: id.toUpperCase() })),
+    edges: [],
+    boundaries: [
+      { id: 'ab', label: 'a b', members: ['a', 'b'] },
+      { id: 'ac', label: 'a c', members: ['a', 'c'] },
+      { id: 'bc', label: 'b c', members: ['b', 'c'] },
+    ],
+  };
+  const r = renderSVG(await drawn(spec));
+  const tabs = measureDrawing(r.svg).tabs;
+  assert.equal(tabs.length, 4, 'three boundaries, one of them drawn as two pieces');
+  assert.deepEqual(tabs.map(t => t.text).sort(), ['A B', 'A C', 'B C', 'B C'],
+    'every boundary is named, and the split one says its name twice');
+
+  /* And no two of them are on top of each other. The cards are measured, not
+     the words: a card over a card hides the name under it. */
+  for (let i = 0; i < tabs.length; i++)
+    for (let j = i + 1; j < tabs.length; j++) {
+      const a = tabs[i], b = tabs[j];
+      const over = a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+      assert.ok(!over, `the cards of "${a.text}" and "${b.text}" are on top of each other`);
+    }
+});
+
 /* The same check over boards nobody wrote: random flows of every software
    kind, tags of every length, notes dropped into the columns and callouts on
    random sides of random things. Seeded, so a failure is the same failure next
@@ -2659,6 +2747,52 @@ await atest('no random board prints a label over words, a note, or a box', async
     const callouts = Array.from({ length: pick(3) }, (_, k) => ({
       id: `c${k}`, at: at[pick(at.length)], side: ['above', 'below', 'left', 'right'][pick(4)], label: 'a callout that says something' }));
     const spec = { title: 'random', nodes: [...nodes, ...notes], edges, callouts };
+    for (const s of overprints(spec, renderSVG(await drawn(spec))).text) found.push(`random board ${i}: ${s}`);
+  }
+  assert.deepEqual(found, []);
+});
+
+/* The same, on boards that carry boundaries. A boundary's name rides a card
+   that slides along the wall it belongs to, and the card is one more thing
+   that floats: it must not land on a tag, on a callout, on a word, under a
+   box, or on another card. Two boundaries whose walls start at the same height
+   are the case that used to lose a name altogether (#87), and a random board
+   has plenty of those. */
+await atest('no random board puts a boundary\'s card on anything', async () => {
+  const { overprints } = await import('./readable.mjs');
+  let seed = 87;
+  const rnd = () => (seed = (seed * 1664525 + 1013904223) >>> 0) / 2 ** 32;
+  const pick = k => Math.floor(rnd() * k);
+  const kinds = ['service', 'datastore', 'queue', 'cache', 'client', 'gateway', 'blob', 'external'];
+  const words = ['read', 'write', 'retry', 'name them', 'flatten', 'events', 'gRPC', 'ack',
+    '40 / 160 / 320 days', 'first month vs second month', 'over budget'];
+  const found = [];
+  for (let i = 0; i < 300; i++) {
+    const size = 3 + pick(8);
+    const nodes = Array.from({ length: size }, (_, k) => ({
+      id: `n${k}`, kind: kinds[pick(kinds.length)], label: `node ${k}`, sub: rnd() < 0.5 ? 'a short sub line' : undefined }));
+    const edges = [], seen = new Set();
+    for (let k = 0; k < size + pick(5); k++) {
+      const a = pick(size), b = pick(size);
+      if (a === b || seen.has(`${a}>${b}`)) continue;
+      seen.add(`${a}>${b}`);
+      edges.push({ from: `n${a}`, to: `n${b}`, label: rnd() < 0.8 ? words[pick(words.length)] : undefined });
+    }
+    const notes = Array.from({ length: pick(3) }, (_, k) => ({
+      id: `note${k}`, kind: 'note', label: 'a note about the thing next to it', col: pick(4), row: pick(4) }));
+    const at = [...nodes.map(n => n.id), ...edges.map(e => `${e.from}>${e.to}`)];
+    const callouts = Array.from({ length: pick(3) }, (_, k) => ({
+      id: `c${k}`, at: at[pick(at.length)], side: ['above', 'below', 'left', 'right'][pick(4)], label: 'a callout that says something' }));
+    const boundaries = [];
+    for (let k = 0; k < pick(4); k++) {
+      const members = [];
+      for (let j = 0; j < 1 + pick(size); j++) {
+        const m = `n${pick(size)}`;
+        if (!members.includes(m)) members.push(m);
+      }
+      if (members.length) boundaries.push({ id: `b${k}`, label: `zone ${k}`, members });
+    }
+    const spec = { title: 'random', nodes: [...nodes, ...notes], edges, callouts, boundaries };
     for (const s of overprints(spec, renderSVG(await drawn(spec))).text) found.push(`random board ${i}: ${s}`);
   }
   assert.deepEqual(found, []);
