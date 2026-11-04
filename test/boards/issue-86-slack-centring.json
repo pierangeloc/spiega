@@ -1,0 +1,18 @@
+{
+  "title": "one pinned box, three that nothing pins",
+  "nodes": [
+    { "id": "a", "kind": "service", "label": "A", "col": 0, "row": 0 },
+    { "id": "x", "kind": "service", "label": "X (member)", "col": 1, "row": 0 },
+    { "id": "b", "kind": "service", "label": "B (intruder)", "col": 1, "row": 1 },
+    { "id": "c", "kind": "service", "label": "C (free)", "col": 1, "row": 2 },
+    { "id": "d", "kind": "service", "label": "D (free)", "col": 1, "row": 3 },
+    { "id": "tall", "kind": "service", "label": "Tall 1", "col": 2, "row": 0 },
+    { "id": "tall2", "kind": "service", "label": "Tall 2", "col": 2, "row": 1 },
+    { "id": "tall3", "kind": "service", "label": "Tall 3", "col": 2, "row": 2 },
+    { "id": "tall4", "kind": "service", "label": "Tall 4", "col": 2, "row": 3 },
+    { "id": "tall5", "kind": "service", "label": "Tall 5", "col": 2, "row": 4 },
+    { "id": "lone", "kind": "client", "label": "Lone", "col": 3, "row": 0 }
+  ],
+  "edges": [{ "from": "a", "to": "x" }],
+  "boundaries": [{ "id": "ax", "label": "a x", "members": ["a", "x"] }]
+}
