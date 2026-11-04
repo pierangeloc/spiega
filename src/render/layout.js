@@ -560,10 +560,13 @@ function separate(groups, boxes) {
   /** @type {Record<string, number>} */
   const y = Object.fromEntries(ids.map(id => [id, PAD]));
   const ready = ids.filter(id => !indegree.get(id));
+  /** @type {string[]} */
+  const order = [];
   let done = 0;
   while (ready.length) {
     const id = /** @type {string} */ (ready.shift());
     done++;
+    order.push(id);
     for (const [to, by] of graph.get(id) || []) {
       y[to] = Math.max(y[to], y[id] + by);
       indegree.set(to, (indegree.get(to) || 0) - 1);
@@ -572,39 +575,38 @@ function separate(groups, boxes) {
   }
 
   /* The longest path gives every box its earliest position, which packs the
-     board to the top. A column that no boundary touches has no reason to be
-     packed: layout() centres every column against the tallest one, and those
-     columns lost that the moment separation ran. Within a column the boxes are
-     chained so they already move as one; the constraint that crosses a column
-     boundary is what pins a column, so a column whose boxes take part in no
-     cross-column edge is free to be centred again. Centring it can never grow
-     the board — a column's height is at most the tallest column's — and a box
-     with no cross-column edge is a box no group's rectangle reaches, so it can
-     neither become an intruder nor drag a wall over one. */
+     whole board to the top. layout() centres every column against the tallest
+     one, and that centring is lost the moment separation runs. Running the same
+     graph backwards from the board's height gives each box its latest position
+     — how far it can fall before an edge that needs it above another, or the
+     bottom, stops it. `slack = latest - earliest` is that box's own room to
+     move, and standing it in the middle of its slack puts a box that shares a
+     column with one a boundary pinned back where it sat before separation,
+     instead of deciding per column and dragging the pinned neighbour along or
+     leaving a whole column packed to the top.
 
-  /** @param {string} id */
-  const colOf = id => boxes[id].col ?? 0;
-  /** @type {Map<string, boolean>} */
-  const free = new Map(ids.map(id => [id, true]));
-  for (const [from, tos] of graph)
-    for (const to of tos.keys())
-      if (colOf(from) !== colOf(to)) { free.set(from, false); free.set(to, false); }
+     The midpoint is safe because both ends are a valid placement of the same
+     difference constraints: taking the average of two placements that each
+     satisfy "this one is at least so far below that one" satisfies it too. So a
+     box a boundary stood clear of a member stays clear of it, and the board
+     never grows — the reverse pass anchors every box above the bottom its
+     earliest position already reached. */
 
-  let contentBottom = PAD;
-  for (const id of ids) contentBottom = Math.max(contentBottom, y[id] + span(id));
+  if (done !== ids.length) return null;
 
-  /** @type {Record<number, string[]>} */
-  const colIds = {};
-  for (const id of ids) (colIds[colOf(id)] ||= []).push(id);
-  for (const members of Object.values(colIds)) {
-    if (!members.every(id => free.get(id))) continue;
-    const top = Math.min(...members.map(id => y[id]));
-    const bot = Math.max(...members.map(id => y[id] + span(id)));
-    const h = bot - top;
-    const shift = PAD + (contentBottom - PAD - h) / 2 - top;
-    for (const id of members) y[id] += shift;
+  let bottom = PAD;
+  for (const id of ids) bottom = Math.max(bottom, y[id] + span(id));
+
+  /** @type {Record<string, number>} */
+  const latest = Object.fromEntries(ids.map(id => [id, bottom - span(id)]));
+  for (let i = order.length - 1; i >= 0; i--) {
+    const id = order[i];
+    for (const [to, by] of graph.get(id) || [])
+      latest[id] = Math.min(latest[id], latest[to] - by);
   }
-  return done === ids.length ? y : null;
+  for (const id of ids) y[id] += (latest[id] - y[id]) / 2;
+
+  return y;
 }
 
 export { COL_GAP, ROW_GAP, PAD, EDGE_GAP, KNEE };
