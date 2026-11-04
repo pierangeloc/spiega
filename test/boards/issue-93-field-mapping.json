@@ -1,0 +1,22 @@
+{
+  "title": "which Kafka event field maps to which column of the CSV export",
+  "nodes": [
+    { "id": "discount-code", "kind": "field", "label": "discountCode", "sub": "grams" },
+    { "id": "parcel-type", "kind": "field", "label": "parcelType.key" },
+    { "id": "weight-limits", "kind": "field", "label": "parcelType.weightLimits" },
+    { "id": "recipient", "kind": "field", "label": "recipient.name" },
+    { "id": "kg-factuurbedrag", "kind": "field", "label": "KG_FACTUURBEDRAG" },
+    { "id": "kolom-soort", "kind": "field", "label": "KOLOM_SOORT" },
+    { "id": "gewicht", "kind": "field", "label": "GEWICHT" },
+    { "id": "ontvanger", "kind": "field", "label": "ONTVANGER" }
+  ],
+  "edges": [
+    { "from": "discount-code", "to": "kg-factuurbedrag", "label": "1:1" },
+    { "from": "parcel-type", "to": "kolom-soort", "label": "1:1" },
+    { "from": "weight-limits", "to": "gewicht", "label": "1:1" },
+    { "from": "recipient", "to": "ontvanger", "label": "1:1" }
+  ],
+  "boundaries": [
+    { "id": "csv", "label": "the CSV export", "members": ["kg-factuurbedrag", "kolom-soort", "gewicht", "ontvanger"] }
+  ]
+}

@@ -73,12 +73,26 @@ spiega say  "The gateway does **authn** and rate limiting, then hands off."
 | `cache` | a cache, a read replica, a copy of truth from elsewhere |
 | `queue` | a topic, a queue, a stream (`"depth": 4` fills slots) |
 | `external` | a third party, drawn as a cloud |
+| `field` | a named value: a CSV column, a field of a message, a config key |
 | `note` | your own handwriting: a keyword, a caveat, a number |
 | `formula` | an equation that *is* the explanation |
 | `blob` | a body, a region, a mass with no fixed form |
 | `vessel` | a container: a cell, a tank, a reservoir |
 | `particle` | a molecule, a drop, one unit of a substance |
 | `source` | the sun, a spring, wherever something comes from |
+
+**A shape is a claim, and a wrong one is a false statement.** A cylinder says
+*durable storage*; a row of slots says *a queue*; a rounded box says *a
+component*. Drawn on a field name, each of those says something the
+explanation does not mean, and the board is wrong about what it is drawing.
+So pick the shape that says what you mean, and if nothing in the table fits,
+say so in words instead of reaching for the nearest one.
+
+A `field` is for a named value: a column of a CSV, a field of a message on a
+topic, a key in a config, a member of a DTO. It is about software and is not
+a piece of infrastructure, which is why it has a shape of its own rather than
+borrowing one. Its notch is on the side the value runs, so the two sides of a
+mapping mirror each other — you do not have to say which is which.
 
 The last four carry no software meaning. Use them when a figure is not about
 software — `source` for the sun, `vessel` for water, `particle` for a gas,
