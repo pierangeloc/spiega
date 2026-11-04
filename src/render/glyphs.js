@@ -436,12 +436,14 @@ export function drawBoundary(b, box) {
  * @param {{id?: string, label?: string, tint?: string}} b
  * @param {import('./layout.js').Box} box
  * @param {{x: number, y: number, w: number, h: number}|null} [tab]
+ * @param {string} [name] what the card says, when it is not the boundary's own
+ *   label: a piece of a split boundary says which piece it is
  */
-export function drawBoundaryCard(b, box, tab = null) {
+export function drawBoundaryCard(b, box, tab = null, name = b.label) {
   const { x, y } = box;
   const seed = hashSeed(b.id || b.label || 'b') % 100000;
-  const lab = lettering(b.label || '');
-  const { w: tw, h: th } = tabSize(b.label);
+  const lab = lettering(name || '');
+  const { w: tw, h: th } = tabSize(name);
   const tx = tab ? tab.x : x + 16;
   const ty = tab ? tab.y : y - 11;
   const card = roughRect(tx, ty, tw, th, 7, { seed: seed + 3, amp: 0.8 });

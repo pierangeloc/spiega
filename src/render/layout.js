@@ -434,6 +434,33 @@ export function boundaryShapes(members, boxes) {
   return pieces.map(ids => /** @type {Box} */ (boundaryBox(ids, boxes)));
 }
 
+/* What each piece of a boundary calls itself on its card.
+
+   Two dashed rectangles under one name read as two boundaries that happen to
+   share a name, not as one boundary that could not be drawn as one. So when a
+   boundary is drawn as several pieces, each card says which piece it is:
+   `B D (1/2)` and `B D (2/2)`, numbered the way the board is read, top to
+   bottom and then left to right. A link between the pieces was the other way
+   to say it, and it cannot be drawn honestly: the pieces are apart because
+   something that is not a member stands between them, so the line would have
+   to run through or around exactly the boxes the split is keeping out, and
+   would read as an edge. A boundary that is one rectangle keeps its name as
+   written. */
+/**
+ * @param {string|undefined} label
+ * @param {Box[]} shapes what boundaryShapes returned
+ * @returns {(string|undefined)[]} one name per shape, in the same order
+ */
+export function pieceNames(label, shapes) {
+  if (shapes.length < 2) return shapes.map(() => label);
+  const reading = shapes.map((_, i) => i)
+    .sort((i, j) => (shapes[i].y - shapes[j].y) || (shapes[i].x - shapes[j].x) || (i - j));
+  return shapes.map((_, i) => {
+    const part = `(${reading.indexOf(i) + 1}/${shapes.length})`;
+    return label ? `${label} ${part}` : part;
+  });
+}
+
 /* Where each box must stand for every group's enclosure to hold only its own.
 
    Each box that an enclosure would otherwise swallow has to go wholly above it

@@ -62,8 +62,10 @@ import { tabSize } from './ink.js';
  * }} CalloutPlace */
 /* A boundary, and the rectangles it is drawn as: one when one tells the
    truth, several when it cannot be one true rectangle. Each rectangle carries
-   its own tab, so each is placed on its own. */
-/** @typedef {{id: string, label?: string, tint?: string, shapes: Box[]}} Boundary */
+   its own tab, so each is placed on its own, sized for the name that piece
+   carries: a split boundary's pieces are numbered, which is wider than the
+   name alone. */
+/** @typedef {{id: string, label?: string, names?: (string|undefined)[], tint?: string, shapes: Box[]}} Boundary */
 /** @typedef {{rect: Rect, what: string, float?: boolean, weight?: number}} Solid */
 /** @typedef {{key: string, pts: number[][]}} Wire */
 /** @typedef {{solids: Solid[], wires: Wire[]}} Obstacles */
@@ -283,7 +285,7 @@ export function planFloating({ planned, boxes, callouts = [], boundaries = [], s
   for (const b of boundaries) {
     for (const [i, shape] of b.shapes.entries()) {
       const key = `${b.id}#${i}`;
-      const { w, h } = tabSize(b.label);
+      const { w, h } = tabSize(b.names?.[i] ?? b.label);
       const ideal = { at: [shape.x + 16 + w / 2, shape.y], w, h };
       /** @param {number[]} at @returns {Rect} */
       const rect = at => ({ x: at[0] - w / 2, y: at[1] - h / 2, w, h });
