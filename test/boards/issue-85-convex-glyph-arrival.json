@@ -1,0 +1,34 @@
+{
+  "nodes": [
+    {
+      "id": "source",
+      "kind": "blob",
+      "label": "Source"
+    },
+    {
+      "id": "target",
+      "kind": "blob",
+      "label": "Target"
+    }
+  ],
+  "edges": [
+    {
+      "from": "source",
+      "to": "target",
+      "label": "Edge 1",
+      "fan": 0.5
+    },
+    {
+      "from": "source",
+      "to": "target",
+      "label": "Edge 2",
+      "fan": -0.5
+    }
+  ],
+  "layout": {
+    "columns": [
+      ["source"],
+      ["target"]
+    ]
+  }
+}

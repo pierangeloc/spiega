@@ -39,5 +39,10 @@
     "issue": 80,
     "broke": "`gBlob` drew its outline at `0.46 * w * kx` and `0.4 * h * ky` from the centre (`kx` in 0.93..1.0, `ky` in 0.78..1.0), leaving the ink 10 to 16px inside the left/right of its box and 9 to 12px inside the top/bottom. Edges stop 8px outside the box, so every arrow into or out of a blob ended in empty background.",
     "fixed": "The ten vertices still wobble independently with `kx` and `ky`, then each half is scaled out to its side of the box (`0.5 * w` and `0.5 * h`), so the outline keeps its uneven hand-drawn mass while reaching the box edges on all four sides."
+  },
+  "issue-85-convex-glyph-arrival": {
+    "issue": 85,
+    "broke": "Edges still stop short of a convex glyph when they arrive off the side midpoint, specifically for fanned arrivals on blobs, particles, and vessels. Arrows 4 and 5 into UPDATE in kalman.svg reach the ink with 8px residual at midpoint, ~20px at fanned positions.",
+    "fixed": "Modified sidePoint function to add ink inset per side as a function of fan offset for convex glyphs. Added test to verify edges reach the ink of convex glyphs at fanned arrival positions."
   }
 }

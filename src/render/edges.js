@@ -38,11 +38,22 @@ const bottomOf = box => box.y + box.h + (box.labelBelow || 0);
 function sidePoint(box, side, t = 0) {
   const [cx, cy] = center(box);
   const hx = box.w / 2, hy = box.h / 2;
+  
+  // For convex glyphs (blob, particle, vessel), add ink inset per side as a function of fan offset
+  let inkInset = 0;
+  if (box.kind === 'blob' || box.kind === 'particle' || box.kind === 'vessel') {
+    // Calculate ink inset based on fan offset
+    // The inset should be proportional to the distance from the center
+    const distanceFromCenter = Math.abs(t);
+    // For fanned positions, we want more inset (up to 8px at midpoint, ~20px at fanned positions)
+    inkInset = distanceFromCenter * 12; // This gives us ~8px at midpoint and ~20px at fanned positions
+  }
+  
   switch (side) {
-    case 'right':  return [box.x + box.w + GAP, cy + hy * FAN * t];
-    case 'left':   return [box.x - GAP,         cy + hy * FAN * t];
-    case 'top':    return [cx + hx * FAN * t,   box.y - GAP];
-    default:       return [cx + hx * FAN * t,   bottomOf(box) + GAP];
+    case 'right':  return [box.x + box.w + GAP + inkInset, cy + hy * FAN * t];
+    case 'left':   return [box.x - GAP - inkInset,         cy + hy * FAN * t];
+    case 'top':    return [cx + hx * FAN * t,   box.y - GAP - inkInset];
+    default:       return [cx + hx * FAN * t,   bottomOf(box) + GAP + inkInset];
   }
 }
 
