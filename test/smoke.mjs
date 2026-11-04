@@ -2574,6 +2574,45 @@ await atest('a boundary that cannot be one true rectangle is drawn as true piece
   assert.ok(shapes.some(n => n > 1), 'one of them is given up, and drawn as more than one piece');
 });
 
+/* #77. Two dashed rectangles under one name read as two boundaries that happen
+   to share a name, not as one boundary that could not be drawn as one. The
+   check is made on the words the picture prints on its cards: a split boundary
+   numbers its pieces, and a boundary that is one rectangle keeps its name as it
+   was written, so no board that was never split changes. */
+await atest('a boundary drawn as pieces says so on every piece, and only then', async () => {
+  const cards = svg => [...svg.matchAll(/<g data-boundary="([^"]*)">((?:<g class="boundary-card">.*?<\/g>)+)<\/g>/gs)]
+    .flatMap(g => [...g[2].matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map(t => [g[1], t[1]]));
+  const words = async (name, spec) => {
+    const b = await drawn(spec);
+    const r = renderSVG(b);
+    const got = cards(r.svg);
+    for (const bd of b.boundaries) {
+      const n = boundaryShapes(bd.members, r.boxes).length;
+      const mine = got.filter(([id]) => id === bd.id).map(([, t]) => t.toLowerCase());
+      const label = bd.label.toLowerCase();
+      assert.deepEqual(
+        n === 1 ? mine : [...mine].sort(),
+        n === 1 ? [label] : Array.from({ length: n }, (_, k) => `${label} (${k + 1}/${n})`),
+        `${name}: "${bd.label}" is drawn as ${n} rectangle(s)`);
+    }
+    return b.boundaries.filter(bd => boundaryShapes(bd.members, r.boxes).length > 1).length;
+  };
+
+  let split = 0;
+  for (const [name, file] of [
+    ...boardSpecs().map(f => [`test/boards/${f}`, path.join(ROOT, 'test/boards', f)]),
+    ...fs.readdirSync(path.join(ROOT, 'examples')).filter(f => f.endsWith('.json'))
+      .map(f => [`examples/${f}`, path.join(ROOT, 'examples', f)]),
+  ]) split += await words(name, JSON.parse(fs.readFileSync(file, 'utf8')));
+  assert.ok(split >= 2, 'the boards that were split to begin with are among those checked');
+
+  // the pieces are numbered the way the board is read: top to bottom
+  const r = renderSVG(await drawn(JSON.parse(fs.readFileSync(path.join(ROOT, 'test/boards/issue-58-boundary-impossible.json'), 'utf8'))));
+  const [first, second] = cards(r.svg).filter(([id]) => id === 'bd').map(([, t]) => t);
+  assert.deepEqual([first, second].sort(), ['B D (1/2)', 'B D (2/2)']);
+  assert.ok(r.svg.indexOf(first) < r.svg.indexOf(second));
+});
+
 /* The invariant is the point, so it is also asked of boards nobody wrote:
    random flows with random, overlapping, nested boundaries. Seeded, so a
    failure is the same failure next time. */
@@ -2801,8 +2840,8 @@ await atest('every boundary on the board is named, even where three of them over
   const r = renderSVG(await drawn(spec));
   const tabs = measureDrawing(r.svg).tabs;
   assert.equal(tabs.length, 4, 'three boundaries, one of them drawn as two pieces');
-  assert.deepEqual(tabs.map(t => t.text).sort(), ['A B', 'A C', 'B C', 'B C'],
-    'every boundary is named, and the split one says its name twice');
+  assert.deepEqual(tabs.map(t => t.text).sort(), ['A B', 'A C', 'B C (1/2)', 'B C (2/2)'],
+    'every boundary is named, and the split one names each piece (#77)');
 
   /* And no two of them are on top of each other. The cards are measured, not
      the words: a card over a card hides the name under it. */

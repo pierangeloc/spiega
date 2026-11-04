@@ -13,7 +13,7 @@ import { drawNode, drawBoundary, drawBoundaryCard } from './glyphs.js';
 import { drawEdge, planEdges, edgeKey } from './edges.js';
 import { drawCallout } from './callout.js';
 import { planFloating } from './floating.js';
-import { assign, layout, boundaryShapes } from './layout.js';
+import { assign, layout, boundaryShapes, pieceNames } from './layout.js';
 
 /** @typedef {import('../board/state.js').Board} Board */
 /** @typedef {import('../board/state.js').FlowStep} FlowStep */
@@ -136,10 +136,11 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   const planned = planEdges(edges, boxes);
   /* The rectangles a boundary is drawn as, and the cards that carry its name.
      A boundary that cannot be one true rectangle is drawn as several, and each
-     piece carries its own card. */
+     piece carries its own card, and the card says which piece it is. */
   const boundaries = (spec.boundaries || [])
     .map(b => ({ ...b, shapes: boundaryShapes(b.members || [], boxes) }))
-    .filter(b => b.shapes.length);
+    .filter(b => b.shapes.length)
+    .map(b => ({ ...b, names: pieceNames(b.label, b.shapes) }));
   const { tags, tabs, callouts: calls } = planFloating({
     planned, boxes, callouts: spec.callouts, boundaries, stepFor });
   const floats = [...calls.map(p => p.box),
@@ -167,7 +168,7 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
     body += `<g data-boundary="${b.id}">${b.shapes.map(bb => drawBoundary(b, bb)).join('')}</g>`;
   for (const b of boundaries)
     body += `<g data-boundary="${b.id}">` +
-      b.shapes.map((bb, i) => drawBoundaryCard(b, bb, tabRect(tabs.get(`${b.id}#${i}`)))).join('') +
+      b.shapes.map((bb, i) => drawBoundaryCard(b, bb, tabRect(tabs.get(`${b.id}#${i}`)), b.names[i])).join('') +
       `</g>`;
 
   for (const r of planned) {
