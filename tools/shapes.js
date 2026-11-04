@@ -42,6 +42,16 @@ const SAMPLES = [
   ['note', [{ op: 'node', id: 'n', kind: 'note', label: 'at most once\nper tenant' }]],
   ['formula', [{ op: 'node', id: 'f', kind: 'formula', label: '\\nabla \\times E = -\\frac{\\partial B}{\\partial t}' }]],
 
+  /* A field, and the same field on the other side of a mapping: the notch is
+     on the side the value runs, so the two mirror each other across the
+     gutter. */
+  ['field', [{ op: 'node', id: 'fld', kind: 'field', label: 'discountCode', sub: 'grams' }]],
+  ['field-mapping', [
+    { op: 'node', id: 'src', kind: 'field', label: 'discountCode' },
+    { op: 'node', id: 'tgt', kind: 'field', label: 'FACTUURBEDRAG' },
+    { op: 'edge', from: 'src', to: 'tgt', label: '1:1' },
+  ]],
+
   // the neutral kinds, shown on a figure that is not about software at all
   ['blob', [{ op: 'node', id: 'b', kind: 'blob', label: 'Chloroplast', sub: 'organelle' }]],
   ['vessel', [{ op: 'node', id: 'v', kind: 'vessel', label: 'Water', sub: 'H2O' }]],

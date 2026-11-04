@@ -1,0 +1,15 @@
+{
+  "title": "A boundary drawn as two pieces, and nothing says so",
+  "nodes": [
+    { "id": "a", "kind": "service", "label": "A" },
+    { "id": "b", "kind": "service", "label": "B" },
+    { "id": "c", "kind": "service", "label": "C" },
+    { "id": "d", "kind": "service", "label": "D" }
+  ],
+  "edges": [{ "from": "d", "to": "a" }],
+  "boundaries": [
+    { "id": "abc", "label": "a b c", "members": ["a", "b", "c"] },
+    { "id": "cd", "label": "c d", "members": ["c", "d"] },
+    { "id": "bd", "label": "b d", "members": ["b", "d"] }
+  ]
+}

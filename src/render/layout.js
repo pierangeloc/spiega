@@ -54,7 +54,8 @@
 /** @typedef {{
  *   x: number, y: number, w: number, h: number,
  *   labelBelow?: number, col?: number, row?: number,
- *   inkAt?: (side: string, along: number) => { inset: number, slide: number }
+ *   inkAt?: (side: string, along: number) => { inset: number, slide: number },
+ *   inkSpan?: (side: string) => { lo: number, hi: number } | null
  * }} Box */
 
 /* COL_GAP is the least a gutter is ever given. What a gutter actually gets is
@@ -80,7 +81,7 @@ const WALL_AIR = 16;
 
 import { wrapText, NOTE_LINES, nodeText, tagLines, pillSize } from './ink.js';
 import { measureMath } from './math.js';
-import { inkAt } from './glyphs.js';
+import { inkAt, inkSpan } from './glyphs.js';
 
 /** @type {Record<string, (n: LayoutNode, tw: number) => Size>} */
 const SIZES = {
@@ -90,6 +91,13 @@ const SIZES = {
   cache:     (n, tw) => ({ w: Math.max(150, tw + 52), h: 70 }),
   datastore: (n, tw) => ({ w: Math.max(146, tw + 48), h: 96 }),
   queue:     (n, tw) => ({ w: Math.max(176, tw + 60), h: 48, labelBelow: 34 }),
+  /* A field is a card with a label on it, not a component: flatter than a
+     service, and about as wide, because what it holds is a name and not a
+     box of its own. Tall enough to clear both the notch above the title and
+     the thickness band below the sub — at 58 the sub's baseline was touching
+     the band and the wobble of the band's top edge was crossing the bottom
+     of the sub's letters. */
+  field:     (n, tw) => ({ w: Math.max(150, tw + 52), h: 64 }),
   client:    (n, tw) => ({ w: Math.max(146, tw + 48), h: 92 }),
   external:  (n, tw) => ({ w: Math.max(182, tw + 96), h: 96 }),
   /* Measured, not estimated. Every other kind guesses its width from a
@@ -347,6 +355,7 @@ export function layout(spec, placed, stepFor = e => e.step) {
         w: e.s.w, h: e.s.h, labelBelow: e.s.labelBelow, col: c, row: e.p.row,
       };
       box.inkAt = (side, along) => inkAt(e.n, box, side, along);
+      box.inkSpan = side => inkSpan(e.n, box, side);
       boxes[e.n.id] = box;
       y += e.s.h + e.s.labelBelow + ROW_GAP;
     }
@@ -447,6 +456,33 @@ export function boundaryShapes(members, boxes) {
       }
   }
   return pieces.map(ids => /** @type {Box} */ (boundaryBox(ids, boxes)));
+}
+
+/* What each piece of a boundary calls itself on its card.
+
+   Two dashed rectangles under one name read as two boundaries that happen to
+   share a name, not as one boundary that could not be drawn as one. So when a
+   boundary is drawn as several pieces, each card says which piece it is:
+   `B D (1/2)` and `B D (2/2)`, numbered the way the board is read, top to
+   bottom and then left to right. A link between the pieces was the other way
+   to say it, and it cannot be drawn honestly: the pieces are apart because
+   something that is not a member stands between them, so the line would have
+   to run through or around exactly the boxes the split is keeping out, and
+   would read as an edge. A boundary that is one rectangle keeps its name as
+   written. */
+/**
+ * @param {string|undefined} label
+ * @param {Box[]} shapes what boundaryShapes returned
+ * @returns {(string|undefined)[]} one name per shape, in the same order
+ */
+export function pieceNames(label, shapes) {
+  if (shapes.length < 2) return shapes.map(() => label);
+  const reading = shapes.map((_, i) => i)
+    .sort((i, j) => (shapes[i].y - shapes[j].y) || (shapes[i].x - shapes[j].x) || (i - j));
+  return shapes.map((_, i) => {
+    const part = `(${reading.indexOf(i) + 1}/${shapes.length})`;
+    return label ? `${label} ${part}` : part;
+  });
 }
 
 /* Where each box must stand for every group's enclosure to hold only its own.

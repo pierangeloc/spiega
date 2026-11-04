@@ -198,6 +198,104 @@ test('every kind renders, and the same board draws the same strokes', () => {
   for (const k of KINDS) assert.ok(a1.includes(k.toUpperCase()) || a1.includes(k), k);
 });
 
+/* The outline of one node, as the points it is drawn from. A field's notch is
+   half of what it says, so it is asked of the drawing and not of the code that
+   made it. */
+const outlineOf = (svg, id) => {
+  const at = svg.indexOf(`data-node="${id}"`);
+  if (at < 0) return null;
+  const from = svg.indexOf('<path', at);
+  const m = / d="([^"]+)"/.exec(svg.slice(from, from + 8000));
+  if (!m) return null;
+  return [...m[1].matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map(p => [+p[1], +p[2]]);
+};
+
+/* Which corner of a field is bitten out. The top edge stops short of one of
+   them, and the corner it stops short of is the reading. */
+const notchSide = (svg, id, box) => {
+  const pts = outlineOf(svg, id);
+  if (!pts) return null;
+  const top = Math.min(...pts.map(p => p[1]));
+  const onTop = pts.filter(p => p[1] <= top + 3);
+  const gapL = Math.min(...onTop.map(p => p[0])) - box.x;
+  const gapR = (box.x + box.w) - Math.max(...onTop.map(p => p[0]));
+  return gapR > gapL ? 'right' : 'left';
+};
+
+/* #93. A board asked to show which event fields map to which columns drew
+   every field as a `datastore` cylinder, so it asserted "durable storage"
+   about a list of field names. A field is a card with a corner notched: no
+   cylinder, no slot row, no rounded rectangle, no tilted scrap. */
+test('a field is a notched card and claims to be no piece of infrastructure', () => {
+  const b = emptyBoard();
+  applyOps(b, [{ op: 'node', id: 'f', kind: 'field', label: 'discountCode', sub: 'grams' }]);
+  const r = renderSVG(b, { hand: false });
+
+  assert.ok(r.boxes.f, 'the field is on the board');
+  assert.equal(r.boxes.f.labelBelow, 0, 'and it is not a queue, which keeps its name in a strip');
+
+  const body = r.svg.slice(r.svg.indexOf('data-node="f"'));
+  /* A cylinder is drawn with an arc and a service with rounded corners, and a
+     note is tilted. A field is none of those: its outline is straight, and it
+     stands upright. */
+  const outline = / d="([^"]+)"/.exec(body.slice(body.indexOf('<path'), body.indexOf('<path') + 8000));
+  assert.ok(outline, 'the field has an outline');
+  assert.ok(!/[AQ]/.test(outline[1]), 'a field is drawn with straight segments: no cylinder, no rounded box');
+  assert.ok(!/rotate\(/.test(body), 'and it is not a tilted scrap of paper');
+
+  /* The notch: the top edge stops short of a corner. */
+  const side = notchSide(r.svg, 'f', r.boxes.f);
+  assert.ok(side, 'the field has an outline to read');
+  assert.ok(['left', 'right'].includes(side));
+
+  /* And it is a card, not a slab: a field holds a name and nothing else. */
+  assert.ok(r.boxes.f.h < 70, `a field is ${r.boxes.f.h}px tall; a service is 70`);
+});
+
+/* The notch is on the side the value runs, so the two sides of a mapping face
+   each other and the reader tells source from target by the shape. */
+test('the two sides of a mapping notch towards each other', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'node', id: 'src', kind: 'field', label: 'discountCode' },
+    { op: 'node', id: 'tgt', kind: 'field', label: 'FACTUURBEDRAG' },
+    { op: 'edge', from: 'src', to: 'tgt', label: '1:1' },
+  ]);
+  const r = renderSVG(b, { hand: false });
+  assert.equal(notchSide(r.svg, 'src', r.boxes.src), 'right',
+    'the field that gives the value notches right, towards what it feeds');
+  assert.equal(notchSide(r.svg, 'tgt', r.boxes.tgt), 'left',
+    'and the one that receives it notches left, back the way it came');
+
+  /* A board with one column and no edges says nothing about which side is
+     which, and the field says so too: it notches right, the default. */
+  const lone = emptyBoard();
+  applyOps(lone, [{ op: 'node', id: 'one', kind: 'field', label: 'parcelType.key' }]);
+  const lr = renderSVG(lone, { hand: false });
+  assert.equal(notchSide(lr.svg, 'one', lr.boxes.one), 'right',
+    'a field with no edges at all is not a side of anything, and takes the default');
+
+  /* And the side can be said outright, for the board where the flow does not
+     speak for itself. */
+  const said = emptyBoard();
+  applyOps(said, [
+    { op: 'node', id: 'a', kind: 'field', label: 'A', notch: 'left' },
+    { op: 'node', id: 'b', kind: 'field', label: 'B', notch: 'right' },
+  ]);
+  const sr = renderSVG(said, { hand: false });
+  assert.equal(notchSide(sr.svg, 'a', sr.boxes.a), 'left', 'a stated notch wins');
+  assert.equal(notchSide(sr.svg, 'b', sr.boxes.b), 'right', 'on both sides');
+});
+
+/* An agent reads the skill, not the docs. A kind the renderer knows and the
+   skill does not name is a kind nobody will reach for. */
+test('the skill names every kind the board can draw', () => {
+  const skill = fs.readFileSync(path.join(ROOT, 'skills/spiega/SKILL.md'), 'utf8');
+  for (const kind of KINDS)
+    assert.ok(new RegExp(`\`${kind}\``).test(skill),
+      `skills/spiega/SKILL.md never mentions the "${kind}" kind`);
+});
+
 test('focusing a step lights one edge and dims the rest, but never a note', () => {
   const b = emptyBoard();
   applyOps(b, [
@@ -2407,7 +2505,13 @@ test('a fanned edge stops GAP short of a convex glyph, not of its box', () => {
     const start = marks[i].index + marks[i][0].length;
     const end = i + 1 < marks.length ? marks[i + 1].index : svg.length;
     const body = svg.slice(start, end).replace(/<g class="shadow"[\s\S]*?<\/g>/, '');
-    return [...body.matchAll(/<path class="s" d="([^"]+)"/g)].flatMap(m => sample(m[1]));
+    /* A particle's specks are a couple of pixels and are not the outline an
+       arrow is aiming at. Anything that small is decoration. */
+    const paths = [...body.matchAll(/<path class="s" d="([^"]+)"/g)].map(m => sample(m[1]));
+    return paths.filter(pts => {
+      const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+      return Math.max(...xs) - Math.min(...xs) > 8 || Math.max(...ys) - Math.min(...ys) > 8;
+    }).flat();
   };
   const cross = (pts, horiz, at) => {
     const hit = [];
@@ -2476,12 +2580,36 @@ test('a fanned edge stops GAP short of a convex glyph, not of its box', () => {
 
   for (const [id, kind] of [['region', 'blob'], ['pool', 'vessel'], ['drop', 'particle']]) {
     const r = fan(id, kind, id === 'region' ? { label: 'Update', sub: 'step K of the way' } : {});
+    const tips = [];
     for (const key of ['a>' + id, 'b>' + id]) {
       const g = landed(r, key);
-      assert.ok(Math.abs(g.t) === 1, `${kind} ${key} should fan`);
       assert.ok(g.residual != null, `${kind} ${key} missed the ink`);
       nearGap(g.residual, `${kind} ${key}`);
+      tips.push(r.planned.find(p => p.key === key).pts.at(-1));
     }
+    /* Solving each station against the nearest point of a small disc parks
+       both arrowheads on it. Two edges must still arrive as two. */
+    const sep = Math.hypot(tips[0][0] - tips[1][0], tips[0][1] - tips[1][1]);
+    assert.ok(sep >= 16, `${kind} arrivals are ${sep.toFixed(1)}px apart and read as one arrow`);
+  }
+
+  /* A tag hung on the trunk a fan shares is read as labelling every edge in
+     it. `also` belongs on the run into Also, not at the elbow into Sink. */
+  const board = JSON.parse(fs.readFileSync(path.join(ROOT, 'test/boards/issue-85-convex-glyph-arrival.json'), 'utf8'));
+  const bb = emptyBoard();
+  applyOps(bb, specToOps(board));
+  const br = renderSVG(bb, { hand: false });
+  for (const id of ['drop', 'sun']) {
+    const tips = br.planned.filter(p => p.e.to === id).map(p => p.pts.at(-1));
+    const sep = Math.abs(tips[0][1] - tips[1][1]);
+    assert.ok(sep >= 16, `${id}: two arrows arrive ${sep.toFixed(1)}px apart`);
+  }
+  for (const key of ['region>out1', 'region>out2']) {
+    const p = br.planned.find(x => x.key === key);
+    const tag = br.tags.get(key);
+    const tip = p.pts.at(-1);
+    assert.ok(Math.abs(tag.at[1] - tip[1]) < 16,
+      `${key} tag sat at y=${tag.at[1].toFixed(1)}, not on the arrow into y=${tip[1].toFixed(1)}`);
   }
 
   const rect = fan('svc', 'service');
@@ -2590,6 +2718,45 @@ await atest('a boundary that cannot be one true rectangle is drawn as true piece
   });
   assert.deepEqual(lies, []);
   assert.ok(shapes.some(n => n > 1), 'one of them is given up, and drawn as more than one piece');
+});
+
+/* #77. Two dashed rectangles under one name read as two boundaries that happen
+   to share a name, not as one boundary that could not be drawn as one. The
+   check is made on the words the picture prints on its cards: a split boundary
+   numbers its pieces, and a boundary that is one rectangle keeps its name as it
+   was written, so no board that was never split changes. */
+await atest('a boundary drawn as pieces says so on every piece, and only then', async () => {
+  const cards = svg => [...svg.matchAll(/<g data-boundary="([^"]*)">((?:<g class="boundary-card">.*?<\/g>)+)<\/g>/gs)]
+    .flatMap(g => [...g[2].matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map(t => [g[1], t[1]]));
+  const words = async (name, spec) => {
+    const b = await drawn(spec);
+    const r = renderSVG(b);
+    const got = cards(r.svg);
+    for (const bd of b.boundaries) {
+      const n = boundaryShapes(bd.members, r.boxes).length;
+      const mine = got.filter(([id]) => id === bd.id).map(([, t]) => t.toLowerCase());
+      const label = bd.label.toLowerCase();
+      assert.deepEqual(
+        n === 1 ? mine : [...mine].sort(),
+        n === 1 ? [label] : Array.from({ length: n }, (_, k) => `${label} (${k + 1}/${n})`),
+        `${name}: "${bd.label}" is drawn as ${n} rectangle(s)`);
+    }
+    return b.boundaries.filter(bd => boundaryShapes(bd.members, r.boxes).length > 1).length;
+  };
+
+  let split = 0;
+  for (const [name, file] of [
+    ...boardSpecs().map(f => [`test/boards/${f}`, path.join(ROOT, 'test/boards', f)]),
+    ...fs.readdirSync(path.join(ROOT, 'examples')).filter(f => f.endsWith('.json'))
+      .map(f => [`examples/${f}`, path.join(ROOT, 'examples', f)]),
+  ]) split += await words(name, JSON.parse(fs.readFileSync(file, 'utf8')));
+  assert.ok(split >= 2, 'the boards that were split to begin with are among those checked');
+
+  // the pieces are numbered the way the board is read: top to bottom
+  const r = renderSVG(await drawn(JSON.parse(fs.readFileSync(path.join(ROOT, 'test/boards/issue-58-boundary-impossible.json'), 'utf8'))));
+  const [first, second] = cards(r.svg).filter(([id]) => id === 'bd').map(([, t]) => t);
+  assert.deepEqual([first, second].sort(), ['B D (1/2)', 'B D (2/2)']);
+  assert.ok(r.svg.indexOf(first) < r.svg.indexOf(second));
 });
 
 /* The invariant is the point, so it is also asked of boards nobody wrote:
@@ -2819,8 +2986,8 @@ await atest('every boundary on the board is named, even where three of them over
   const r = renderSVG(await drawn(spec));
   const tabs = measureDrawing(r.svg).tabs;
   assert.equal(tabs.length, 4, 'three boundaries, one of them drawn as two pieces');
-  assert.deepEqual(tabs.map(t => t.text).sort(), ['A B', 'A C', 'B C', 'B C'],
-    'every boundary is named, and the split one says its name twice');
+  assert.deepEqual(tabs.map(t => t.text).sort(), ['A B', 'A C', 'B C (1/2)', 'B C (2/2)'],
+    'every boundary is named, and the split one names each piece (#77)');
 
   /* And no two of them are on top of each other. The cards are measured, not
      the words: a card over a card hides the name under it. */

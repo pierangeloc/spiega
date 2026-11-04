@@ -9,7 +9,7 @@ The field-by-field reference is [vocabulary.md](vocabulary.md). The
 one-shape-per-kind catalogue, with every kind at full size, is
 [shapes.md](shapes.md). This page is the tour.
 
-## The fourteen node kinds
+## The fifteen node kinds
 
 Eight kinds are software's furniture: a browser, a gateway, a service, a
 replica set, durable storage, a copy of it, a queue, and something you do not
@@ -27,6 +27,14 @@ own.
 | `cache` | a cache, a read replica, a copy of truth |
 | `queue` | a topic, a queue, a stream — `depth` fills slots |
 | `external` | a third party, something you do not own |
+
+One more is about software and is not a piece of it: a **field** — a column of
+a CSV, a field of a message on a topic, a key in a config. None of those is a
+database, so it is not drawn as one: a field is a card with a corner notched,
+and the notch is on the side the value runs, so the two sides of a mapping
+mirror each other and the reader tells source from target without a colour.
+
+<img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/kinds-fields.svg" width="620" alt="a field on each side of a mapping, the notches mirrored">
 
 Two more are writing on the board rather than boxes in it: a `note` is a
 torn-off scrap for a keyword or a caveat, and a `formula` sets a small subset of

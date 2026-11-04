@@ -10,7 +10,7 @@ import { INK, MUTED, SHADOW, ACCENT, bodyOf, mix } from './theme.js';
 import {
   roughRect, roughLine, roughEllipse, roughArc, roughPoly, roundedPts,
   stroke, fill, text, hashSeed, rng, wrapText, NOTE_LINES, lettering,
-  nodeText, NODE_TITLE_LH, NODE_SUB_LH, tabSize } from './ink.js';
+  nodeText, NODE_TITLE_LH, NODE_SUB_LH, tabSize, waver, round2 } from './ink.js';
 import { measureMath, drawMath } from './math.js';
 
 const SH_DX = 5, SH_DY = 6;          // the cast shadow sits down and to the left-ish
@@ -34,6 +34,19 @@ const labelBlock = (cx, cy, title, subtitle, { titleSize = 13.5, color = INK } =
   out += t.sub.map((ln, j) =>
     text(cx, subTop + j * NODE_SUB_LH, ln, { size: 10, color: MUTED, weight: 500, spacing: 0.04 })).join('');
   return out;
+};
+
+/* A closed outline whose corners are corners.
+
+   `roughPoly` rounds its corners, because `smooth` curves through the
+   midpoints of the edges and a corner only ever appears as a control point.
+   That is what makes the other glyphs soft, and it is right for them — a
+   cloud has no corners to begin with. A shape that means "not that other
+   shape" needs them sharp, so the edges are the same seeded wobble and the
+   turns are turns. */
+const sharpPoly = (pts, opts = {}) => {
+  const p = waver([...pts, pts[0]], { step: 22, ...opts });
+  return 'M' + p.map(([x, y]) => `${round2(x)} ${round2(y)}`).join('L') + 'Z';
 };
 
 /* The band along the bottom edge that gives a flat shape its thickness.
@@ -272,6 +285,50 @@ function gFormula(box, n, m, seed) {
     `</g>`;
 }
 
+/* ---------- the field glyph ----------
+
+   A field is a named value: a column of a CSV, a field of a message on a
+   topic, a key in a config, a member of a DTO. It is about software, and it is
+   not a piece of infrastructure — which the furniture above cannot say. A
+   cylinder says durable storage and a row of slots says a queue, and a board
+   that draws a field name as either asserts something the explanation does not
+   mean. The four neutral glyphs below escape that by leaving software behind
+   altogether; a field cannot, because it is a thing in the software.
+
+   So it is drawn as what it is: a card with one corner notched, like a
+   luggage tag or a form field. The notch is the whole of the reading — it
+   says "a label for a value" where a plain rectangle would say "a component",
+   and it says it without claiming to be any of the furniture. The corners
+   are sharp, because a rounded rectangle is a service and this is not one. */
+
+/* A notch is a bite taken out of the corner: the edge comes in, turns, and
+   goes back out. The point sits deeper than the straight cut across the same
+   corner would, so the bite is a notch and not a chamfer. */
+function notchPts(x, y, w, h, side, d) {
+  return side === 'left'
+    ? [[x + d, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y + d],
+      [x + d * 0.42, y + d * 0.74]]
+    : [[x, y], [x + w - d, y], [x + w - d * 0.42, y + d * 0.74], [x + w, y + d],
+      [x + w, y + h], [x, y + h]];
+}
+
+function gField(box, n, m, seed, side) {
+  const { x, y, w, h } = box;
+  /* Deep enough to read as a notch from across a room, shallow enough that
+     the card is still a card. */
+  const d = Math.min(19, Math.max(11, Math.round(Math.min(w, h) * 0.32)));
+  const body = sharpPoly(notchPts(x, y, w, h, side, d), { seed, amp: 0.9 });
+  const t = Math.min(7, h * 0.16);
+  const band = sharpPoly([[x, y + h - t], [x + w, y + h - t], [x + w, y + h], [x, y + h]],
+    { seed: seed + 41, amp: 0.6 });
+  /* The words sit below the notch, never under it: the bite is empty paper
+     with the card's own outline around it, and a label crossing that reads as
+     a mistake rather than as a tag. */
+  const label = labelBlock(x + w / 2, y + h / 2 + 3, n.label, n.sub, { titleSize: 12.5 });
+  return castShadow(body) + fill(body, m.l) + fill(band, m.m) +
+    stroke(body, { w: 2 }) + label;
+}
+
 /* ---------- the neutral glyphs ----------
 
    The ten above are software's furniture, and each says something specific:
@@ -442,17 +499,20 @@ function gSource(box, n, m, seed) {
 const GLYPHS = {
   service: gService, gateway: gGateway, datastore: gDatastore, queue: gQueue,
   cache: gCache, client: gClient, external: gExternal, compute: gCompute, note: gNote,
-  formula: gFormula, blob: gBlob, vessel: gVessel, particle: gParticle, source: gSource,
+  formula: gFormula, field: gField, blob: gBlob, vessel: gVessel, particle: gParticle,
+  source: gSource,
 };
 
 export const KINDS = Object.keys(GLYPHS);
 
 const glyphSeed = n => hashSeed(n.id || n.label || 'n') % 100000;
 
-export function drawNode(n, box) {
+/* `side` is the field glyph's notch side: which way the value runs. It is
+   decided by the caller, which is the only place that knows the edges. */
+export function drawNode(n, box, side = 'right') {
   const kind = GLYPHS[n.kind] ? n.kind : 'service';
   const m = bodyOf(n.body, kind);
-  return GLYPHS[kind](box, n, m, glyphSeed(n));
+  return GLYPHS[kind](box, n, m, glyphSeed(n), side);
 }
 
 /* How far a glyph's ink sits inside its box, at one station along a side,
@@ -538,6 +598,24 @@ function walk(pts) {
   return out;
 }
 
+/* The extent of the ink along a side, in board coordinates. A fan that has
+   collapsed is laid back out across this, so two arrows into a small disc
+   stay two. Null for a rectangle: there is no ink inside the box to spread over. */
+export function inkSpan(node, box, side) {
+  const shapes = outlinesOf(node, box);
+  if (!shapes) return null;
+  const horiz = side === 'left' || side === 'right';
+  let lo = Infinity, hi = -Infinity;
+  for (const s of shapes) {
+    for (const p of s.ellipse ? ellipseSamples(s, 48) : walk(s)) {
+      const c = horiz ? p[1] : p[0];
+      if (c < lo) lo = c;
+      if (c > hi) hi = c;
+    }
+  }
+  return lo === Infinity ? null : { lo, hi };
+}
+
 export function inkAt(node, box, side, along) {
   const none = { inset: 0, slide: 0 };
   const shapes = outlinesOf(node, box);
@@ -607,12 +685,14 @@ export function drawBoundary(b, box) {
  * @param {{id?: string, label?: string, tint?: string}} b
  * @param {import('./layout.js').Box} box
  * @param {{x: number, y: number, w: number, h: number}|null} [tab]
+ * @param {string} [name] what the card says, when it is not the boundary's own
+ *   label: a piece of a split boundary says which piece it is
  */
-export function drawBoundaryCard(b, box, tab = null) {
+export function drawBoundaryCard(b, box, tab = null, name = b.label) {
   const { x, y } = box;
   const seed = hashSeed(b.id || b.label || 'b') % 100000;
-  const lab = lettering(b.label || '');
-  const { w: tw, h: th } = tabSize(b.label);
+  const lab = lettering(name || '');
+  const { w: tw, h: th } = tabSize(name);
   const tx = tab ? tab.x : x + 16;
   const ty = tab ? tab.y : y - 11;
   const card = roughRect(tx, ty, tw, th, 7, { seed: seed + 3, amp: 0.8 });

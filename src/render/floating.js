@@ -44,7 +44,7 @@
    ============================================================ */
 
 import { tagBox } from './edges.js';
-import { cuts, wireCuts, toSegment } from './geom.js';
+import { cuts, wireCuts, toSegment, toLine } from './geom.js';
 import { calloutCandidates, onEdges, leaderNear, target, TEXT_PAD, DOT } from './callout.js';
 import { tabSize } from './ink.js';
 
@@ -62,8 +62,10 @@ import { tabSize } from './ink.js';
  * }} CalloutPlace */
 /* A boundary, and the rectangles it is drawn as: one when one tells the
    truth, several when it cannot be one true rectangle. Each rectangle carries
-   its own tab, so each is placed on its own. */
-/** @typedef {{id: string, label?: string, tint?: string, shapes: Box[]}} Boundary */
+   its own tab, so each is placed on its own, sized for the name that piece
+   carries: a split boundary's pieces are numbered, which is wider than the
+   name alone. */
+/** @typedef {{id: string, label?: string, names?: (string|undefined)[], tint?: string, shapes: Box[]}} Boundary */
 /** @typedef {{rect: Rect, what: string, float?: boolean, weight?: number}} Solid */
 /** @typedef {{key: string, pts: number[][]}} Wire */
 /** @typedef {{solids: Solid[], wires: Wire[]}} Obstacles */
@@ -283,7 +285,7 @@ export function planFloating({ planned, boxes, callouts = [], boundaries = [], s
   for (const b of boundaries) {
     for (const [i, shape] of b.shapes.entries()) {
       const key = `${b.id}#${i}`;
-      const { w, h } = tabSize(b.label);
+      const { w, h } = tabSize(b.names?.[i] ?? b.label);
       const ideal = { at: [shape.x + 16 + w / 2, shape.y], w, h };
       /** @param {number[]} at @returns {Rect} */
       const rect = at => ({ x: at[0] - w / 2, y: at[1] - h / 2, w, h });
@@ -321,11 +323,22 @@ export function planFloating({ planned, boxes, callouts = [], boundaries = [], s
          whichever line is nearest, so another line as near as its own makes
          it ambiguous — which is worse than crossing that line from on top of
          its own. And a pill that has wandered off costs as much, every twenty
-         pixels, as crossing a line. Touching, or a hair off, is free. */
+         pixels, as crossing a line. Touching, or a hair off, is free.
+
+         A pill on its own line that another edge also travels is the same
+         failure even when that other line only clips the pill: the two knees
+         of a fan differ by a pixel once each end insets to its own ink, and a
+         line a pixel off the test rect still reads as drawn through the word.
+         The run into the target, which no other edge shares, then wins, and
+         the label stays on the arrow it names. */
       const own = standOff(box, r.pts);
+      const centre = [box.x + box.w / 2, box.y + box.h / 2];
       for (const wire of obs.wires) {
         if (wire.key === r.key) continue;
         if (wireCuts(wire.pts, grow(box, -1))) c += WIRE;
+        /* Closer to the centre than the pill's own edge: the line is through
+           the word, even if the shrunk test rect missed a clip of the rim. */
+        else if (own === 0 && toLine(centre, wire.pts) < Math.min(box.w, box.h) / 2) c += WIRE;
         else if (own > 0 && standOff(box, wire.pts) <= own + NEAR) c += WIRE * 1.5;
       }
       return c + Math.max(0, own - TOUCH) * WIRE / 20;

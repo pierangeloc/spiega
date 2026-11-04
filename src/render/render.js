@@ -9,11 +9,11 @@
 
 import { PAPER, INK, MUTED, ACCENT, PANEL, handFilter } from './theme.js';
 import { roughRect, stroke, fill, text, hashSeed } from './ink.js';
-import { drawNode, drawBoundary, drawBoundaryCard, inkAt } from './glyphs.js';
+import { drawNode, drawBoundary, drawBoundaryCard, inkAt, inkSpan } from './glyphs.js';
 import { drawEdge, planEdges, edgeKey } from './edges.js';
 import { drawCallout } from './callout.js';
 import { planFloating } from './floating.js';
-import { assign, layout, boundaryShapes } from './layout.js';
+import { assign, layout, boundaryShapes, pieceNames } from './layout.js';
 
 /** @typedef {import('../board/state.js').Board} Board */
 /** @typedef {import('../board/state.js').FlowStep} FlowStep */
@@ -67,6 +67,41 @@ function focusAt(spec, steps, active) {
   return { nodes, edges };
 }
 
+/* Which way a field's notch points.
+
+   The notch is on the side the value runs: a field that gives a value notches
+   right, towards whatever it feeds, and a field that only receives one notches
+   left, back towards whatever it came from. On a mapping board that mirrors
+   the two sides against each other, so the reader tells source from target by
+   the shape rather than by a colour.
+
+   The flow decides it, not the column: a column says where a box sits, and
+   not which way its value went. A node may be given the other side with a
+   `notch` field, for the board where the flow says nothing — a lone field
+   with no edges at all, which is not a side of anything. */
+/**
+ * @param {Board['nodes']} nodes
+ * @param {Board['edges']} edges
+ * @returns {Record<string, 'left'|'right'>}
+ */
+function notchSides(nodes, edges) {
+  /** @type {Record<string, {in: number, out: number}>} */
+  const ends = {};
+  for (const n of nodes) ends[n.id] = { in: 0, out: 0 };
+  for (const e of edges) {
+    if (ends[e.from]) ends[e.from].out++;
+    if (ends[e.to]) ends[e.to].in++;
+  }
+  /** @type {Record<string, 'left'|'right'>} */
+  const out = {};
+  for (const n of nodes) {
+    const { in: i, out: o } = ends[n.id];
+    out[n.id] = n.notch === 'left' || n.notch === 'right' ? n.notch
+      : o > 0 ? 'right' : i > 0 ? 'left' : 'right';
+  }
+  return out;
+}
+
 /**
  * @param {Board} spec
  * @param {{
@@ -89,6 +124,7 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   // the gutters are sized for the tags that cross them, step numbers included
   const { boxes, width, height } = layout({ nodes, edges, boundaries: spec.boundaries }, place, e => stepFor({ e, key: edgeKey(e) }));
   const focus = focusAt(spec, steps, active);
+  const notches = notchSides(nodes, edges);
 
   /* Everything that floats is placed before the canvas is sized, in one pass
      against one set of obstacles (render/floating.js): a boundary's tab, tags
@@ -104,15 +140,19 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
      declares nothing, and its lines do not move. */
   for (const n of nodes) {
     const box = boxes[n.id];
-    if (box) box.inkAt = (side, along) => inkAt(n, box, side, along);
+    if (box) {
+      box.inkAt = (side, along) => inkAt(n, box, side, along);
+      box.inkSpan = side => inkSpan(n, box, side);
+    }
   }
   const planned = planEdges(edges, boxes);
   /* The rectangles a boundary is drawn as, and the cards that carry its name.
      A boundary that cannot be one true rectangle is drawn as several, and each
-     piece carries its own card. */
+     piece carries its own card, and the card says which piece it is. */
   const boundaries = (spec.boundaries || [])
     .map(b => ({ ...b, shapes: boundaryShapes(b.members || [], boxes) }))
-    .filter(b => b.shapes.length);
+    .filter(b => b.shapes.length)
+    .map(b => ({ ...b, names: pieceNames(b.label, b.shapes) }));
   const { tags, tabs, callouts: calls } = planFloating({
     planned, boxes, callouts: spec.callouts, boundaries, stepFor });
   const floats = [...calls.map(p => p.box),
@@ -140,7 +180,7 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
     body += `<g data-boundary="${b.id}">${b.shapes.map(bb => drawBoundary(b, bb)).join('')}</g>`;
   for (const b of boundaries)
     body += `<g data-boundary="${b.id}">` +
-      b.shapes.map((bb, i) => drawBoundaryCard(b, bb, tabRect(tabs.get(`${b.id}#${i}`)))).join('') +
+      b.shapes.map((bb, i) => drawBoundaryCard(b, bb, tabRect(tabs.get(`${b.id}#${i}`)), b.names[i])).join('') +
       `</g>`;
 
   for (const r of planned) {
@@ -162,7 +202,7 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
           { w: 2.4, color: ACCENT, opacity: 0.9, dash: '14 7' })
       : '';
     body += `<g class="node" data-node="${n.id}" opacity="${state === 'dim' ? 0.5 : 1}">` +
-      halo + drawNode(n, box) + `</g>`;
+      halo + drawNode(n, box, notches[n.id]) + `</g>`;
   }
 
   // The wobble already lives in the path data (render/ink.js), so the filter is
