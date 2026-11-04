@@ -1,0 +1,12 @@
+{
+  "title": "tag through label",
+  "nodes": [
+    { "id": "rel", "kind": "blob", "label": "What it holds", "sub": "entities, and the relations" },
+    { "id": "line", "kind": "queue", "label": "A single line", "sub": "every answer is a traversal" },
+    { "id": "ops", "kind": "service", "label": "An op", "sub": "from, to, label" }
+  ],
+  "edges": [
+    { "from": "rel", "to": "line", "label": "flatten" },
+    { "from": "rel", "to": "ops", "label": "name them" }
+  ]
+}

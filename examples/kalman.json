@@ -76,7 +76,7 @@
   "callouts": [
     {
       "at": "gain",
-      "side": "right",
+      "side": "above",
       "label": "the whole decision is this one ratio"
     },
     {

@@ -3,7 +3,7 @@
   // so a fresh clone still passes with no install, which is the promise in
   // AGENTS.md. Run `npm install && npm run typecheck` to check types.
   //
-  // checkJs is off on purpose. The four modules below opt in with `// @ts-check`
+  // checkJs is off on purpose. The six modules below opt in with `// @ts-check`
   // instead, which is the standard way to adopt types one file at a time.
   // Turning checkJs on would also check the six render modules they import —
   // theme.js, ink.js, glyphs.js, edges.js, callout.js and math.js — which
@@ -24,6 +24,8 @@
     "src/board/state.js",
     "src/board/script.js",
     "src/render/render.js",
-    "src/render/layout.js"
+    "src/render/layout.js",
+    "src/render/floating.js",
+    "src/render/geom.js"
   ]
 }
