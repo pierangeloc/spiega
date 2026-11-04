@@ -27,7 +27,6 @@ function sides(a, b) {
   return cb[1] >= ca[1] ? ['bottom', 'top'] : ['top', 'bottom'];
 }
 
-/* A point on one side of a box, `t` from -1 (top/left) to 1 (bottom/right). */
 /* A queue keeps its name in a strip under the glyph rather than inside it, so
    the bottom of the box is not the bottom of the node. A line that left at
    box.y + box.h ran down through its own label: the closing edge of a cycle
@@ -35,15 +34,75 @@ function sides(a, b) {
    side clears the drawing by GAP, and this one has to clear the words too. */
 const bottomOf = box => box.y + box.h + (box.labelBelow || 0);
 
+/* A point on one side of a box, `t` from -1 (top/left) to 1 (bottom/right).
+
+   The line stops GAP short of the ink, not of the box. A rectangle's ink is
+   the box, so it answers nothing and a board without a convex glyph does not
+   move. A convex outline curves away from its box everywhere but the points
+   where it touches, and the glyph says how far, at this station along the
+   side. `along` is the fraction of the half-extent from the centre — the same
+   spread the fan uses — so the glyph does not have to know FAN. The inset is
+   added toward the glyph: the other sign pushes an arrow that already stops
+   short even further into the background.
+
+   A station whose ray misses the ink entirely — a particle's circle lives in
+   the top of its box, so the lower half of a fan points at nothing — slides
+   along the side to the nearest ink. Staying put would leave that arrow at
+   the box while its neighbour lands on the circle. A fan that would then
+   collapse onto one point is spread back across the ink, as a fan: each
+   station solved on its own picks the same nearest point of a small disc,
+   and two arrows become one. */
 function sidePoint(box, side, t = 0) {
   const [cx, cy] = center(box);
   const hx = box.w / 2, hy = box.h / 2;
+  const along = FAN * t;
+  const span = side === 'left' || side === 'right' ? box.w : box.h;
+  const adj = box.inkAt ? box.inkAt(side, along) : null;
+  const inset = Math.max(0, Math.min(span, adj?.inset || 0));
+  const slide = adj?.slide || 0;
   switch (side) {
-    case 'right':  return [box.x + box.w + GAP, cy + hy * FAN * t];
-    case 'left':   return [box.x - GAP,         cy + hy * FAN * t];
-    case 'top':    return [cx + hx * FAN * t,   box.y - GAP];
-    default:       return [cx + hx * FAN * t,   bottomOf(box) + GAP];
+    case 'right': return [box.x + box.w + GAP - inset, cy + hy * along + slide];
+    case 'left':  return [box.x - GAP + inset,         cy + hy * along + slide];
+    case 'top':   return [cx + hx * along + slide, box.y - GAP + inset];
+    default:      return [cx + hx * along + slide, bottomOf(box) + GAP - inset];
   }
+}
+
+/* Two arrowheads closer than this read as one. The head is 11px, and its
+   wings stand a few pixels off the shaft; 16 leaves daylight between them. */
+const HEAD_SEP = 16;
+
+/* When a fan has collapsed onto one point of the ink, lay it back out across
+   the ink's extent on this side, in the order it already has. `t` is rewritten
+   so sidePoint's station lands there; the ray then hits, and the inset is the
+   ordinary one. A span too short for the separation gets the whole of it. */
+function spreadFan(list, side) {
+  if (list.length < 2) return;
+  const box = list[0].r[list[0].end];
+  if (!box.inkSpan) return;
+  const horiz = side === 'left' || side === 'right';
+  const axis = horiz ? 1 : 0;
+  const placed = list.map(item => {
+    const t = item.r[item.end === 'a' ? 'ta' : 'tb'];
+    return sidePoint(box, side, t)[axis];
+  }).sort((a, b) => a - b);
+  let collapsed = false;
+  for (let i = 1; i < placed.length; i++) if (placed[i] - placed[i - 1] < HEAD_SEP) collapsed = true;
+  if (!collapsed) return;
+  const span = box.inkSpan(side);
+  if (!span || span.hi - span.lo < 8) return;
+  /* Off the tangent: a station at the extreme of a disc meets the outline at
+     a point, and the arrow sticks out past the glyph. */
+  const pad = Math.min(4, (span.hi - span.lo) * 0.12);
+  const lo = span.lo + pad, hi = span.hi - pad;
+  if (hi - lo < 4) return;
+  const mid = horiz ? box.y + box.h / 2 : box.x + box.w / 2;
+  const half = horiz ? box.h / 2 : box.w / 2;
+  const n = list.length;
+  list.forEach((item, i) => {
+    const at = lo + (hi - lo) * (i / (n - 1));
+    item.r[item.end === 'a' ? 'ta' : 'tb'] = (at - mid) / (half * FAN);
+  });
 }
 
 /* Spread the edges that share a side evenly across it, ordered so that lines
@@ -91,6 +150,12 @@ export function planEdges(edges, boxes) {
       const t = n === 1 ? 0 : (i / (n - 1)) * 2 - 1;
       item.r[item.end === 'a' ? 'ta' : 'tb'] = t;
     });
+    /* A small disc's nearest ink is one point. Solving each station on its
+       own parks every arrowhead there, and the fan the ordering exists to
+       create is gone. Spread them back across the ink, in the same order,
+       far enough apart that two heads still read as two. A fan that already
+       lands apart is left where it is: a blob's stations do not collapse. */
+    spreadFan(list, side);
   }
 
   /* Two back edges that both left a column by the gutter would drop down the

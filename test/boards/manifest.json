@@ -45,6 +45,11 @@
     "broke": "`gBlob` drew its outline at `0.46 * w * kx` and `0.4 * h * ky` from the centre (`kx` in 0.93..1.0, `ky` in 0.78..1.0), leaving the ink 10 to 16px inside the left/right of its box and 9 to 12px inside the top/bottom. Edges stop 8px outside the box, so every arrow into or out of a blob ended in empty background.",
     "fixed": "The ten vertices still wobble independently with `kx` and `ky`, then each half is scaled out to its side of the box (`0.5 * w` and `0.5 * h`), so the outline keeps its uneven hand-drawn mass while reaching the box edges on all four sides."
   },
+  "issue-85-convex-glyph-arrival": {
+    "issue": 85,
+    "broke": "Follow-up to #80. Scaling a blob's vertices out to the box made a line at a side's midpoint meet the ink, but a convex outline curves away from its box everywhere else. A fanned arrival — `t = ±1`, `0.26 * h` off centre — still stopped at the box, ~20px short of the ink on UPDATE and further on a vessel, a particle or a cloud, in proportion to how far that ink sits inside its box.",
+    "fixed": "A glyph now says how far its ink is inside the box at a station along a side, and the box carries that answer because an edge only ever sees a box. The line stops GAP short of the ink instead of the box. A rectangle answers 0, so a board without one of these glyphs does not move. The hand's wobble is untouched: the inset is taken from the outline, not from the waver on top of it."
+  },
   "issue-87-tabs-collide": {
     "issue": 87,
     "broke": "A boundary's name rides a card on its wall, at a fixed offset from the corner, and nothing resolved it against anything. Two enclosures whose walls start at the same height put their cards in the same place and one was painted over the other: the board read `b c`, `a c`, `b c` and `a b` was nowhere on it. Not mislabelled — absent, and nothing on the board said which boundary had gone missing. Three boxes and three boundaries is the floor for it: with no edges every box is in one column, and three pairwise-intersecting sets of members cannot all be made contiguous in one vertical order, so one of the boundaries is drawn as two pieces and the first piece wants the same corner as the first boundary.",

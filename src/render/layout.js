@@ -46,9 +46,16 @@
 
 /** @typedef {{w: number, h: number, labelBelow?: number}} Size */
 
+/* `inkAt` is how far the glyph's ink sits inside one side at a station
+   along it, and how far to slide along the side when that station's ray
+   misses the ink. Layout does not draw, so it does not set this; render
+   asks the glyph and hangs the answer on the box, because an edge only
+   ever sees a box. Absent means the ink is the box. */
 /** @typedef {{
  *   x: number, y: number, w: number, h: number,
- *   labelBelow?: number, col?: number, row?: number
+ *   labelBelow?: number, col?: number, row?: number,
+ *   inkAt?: (side: string, along: number) => { inset: number, slide: number },
+ *   inkSpan?: (side: string) => { lo: number, hi: number } | null
  * }} Box */
 
 /* COL_GAP is the least a gutter is ever given. What a gutter actually gets is
@@ -74,6 +81,7 @@ const WALL_AIR = 16;
 
 import { wrapText, NOTE_LINES, nodeText, tagLines, pillSize } from './ink.js';
 import { measureMath } from './math.js';
+import { inkAt, inkSpan } from './glyphs.js';
 
 /** @type {Record<string, (n: LayoutNode, tw: number) => Size>} */
 const SIZES = {
@@ -335,11 +343,20 @@ export function layout(spec, placed, stepFor = e => e.step) {
   colKeys.forEach((c, i) => {
     let y = PAD + (tallest - colH[c]) / 2;
     for (const e of cols[c]) {
-      boxes[e.n.id] = {
+      /* The box is all an edge ever sees, and a convex glyph's ink is not the
+         box. The glyph says how far, at a station along a side; a rectangle
+         has no outline worth asking about and the function answers nothing
+         that would move a line. Hung on the box here, not painted on later,
+         so every caller of layout hands edges the same answer. */
+      /** @type {Box} */
+      const box = {
         x: Math.round(x + (colW[c] - e.s.w) / 2),
         y: Math.round(y),
         w: e.s.w, h: e.s.h, labelBelow: e.s.labelBelow, col: c, row: e.p.row,
       };
+      box.inkAt = (side, along) => inkAt(e.n, box, side, along);
+      box.inkSpan = side => inkSpan(e.n, box, side);
+      boxes[e.n.id] = box;
       y += e.s.h + e.s.labelBelow + ROW_GAP;
     }
     x += colW[c] + (gap[i] ?? COL_GAP);

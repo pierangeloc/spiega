@@ -69,12 +69,21 @@ function gService(box, n, m, seed) {
 
 /* A gateway is a service with a chevron bitten out of its leading edge — the
    shape says "everything funnels through here" before the label is read. */
+/* A pentagon: the leading edge comes to a point at the side's midpoint, so
+   a line that arrives anywhere else on that side meets air unless it knows
+   the slant. */
+function gatewayPts(box) {
+  const { x, y, w, h } = box;
+  const c = 14;
+  return [
+    [x + c, y], [x + w, y], [x + w, y + h], [x + c, y + h], [x, y + h / 2],
+  ];
+}
+
 function gGateway(box, n, m, seed) {
   const { x, y, w, h } = box;
   const c = 14;
-  const pts = [
-    [x + c, y], [x + w, y], [x + w, y + h], [x + c, y + h], [x, y + h / 2],
-  ];
+  const pts = gatewayPts(box);
   const body = roughPoly(pts, { seed, amp: 1.0, step: 24 });
   return castShadow(body) + fill(body, m.l) +
     stroke(body, { w: 2 }) +
@@ -331,13 +340,16 @@ function gField(box, n, m, seed, side) {
 /* A blob is a body with no orientation: one closed, uneven mass. It is the
    glyph for a region, an organism or a substance whose outline is the
    information. Deliberately not a cloud: a cloud is a union of lobes sitting
-   on a flat base; this has no flat edge and no inside worth separating. */
-function gBlob(box, n, m, seed) {
+   on a flat base; this has no flat edge and no inside worth separating.
+
+   The vertices wobble independently so the mass does not read as a clean
+   ellipse, then each half is scaled out to its side of the box so the ink
+   meets the box where a line arrives at a side's midpoint. Off that point the
+   outline curves back inside the box; inkInset asks for these same points so
+   a fanned line can follow the curve instead of stopping at the box. */
+function blobPts(box, seed) {
   const { x, y, w, h } = box;
   const cx = x + w / 2, cy = y + h / 2, r = rng(seed);
-  /* The vertices wobble independently so the mass does not read as a clean
-     ellipse, then each half is scaled out to its side of the box so the ink
-     still meets the box edges where routed lines arrive. */
   const raw = Array.from({ length: 10 }, (_, i) => {
     const a = (i / 10) * Math.PI * 2;
     const kx = 0.93 + r() * 0.07, ky = 0.78 + r() * 0.22;
@@ -345,10 +357,16 @@ function gBlob(box, n, m, seed) {
   });
   const rx0 = Math.min(...raw.map(p => p[0])), rx1 = Math.max(...raw.map(p => p[0]));
   const ry0 = Math.min(...raw.map(p => p[1])), ry1 = Math.max(...raw.map(p => p[1]));
-  const pts = raw.map(([rx, ry]) => [
+  return raw.map(([rx, ry]) => [
     cx + (rx < 0 ? rx / -rx0 : rx / rx1) * w * 0.5,
     cy + (ry < 0 ? ry / -ry0 : ry / ry1) * h * 0.5,
   ]);
+}
+
+function gBlob(box, n, m, seed) {
+  const { x, y, w, h } = box;
+  const cx = x + w / 2, cy = y + h / 2;
+  const pts = blobPts(box, seed);
   const body = roughPoly(pts, { seed, amp: 1.1, step: 24 });
   const under = roughPoly(pts.map(([px, py]) => [px, py + 6]), { seed: seed + 2, amp: 1.1, step: 24 });
 
@@ -381,7 +399,10 @@ function gBlob(box, n, m, seed) {
    than the belly, sides that bell out below the rim and gather in at the base.
    The dark mouth and the base band are what keep it off the datastore
    cylinder, whose top is a closed, lit face. */
-function gVessel(box, n, m, seed) {
+/* The bowl, its lip and its base, as the points both the drawing and the
+   inset are taken from. The belly is narrower than the box, the rim narrower
+   still, so an edge aimed at the box stops in the margin beside the bowl. */
+function vesselGeom(box) {
   const { x, y, w, h } = box;
   const cx = x + w / 2;
   const top = y + 13, bottom = y + h - 7;
@@ -389,15 +410,27 @@ function gVessel(box, n, m, seed) {
   const bellyRX = Math.min(w * 0.4, 66);
   const baseRX = Math.min(w * 0.24, 40);
   const bellyY = y + h * 0.56;
-  const body = roughPoly([
-    [cx - rimRX, top], [cx - bellyRX, bellyY], [cx - baseRX, bottom],
-    [cx + baseRX, bottom], [cx + bellyRX, bellyY], [cx + rimRX, top],
-  ], { seed, amp: 1.0, step: 22 });
-  const lip = roughEllipse(cx, top, rimRX, Math.min(7, h * 0.1), { seed: seed + 3, amp: 0.7 });
-  const base = roughPoly([
-    [cx - baseRX, bottom], [cx + baseRX, bottom],
-    [cx + baseRX - 4, bottom + 5], [cx - baseRX + 4, bottom + 5],
-  ], { seed: seed + 4, amp: 0.6 });
+  const lipRy = Math.min(7, h * 0.1);
+  return {
+    cx, top, bottom, rimRX, bellyRX, baseRX, bellyY, lipRy,
+    body: [
+      [cx - rimRX, top], [cx - bellyRX, bellyY], [cx - baseRX, bottom],
+      [cx + baseRX, bottom], [cx + bellyRX, bellyY], [cx + rimRX, top],
+    ],
+    base: [
+      [cx - baseRX, bottom], [cx + baseRX, bottom],
+      [cx + baseRX - 4, bottom + 5], [cx - baseRX + 4, bottom + 5],
+    ],
+  };
+}
+
+function gVessel(box, n, m, seed) {
+  const { y, h } = box;
+  const g = vesselGeom(box);
+  const { cx, top, bottom, rimRX, baseRX, lipRy } = g;
+  const body = roughPoly(g.body, { seed, amp: 1.0, step: 22 });
+  const lip = roughEllipse(cx, top, rimRX, lipRy, { seed: seed + 3, amp: 0.7 });
+  const base = roughPoly(g.base, { seed: seed + 4, amp: 0.6 });
   const level = roughLine([cx - baseRX * 0.8, y + h * 0.84], [cx + baseRX * 0.8, y + h * 0.84],
     { seed: seed + 7, amp: 0.7, step: 14 });
   return castShadow(body) + fill(body, m.l) + fill(base, m.m) + fill(lip, m.m) +
@@ -409,10 +442,20 @@ function gVessel(box, n, m, seed) {
 /* A particle is one small thing, with two neighbours to say it is a particle
    and not a status light. It has no slot, box or mouth to imply storage or
    passage — only a body, a highlight, and a couple of specks. */
-function gParticle(box, n, m, seed) {
+/* The orb, not the specks. The specks are a couple of pixels and say
+   "particle"; the body an edge should meet is the circle, which sits in the
+   upper part of a box sized for its label. */
+function particleOrb(box) {
   const { x, y, w, h } = box;
-  const cx = x + w / 2, cy = y + Math.min(20, h * 0.27), r = Math.min(15, h * 0.22);
-  const orb = roughEllipse(cx, cy, r, r * 0.94, { seed });
+  const r = Math.min(15, h * 0.22);
+  return { cx: x + w / 2, cy: y + Math.min(20, h * 0.27), rx: r, ry: r * 0.94 };
+}
+
+function gParticle(box, n, m, seed) {
+  const { y, h } = box;
+  const { cx, cy, rx, ry } = particleOrb(box);
+  const r = rx;
+  const orb = roughEllipse(cx, cy, rx, ry, { seed });
   const shine = roughEllipse(cx - r * 0.3, cy - r * 0.32, r * 0.34, r * 0.24,
     { seed: seed + 4, amp: 0.5 });
   const a = roughEllipse(cx + r * 1.8, cy - r * 0.6, 2.6, 2.3, { seed: seed + 5, amp: 0.4 });
@@ -428,10 +471,18 @@ function gParticle(box, n, m, seed) {
    spring, a supply — the thing at the start, not a shape that stores or
    carries what it gives. Rays stay off the bottom so the label has a clear
    line to sit on. */
-function gSource(box, n, m, seed) {
+/* The disc. The rays are strokes thrown off it; an edge meets the body. */
+function sourceDisc(box) {
   const { x, y, w, h } = box;
-  const cx = x + w / 2, cy = y + 21, r = Math.min(13, h * 0.19);
-  const disc = roughEllipse(cx, cy, r, r * 0.95, { seed });
+  const r = Math.min(13, h * 0.19);
+  return { cx: x + w / 2, cy: y + 21, rx: r, ry: r * 0.95 };
+}
+
+function gSource(box, n, m, seed) {
+  const { y, h } = box;
+  const { cx, cy, rx, ry } = sourceDisc(box);
+  const r = rx;
+  const disc = roughEllipse(cx, cy, rx, ry, { seed });
   let rays = '';
   for (let i = 0; i < 7; i++) {
     const a = (195 + i * 25) * Math.PI / 180;
@@ -454,13 +505,151 @@ const GLYPHS = {
 
 export const KINDS = Object.keys(GLYPHS);
 
+const glyphSeed = n => hashSeed(n.id || n.label || 'n') % 100000;
+
 /* `side` is the field glyph's notch side: which way the value runs. It is
    decided by the caller, which is the only place that knows the edges. */
 export function drawNode(n, box, side = 'right') {
   const kind = GLYPHS[n.kind] ? n.kind : 'service';
   const m = bodyOf(n.body, kind);
-  const seed = hashSeed(n.id || n.label || 'n') % 100000;
-  return GLYPHS[kind](box, n, m, seed, side);
+  return GLYPHS[kind](box, n, m, glyphSeed(n), side);
+}
+
+/* How far a glyph's ink sits inside its box, at one station along a side,
+   and whether that station has to slide along the side to meet the ink.
+
+   `along` is the fraction of the half-extent from the centre, the same number
+   sidePoint spreads a fan over. The answer is measured on the outline the
+   glyph draws — the control polygon, not the hand's wobble on top of it — so
+   a line stops GAP short of the shape, and the wobble stays the wobble.
+   A ray that misses the ink slides to the nearest point of it: a particle's
+   circle does not fill its box, and an arrow that stayed at the miss would
+   stop in the margin while its neighbour landed on the circle. A rectangle
+   is not listed, and answers nothing, which is why a board without one of
+   these glyphs does not move. */
+function polyHits(pts, horiz, at) {
+  const closed = pts.length > 1 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]
+    ? pts : [...pts, pts[0]];
+  const hits = [];
+  for (let i = 0; i < closed.length - 1; i++) {
+    const a = closed[i], b = closed[i + 1];
+    const a0 = horiz ? a[1] : a[0], b0 = horiz ? b[1] : b[0];
+    if ((a0 - at) * (b0 - at) > 0 || a0 === b0) continue;
+    const k = (at - a0) / (b0 - a0);
+    if (k < 0 || k > 1) continue;
+    const a1 = horiz ? a[0] : a[1], b1 = horiz ? b[0] : b[1];
+    hits.push(a1 + (b1 - a1) * k);
+  }
+  return hits;
+}
+
+function ellipseHits(e, side, at) {
+  if (side === 'left' || side === 'right') {
+    const n = (at - e.cy) / e.ry;
+    if (n * n > 1) return [];
+    const dx = e.rx * Math.sqrt(Math.max(0, 1 - n * n));
+    return [side === 'left' ? e.cx - dx : e.cx + dx];
+  }
+  const n = (at - e.cx) / e.rx;
+  if (n * n > 1) return [];
+  const dy = e.ry * Math.sqrt(Math.max(0, 1 - n * n));
+  return [side === 'top' ? e.cy - dy : e.cy + dy];
+}
+
+/* The outlines an edge should stop short of. An ellipse is named so the hit
+   is solved rather than sampled; everything else is a closed polyline. */
+function outlinesOf(node, box) {
+  const { x, y, w, h } = box;
+  switch (node.kind) {
+    case 'blob': return [blobPts(box, glyphSeed(node))];
+    case 'vessel': {
+      const g = vesselGeom(box);
+      return [g.body, g.base, { ellipse: true, cx: g.cx, cy: g.top, rx: g.rimRX, ry: g.lipRy }];
+    }
+    case 'particle': return [{ ellipse: true, ...particleOrb(box) }];
+    case 'source': return [{ ellipse: true, ...sourceDisc(box) }];
+    case 'gateway': return [gatewayPts(box)];
+    case 'external': return [cloudPts(x + 4, x + w - 4, y + h - 6, h)];
+    default: return null;
+  }
+}
+
+function ellipseSamples(e, n = 64) {
+  return Array.from({ length: n }, (_, i) => {
+    const a = (i / n) * Math.PI * 2;
+    return [e.cx + e.rx * Math.cos(a), e.cy + e.ry * Math.sin(a)];
+  });
+}
+
+/* Vertices alone miss the nearest point when it sits mid-edge. A step of a
+   few pixels is closer than the hand's wobble, which is the tolerance the
+   arrival is already allowed. */
+function walk(pts) {
+  const closed = pts.length > 1 ? [...pts, pts[0]] : pts;
+  const out = [];
+  for (let i = 0; i < closed.length - 1; i++) {
+    const a = closed[i], b = closed[i + 1];
+    const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 4));
+    for (let k = 0; k < n; k++) {
+      const t = k / n;
+      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+    }
+  }
+  return out;
+}
+
+/* The extent of the ink along a side, in board coordinates. A fan that has
+   collapsed is laid back out across this, so two arrows into a small disc
+   stay two. Null for a rectangle: there is no ink inside the box to spread over. */
+export function inkSpan(node, box, side) {
+  const shapes = outlinesOf(node, box);
+  if (!shapes) return null;
+  const horiz = side === 'left' || side === 'right';
+  let lo = Infinity, hi = -Infinity;
+  for (const s of shapes) {
+    for (const p of s.ellipse ? ellipseSamples(s, 48) : walk(s)) {
+      const c = horiz ? p[1] : p[0];
+      if (c < lo) lo = c;
+      if (c > hi) hi = c;
+    }
+  }
+  return lo === Infinity ? null : { lo, hi };
+}
+
+export function inkAt(node, box, side, along) {
+  const none = { inset: 0, slide: 0 };
+  const shapes = outlinesOf(node, box);
+  if (!shapes) return none;
+  const horiz = side === 'left' || side === 'right';
+  const { x, y, w, h } = box;
+  const at = horiz ? y + h / 2 * (1 + along) : x + w / 2 * (1 + along);
+  const hits = shapes.flatMap(s => s.ellipse ? ellipseHits(s, side, at) : polyHits(s, horiz, at));
+  const edge = side === 'left' ? x : side === 'right' ? x + w : side === 'top' ? y : y + h;
+  if (hits.length) {
+    const ink = side === 'left' || side === 'top' ? Math.min(...hits) : Math.max(...hits);
+    const inset = side === 'left' || side === 'top' ? ink - edge : edge - ink;
+    return { inset: inset > 0 ? inset : 0, slide: 0 };
+  }
+  /* The ray misses. The nearest ink is where this arrow can still arrive
+     without crossing the glyph to get there: GAP short of that point, on
+     the side we came in on. */
+  const station = horiz
+    ? [side === 'left' ? x : x + w, at]
+    : [at, side === 'top' ? y : y + h];
+  let best = null, bestD = Infinity;
+  for (const s of shapes) {
+    for (const p of s.ellipse ? ellipseSamples(s) : walk(s)) {
+      const d = (p[0] - station[0]) ** 2 + (p[1] - station[1]) ** 2;
+      if (d < bestD) { bestD = d; best = p; }
+    }
+  }
+  if (!best) return none;
+  if (horiz) {
+    const inset = side === 'left' ? best[0] - x : (x + w) - best[0];
+    return { inset: inset > 0 ? inset : 0, slide: best[1] - at };
+  }
+  const inset = side === 'top' ? best[1] - y : (y + h) - best[1];
+  return { inset: inset > 0 ? inset : 0, slide: best[0] - at };
 }
 
 /* A boundary is drawn under everything it contains: a loose dashed enclosure,

@@ -1,0 +1,31 @@
+{
+  "title": "fanned edges reach the ink of a convex glyph",
+  "nodes": [
+    { "id": "a", "kind": "service", "label": "Source A", "sub": "fan in" },
+    { "id": "b", "kind": "service", "label": "Source B", "sub": "fan in" },
+    { "id": "region", "kind": "blob", "label": "Region", "sub": "uneven mass", "col": 1, "row": 0 },
+    { "id": "out1", "kind": "service", "label": "Sink", "col": 2, "row": 0 },
+    { "id": "out2", "kind": "service", "label": "Also", "col": 2, "row": 1 },
+    { "id": "c", "kind": "service", "label": "Source C", "sub": "fan in" },
+    { "id": "d", "kind": "service", "label": "Source D", "sub": "fan in" },
+    { "id": "pool", "kind": "vessel", "label": "Pool", "sub": "holds", "col": 1, "row": 2 },
+    { "id": "e", "kind": "service", "label": "Source E", "sub": "fan in" },
+    { "id": "f", "kind": "service", "label": "Source F", "sub": "fan in" },
+    { "id": "drop", "kind": "particle", "label": "Drop", "sub": "one unit", "col": 1, "row": 4 },
+    { "id": "g", "kind": "service", "label": "Source G", "sub": "fan in" },
+    { "id": "h", "kind": "service", "label": "Source H", "sub": "fan in" },
+    { "id": "sun", "kind": "source", "label": "Sun", "sub": "light", "col": 1, "row": 6 }
+  ],
+  "edges": [
+    { "from": "a", "to": "region" },
+    { "from": "b", "to": "region" },
+    { "from": "region", "to": "out1", "label": "out" },
+    { "from": "region", "to": "out2", "label": "also" },
+    { "from": "c", "to": "pool" },
+    { "from": "d", "to": "pool" },
+    { "from": "e", "to": "drop" },
+    { "from": "f", "to": "drop" },
+    { "from": "g", "to": "sun" },
+    { "from": "h", "to": "sun" }
+  ]
+}
