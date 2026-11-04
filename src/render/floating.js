@@ -25,21 +25,28 @@
      printed on a word is not. So a wire costs something, and a solid costs a
      great deal more, and when nothing is clear the least bad place wins.
 
-   A boundary's tab (#87) would enter as one more solid, pushed by obstacles()
-   with the others; nothing in the pass would change.
+   A boundary's tab (#87) is one of these: a name, carried on a card that rides
+   the top of the enclosure's wall. It is placed here, first of all, and it
+   slides along its wall until it is clear of everything already on the board.
+   It used to sit at a fixed offset from the corner, which meant two walls
+   starting at the same height put their names in the same place and one of
+   them was painted over: a boundary on the board that was named nowhere.
 
-   Order is what keeps a board still while it is being drawn. Tags go first,
-   left to right and then top to bottom by where each would rather be, so
-   adding an edge on the right never reshuffles the tags on the left. Callouts
-   go after, in the order they were said: a callout is an aside, and it gives
-   way to the structure rather than the other way round. Each candidate list
-   starts with where the thing has always gone, so a label that was already on
-   its own line and clear of everything stays exactly where it was.
+   Order is what keeps a board still while it is being drawn. Tabs go first,
+   because the name of an enclosure is structure and a label riding an edge
+   gives way to it rather than the other way round. Then tags, left to right and
+   then top to bottom by where each would rather be, so adding an edge on the
+   right never reshuffles the tags on the left. Callouts go after, in the order
+   they were said: a callout is an aside, and it gives way to the structure
+   rather than the other way round. Each candidate list starts with where the
+   thing has always gone, so a label that was already on its own line and clear
+   of everything stays exactly where it was.
    ============================================================ */
 
 import { tagBox } from './edges.js';
 import { cuts, wireCuts, toSegment } from './geom.js';
 import { calloutCandidates, onEdges, leaderNear, target, TEXT_PAD, DOT } from './callout.js';
+import { tabSize } from './ink.js';
 
 /** @typedef {{x: number, y: number, w: number, h: number}} Rect */
 /** @typedef {import('./layout.js').Box} Box */
@@ -53,6 +60,10 @@ import { calloutCandidates, onEdges, leaderNear, target, TEXT_PAD, DOT } from '.
  *   c: Callout, tip: {x: number, y: number, kind: string}, side: string,
  *   lines: string[], w: number, h: number, cx: number, cy: number, box: Rect
  * }} CalloutPlace */
+/* A boundary, and the rectangles it is drawn as: one when one tells the
+   truth, several when it cannot be one true rectangle. Each rectangle carries
+   its own tab, so each is placed on its own. */
+/** @typedef {{id: string, label?: string, tint?: string, shapes: Box[]}} Boundary */
 /** @typedef {{rect: Rect, what: string, float?: boolean, weight?: number}} Solid */
 /** @typedef {{key: string, pts: number[][]}} Wire */
 /** @typedef {{solids: Solid[], wires: Wire[]}} Obstacles */
@@ -66,6 +77,7 @@ const BESIDE = 7;         // a pill set beside its line stands this far off it, 
 const TOUCH = BESIDE;     // how far off its own line a pill may sit and still be on it
 const HEAD = 8, WING = 5;  // the front of an arrowhead, which is the part that says which way, and its spread
 const NEAR = 8;           // another line within this much of as near as its own makes a pill ambiguous
+const SLIDE = 6;          // how far along its wall a boundary's tab moves at a time
 
 /* Everything fixed that floating text must keep off. */
 /**
@@ -189,6 +201,34 @@ function tagSpots(r, ideal) {
   return out;
 }
 
+/* Where a boundary's tab could sit, best first.
+
+   It slides along the top of its own wall, the way a tag slides along its own
+   line, and it never leaves the wall: a name floating off its enclosure is a
+   name nobody can place, which is the failure this whole pass exists to
+   prevent. So the candidates are the spot it has always gone to and then every
+   step to the right and to the left along that wall, until the card would hang
+   off the end of it.
+
+   Two enclosures can share a wall — one boundary's rectangle may be the top
+   half of another's — and then both names ride the same line. That is still
+   better than one name on top of the other: both are readable, and which
+   rectangle is which is the question #77 asks. */
+/**
+ * @param {Box} shape
+ * @param {{at: number[], w: number, h: number}} ideal
+ * @returns {number[][]}
+ */
+function tabSpots(shape, ideal) {
+  const { w } = ideal;
+  const out = [ideal.at];
+  const left = shape.x + 4;
+  const right = shape.x + shape.w - w - 4;
+  for (let x = ideal.at[0] - w / 2 + SLIDE; x <= right; x += SLIDE) out.push([x + w / 2, ideal.at[1]]);
+  for (let x = ideal.at[0] - w / 2 - SLIDE; x >= left; x -= SLIDE) out.push([x + w / 2, ideal.at[1]]);
+  return out;
+}
+
 /* The first spot that costs nothing, else the cheapest, earlier winning a tie.
    `costOf` is told the best so far, so it can stop adding as soon as it is
    past it. */
@@ -209,18 +249,19 @@ function cheapest(spots, costOf) {
 
 /* The pass. `planned` is what planEdges routed; `stepFor` says which number
    rides on an edge's tag, since the tag is as wide as the number and the words
-   together. Returns where every tag sits, and every callout placement in the
-   shape drawCallout takes. */
+   together. Returns where every tag sits, where every boundary's tab sits, and
+   every callout placement in the shape drawCallout takes. */
 /**
  * @param {{
  *   planned: Route[],
  *   boxes: Record<string, Box>,
  *   callouts?: Callout[],
+ *   boundaries?: Boundary[],
  *   stepFor?: (r: Route) => number|null,
  * }} args
- * @returns {{tags: Map<string, PlacedTag>, callouts: CalloutPlace[]}}
+ * @returns {{tags: Map<string, PlacedTag>, tabs: Map<string, PlacedTag>, callouts: CalloutPlace[]}}
  */
-export function planFloating({ planned, boxes, callouts = [], stepFor = () => null }) {
+export function planFloating({ planned, boxes, callouts = [], boundaries = [], stepFor = () => null }) {
   const obs = obstacles(boxes, planned);
   /* A callout on an edge lands its ball on the line at a point fixed by the
      route, whichever side its words go, so that point is known before any tag
@@ -231,6 +272,34 @@ export function planFloating({ planned, boxes, callouts = [], stepFor = () => nu
     const tip = target(c, boxes, planned, 'below');
     if (tip && tip.kind === 'edge')
       obs.solids.push({ what: `the ball of callout ${c.id || ''}`, rect: grow({ x: tip.x, y: tip.y, w: 0, h: 0 }, DOT + 1) });
+  }
+
+  /* A boundary's name rides a card on its wall, and the card slides along that
+     wall until it is clear. It is placed before anything else floats: the name
+     of an enclosure is structure, and a label riding an edge gives way to it
+     rather than the other way round. */
+  /** @type {Map<string, PlacedTag>} */
+  const tabs = new Map();
+  for (const b of boundaries) {
+    for (const [i, shape] of b.shapes.entries()) {
+      const key = `${b.id}#${i}`;
+      const { w, h } = tabSize(b.label);
+      const ideal = { at: [shape.x + 16 + w / 2, shape.y], w, h };
+      /** @param {number[]} at @returns {Rect} */
+      const rect = at => ({ x: at[0] - w / 2, y: at[1] - h / 2, w, h });
+      const at = cheapest(tabSpots(shape, ideal), (at, low) => {
+        const box = rect(at);
+        let c = solidCost(grow(box, PAD / 2), obs.solids);
+        if (c >= low) return c;
+        /* A tab is painted under the edges, so a line that crosses it is drawn
+           over the name rather than under it: it strikes the words through,
+           which is worse than a pill laid across a line. */
+        for (const wire of obs.wires) if (wireCuts(wire.pts, grow(box, -1))) c += WIRE;
+        return c;
+      });
+      tabs.set(key, { key, at, w, h });
+      obs.solids.push({ what: `the tab of ${b.id}`, rect: grow(rect(at), PAD / 2), float: true });
+    }
   }
 
   const items = planned
@@ -289,5 +358,5 @@ export function planFloating({ planned, boxes, callouts = [], stepFor = () => nu
     obs.solids.push({ what: `callout ${c.id || ''}`, rect: grow(best.box, PAD / 2), float: true });
   }
 
-  return { tags, callouts: calls };
+  return { tags, tabs, callouts: calls };
 }
