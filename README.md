@@ -34,13 +34,16 @@ drawn, not generated. The notes are synchronized with the elements being put in 
 
 ## What it can draw
 
-Fourteen node kinds, each with its own drawing. Eight are classic software UML-ish boxes —
+Fifteen node kinds, each with its own drawing. Eight are classic software UML-ish boxes —
 a browser, a gateway, a service, a replica set, a database, a cache, a queue,
-and something you do not own. Two are writing on the board: a note and a
-formula. Four carry no infrastructure meaning, so a figure about a cell or a
+and something you do not own. One more is a named value: a field of a message,
+a column of a CSV, a key in a config. Two are writing on the board: a note and
+a formula. Four carry no infrastructure meaning, so a figure about a cell or a
 gas does not have to borrow software's nouns.
 
 <img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/kinds-software.svg" width="760" alt="client, gateway, service, compute, datastore, cache, queue and external nodes">
+
+<img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/kinds-fields.svg" width="520" alt="a field on each side of a mapping, the notches mirrored">
 
 <img src="https://raw.githubusercontent.com/pierangeloc/spiega/main/docs/gallery/kinds-neutral.svg" width="540" alt="blob, vessel, particle and source nodes">
 
@@ -77,7 +80,7 @@ numbered hops also laid out as a list beside the drawing:
 
 Every picture is rendered by the board's own renderer and regenerated with
 `node tools/gallery.js`, so it cannot drift from what you will see. The full
-tour — all fourteen kinds, the title bar, and the code for each — is in
+tour — all fifteen kinds, the title bar, and the code for each — is in
 [the gallery](https://github.com/pierangeloc/spiega/blob/main/docs/gallery.md).
 
 ## Two examples

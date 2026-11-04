@@ -67,6 +67,41 @@ function focusAt(spec, steps, active) {
   return { nodes, edges };
 }
 
+/* Which way a field's notch points.
+
+   The notch is on the side the value runs: a field that gives a value notches
+   right, towards whatever it feeds, and a field that only receives one notches
+   left, back towards whatever it came from. On a mapping board that mirrors
+   the two sides against each other, so the reader tells source from target by
+   the shape rather than by a colour.
+
+   The flow decides it, not the column: a column says where a box sits, and
+   not which way its value went. A node may be given the other side with a
+   `notch` field, for the board where the flow says nothing — a lone field
+   with no edges at all, which is not a side of anything. */
+/**
+ * @param {Board['nodes']} nodes
+ * @param {Board['edges']} edges
+ * @returns {Record<string, 'left'|'right'>}
+ */
+function notchSides(nodes, edges) {
+  /** @type {Record<string, {in: number, out: number}>} */
+  const ends = {};
+  for (const n of nodes) ends[n.id] = { in: 0, out: 0 };
+  for (const e of edges) {
+    if (ends[e.from]) ends[e.from].out++;
+    if (ends[e.to]) ends[e.to].in++;
+  }
+  /** @type {Record<string, 'left'|'right'>} */
+  const out = {};
+  for (const n of nodes) {
+    const { in: i, out: o } = ends[n.id];
+    out[n.id] = n.notch === 'left' || n.notch === 'right' ? n.notch
+      : o > 0 ? 'right' : i > 0 ? 'left' : 'right';
+  }
+  return out;
+}
+
 /**
  * @param {Board} spec
  * @param {{
@@ -89,6 +124,7 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   // the gutters are sized for the tags that cross them, step numbers included
   const { boxes, width, height } = layout({ nodes, edges, boundaries: spec.boundaries }, place, e => stepFor({ e, key: edgeKey(e) }));
   const focus = focusAt(spec, steps, active);
+  const notches = notchSides(nodes, edges);
 
   /* Everything that floats is placed before the canvas is sized, in one pass
      against one set of obstacles (render/floating.js): a boundary's tab, tags
@@ -154,7 +190,7 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
           { w: 2.4, color: ACCENT, opacity: 0.9, dash: '14 7' })
       : '';
     body += `<g class="node" data-node="${n.id}" opacity="${state === 'dim' ? 0.5 : 1}">` +
-      halo + drawNode(n, box) + `</g>`;
+      halo + drawNode(n, box, notches[n.id]) + `</g>`;
   }
 
   // The wobble already lives in the path data (render/ink.js), so the filter is
