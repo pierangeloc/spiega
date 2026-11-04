@@ -164,6 +164,19 @@ function kindsSheet(group) {
   return sheet(tiles, { cols: group.cols });
 }
 
+/* The two sides of a mapping, one sheet. The notch on a field is on the side
+   the value runs, so a field that gives one notches right and a field that
+   receives one notches left: the two mirror each other across the gutter and
+   the reader tells source from target without reading a colour. */
+function fieldsSheet() {
+  const t = render([
+    { op: 'node', id: 'src', kind: 'field', label: 'discountCode', sub: 'grams' },
+    { op: 'node', id: 'tgt', kind: 'field', label: 'FACTUURBEDRAG' },
+    { op: 'edge', from: 'src', to: 'tgt', label: '1:1' },
+  ]);
+  return doc(t.v.w, t.v.h, place(t, 0, 0));
+}
+
 /* Four ways for an arrow to say something, each on its own pair of boxes. They
    are split across two sheets because four pairs side by side is a wide, thin
    strip: at README width the labels would be the smallest thing on the page.
@@ -340,6 +353,7 @@ function flowSheet() {
 const SHEETS = [
   ['kinds-software', () => kindsSheet(KIND_GROUPS[0])],
   ['kinds-writing', () => kindsSheet(KIND_GROUPS[1])],
+  ['kinds-fields', fieldsSheet],
   ['kinds-neutral', () => kindsSheet(KIND_GROUPS[2])],
   ['edges', edgesBasic],
   ['edges-async', edgesAsync],

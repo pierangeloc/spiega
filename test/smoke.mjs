@@ -197,6 +197,104 @@ test('every kind renders, and the same board draws the same strokes', () => {
   for (const k of KINDS) assert.ok(a1.includes(k.toUpperCase()) || a1.includes(k), k);
 });
 
+/* The outline of one node, as the points it is drawn from. A field's notch is
+   half of what it says, so it is asked of the drawing and not of the code that
+   made it. */
+const outlineOf = (svg, id) => {
+  const at = svg.indexOf(`data-node="${id}"`);
+  if (at < 0) return null;
+  const from = svg.indexOf('<path', at);
+  const m = / d="([^"]+)"/.exec(svg.slice(from, from + 8000));
+  if (!m) return null;
+  return [...m[1].matchAll(/[ML](-?[\d.]+) (-?[\d.]+)/g)].map(p => [+p[1], +p[2]]);
+};
+
+/* Which corner of a field is bitten out. The top edge stops short of one of
+   them, and the corner it stops short of is the reading. */
+const notchSide = (svg, id, box) => {
+  const pts = outlineOf(svg, id);
+  if (!pts) return null;
+  const top = Math.min(...pts.map(p => p[1]));
+  const onTop = pts.filter(p => p[1] <= top + 3);
+  const gapL = Math.min(...onTop.map(p => p[0])) - box.x;
+  const gapR = (box.x + box.w) - Math.max(...onTop.map(p => p[0]));
+  return gapR > gapL ? 'right' : 'left';
+};
+
+/* #93. A board asked to show which event fields map to which columns drew
+   every field as a `datastore` cylinder, so it asserted "durable storage"
+   about a list of field names. A field is a card with a corner notched: no
+   cylinder, no slot row, no rounded rectangle, no tilted scrap. */
+test('a field is a notched card and claims to be no piece of infrastructure', () => {
+  const b = emptyBoard();
+  applyOps(b, [{ op: 'node', id: 'f', kind: 'field', label: 'discountCode', sub: 'grams' }]);
+  const r = renderSVG(b, { hand: false });
+
+  assert.ok(r.boxes.f, 'the field is on the board');
+  assert.equal(r.boxes.f.labelBelow, 0, 'and it is not a queue, which keeps its name in a strip');
+
+  const body = r.svg.slice(r.svg.indexOf('data-node="f"'));
+  /* A cylinder is drawn with an arc and a service with rounded corners, and a
+     note is tilted. A field is none of those: its outline is straight, and it
+     stands upright. */
+  const outline = / d="([^"]+)"/.exec(body.slice(body.indexOf('<path'), body.indexOf('<path') + 8000));
+  assert.ok(outline, 'the field has an outline');
+  assert.ok(!/[AQ]/.test(outline[1]), 'a field is drawn with straight segments: no cylinder, no rounded box');
+  assert.ok(!/rotate\(/.test(body), 'and it is not a tilted scrap of paper');
+
+  /* The notch: the top edge stops short of a corner. */
+  const side = notchSide(r.svg, 'f', r.boxes.f);
+  assert.ok(side, 'the field has an outline to read');
+  assert.ok(['left', 'right'].includes(side));
+
+  /* And it is a card, not a slab: a field holds a name and nothing else. */
+  assert.ok(r.boxes.f.h < 70, `a field is ${r.boxes.f.h}px tall; a service is 70`);
+});
+
+/* The notch is on the side the value runs, so the two sides of a mapping face
+   each other and the reader tells source from target by the shape. */
+test('the two sides of a mapping notch towards each other', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'node', id: 'src', kind: 'field', label: 'discountCode' },
+    { op: 'node', id: 'tgt', kind: 'field', label: 'FACTUURBEDRAG' },
+    { op: 'edge', from: 'src', to: 'tgt', label: '1:1' },
+  ]);
+  const r = renderSVG(b, { hand: false });
+  assert.equal(notchSide(r.svg, 'src', r.boxes.src), 'right',
+    'the field that gives the value notches right, towards what it feeds');
+  assert.equal(notchSide(r.svg, 'tgt', r.boxes.tgt), 'left',
+    'and the one that receives it notches left, back the way it came');
+
+  /* A board with one column and no edges says nothing about which side is
+     which, and the field says so too: it notches right, the default. */
+  const lone = emptyBoard();
+  applyOps(lone, [{ op: 'node', id: 'one', kind: 'field', label: 'parcelType.key' }]);
+  const lr = renderSVG(lone, { hand: false });
+  assert.equal(notchSide(lr.svg, 'one', lr.boxes.one), 'right',
+    'a field with no edges at all is not a side of anything, and takes the default');
+
+  /* And the side can be said outright, for the board where the flow does not
+     speak for itself. */
+  const said = emptyBoard();
+  applyOps(said, [
+    { op: 'node', id: 'a', kind: 'field', label: 'A', notch: 'left' },
+    { op: 'node', id: 'b', kind: 'field', label: 'B', notch: 'right' },
+  ]);
+  const sr = renderSVG(said, { hand: false });
+  assert.equal(notchSide(sr.svg, 'a', sr.boxes.a), 'left', 'a stated notch wins');
+  assert.equal(notchSide(sr.svg, 'b', sr.boxes.b), 'right', 'on both sides');
+});
+
+/* An agent reads the skill, not the docs. A kind the renderer knows and the
+   skill does not name is a kind nobody will reach for. */
+test('the skill names every kind the board can draw', () => {
+  const skill = fs.readFileSync(path.join(ROOT, 'skills/spiega/SKILL.md'), 'utf8');
+  for (const kind of KINDS)
+    assert.ok(new RegExp(`\`${kind}\``).test(skill),
+      `skills/spiega/SKILL.md never mentions the "${kind}" kind`);
+});
+
 test('focusing a step lights one edge and dims the rest, but never a note', () => {
   const b = emptyBoard();
   applyOps(b, [

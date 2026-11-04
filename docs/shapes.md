@@ -10,9 +10,9 @@ the picture of it.
 
 ## Node kinds
 
-Eight kinds for software, `note` and `formula` for writing and mathematics, and
-four that carry no infrastructure meaning. An unknown kind is drawn as a
-`service`, so a guess is never an error.
+Eight kinds for software, `note` and `formula` for writing and mathematics,
+one for a named value, and four that carry no infrastructure meaning. An
+unknown kind is drawn as a `service`, so a guess is never an error.
 
 | | kind | use it for |
 |---|---|---|
@@ -24,12 +24,25 @@ four that carry no infrastructure meaning. An unknown kind is drawn as a
 | <img src="shapes/cache.svg" width="150"> | `cache` | a cache, a read replica, a copy of truth |
 | <img src="shapes/queue.svg" width="175"> | `queue` | a topic, a queue, a stream — `depth` fills slots |
 | <img src="shapes/external.svg" width="175"> | `external` | a third party, something you do not own |
+| <img src="shapes/field.svg" width="150"> | `field` | a named value: a CSV column, a message field, a config key |
 | <img src="shapes/note.svg" width="140"> | `note` | a keyword, a caveat, a number, in the margin |
 | <img src="shapes/formula.svg" width="150"> | `formula` | an equation that *is* the explanation |
 | <img src="shapes/blob.svg" width="150"> | `blob` | a body, a region, a mass with no fixed form |
 | <img src="shapes/vessel.svg" width="150"> | `vessel` | a container: a cell, a tank, a reservoir |
 | <img src="shapes/particle.svg" width="150"> | `particle` | a molecule, a drop, one unit of a substance |
 | <img src="shapes/source.svg" width="150"> | `source` | the sun, a spring, wherever something comes from |
+
+A `field` is a card with one corner notched, and the notch is on the side the
+value runs — so the two sides of a mapping mirror each other, and the reader
+tells source from target by the shape and not by a colour:
+
+<img src="shapes/field-mapping.svg" width="480">
+
+```json
+{"op":"node","id":"src","kind":"field","label":"discountCode","sub":"grams"}
+{"op":"node","id":"tgt","kind":"field","label":"FACTUURBEDRAG"}
+{"op":"edge","from":"src","to":"tgt","label":"1:1"}
+```
 
 The last four are the neutral ones. A figure of photosynthesis can say what it
 means without borrowing software's nouns: `source` for the sun, `vessel` for

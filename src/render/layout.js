@@ -83,6 +83,10 @@ const SIZES = {
   cache:     (n, tw) => ({ w: Math.max(150, tw + 52), h: 70 }),
   datastore: (n, tw) => ({ w: Math.max(146, tw + 48), h: 96 }),
   queue:     (n, tw) => ({ w: Math.max(176, tw + 60), h: 48, labelBelow: 34 }),
+  /* A field is a card with a label on it, not a component: flatter than a
+     service, and about as wide, because what it holds is a name and not a
+     box of its own. */
+  field:     (n, tw) => ({ w: Math.max(150, tw + 52), h: 58 }),
   client:    (n, tw) => ({ w: Math.max(146, tw + 48), h: 92 }),
   external:  (n, tw) => ({ w: Math.max(182, tw + 96), h: 96 }),
   /* Measured, not estimated. Every other kind guesses its width from a

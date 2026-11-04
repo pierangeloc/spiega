@@ -39,6 +39,10 @@ export const BODY_FOR_KIND = {
   cache:     'blush',
   compute:   'cobalt',
   note:      'paper',
+  /* A field is a quiet thing and there are usually many of them, so it takes
+     the muted slate rather than one of the five saturated colours: a column of
+     fields is a list, not a set of components. */
+  field:     'slate',
   // The neutral vocabulary keeps its own readings: green for an organism,
   // blue for a vessel, pink for a particle, yellow for a source.
   blob:      'mint',

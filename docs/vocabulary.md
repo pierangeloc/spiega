@@ -45,11 +45,12 @@ a sign the text wanted to be several notes, or a `callout`, or the script.
 
 ## Node kinds
 
-Fourteen, each with its own drawing. Eight are software's furniture, `note` and
-`formula` are writing on the board, and the last four carry no infrastructure
-meaning — so a figure that is not about software does not have to lie: water is
-not a database, and a gas is not a queue. An unknown kind falls back to
-`service`. [shapes.md](shapes.md) shows what each one looks like.
+Fifteen, each with its own drawing. Eight are software's furniture, `field` is
+a named value, `note` and `formula` are writing on the board, and the last
+four carry no infrastructure meaning — so a figure that is not about software
+does not have to lie: water is not a database, and a gas is not a queue. An
+unknown kind falls back to `service`. [shapes.md](shapes.md) shows what each
+one looks like.
 
 | kind | drawn as | use it for |
 |---|---|---|
@@ -61,6 +62,7 @@ not a database, and a gas is not a queue. An unknown kind falls back to
 | `cache` | a cylinder, lighter | a cache, a read replica, a copy of truth |
 | `queue` | a row of slots | a topic, a queue, a stream |
 | `external` | a cloud | a third party, something you do not own |
+| `field` | a card with a corner notched | a named value: a CSV column, a message field, a config key |
 | `note` | a torn-off scrap | a keyword, a caveat, a number |
 | `formula` | set mathematics, underlined | an equation that *is* the explanation |
 | `blob` | an uneven, organic mass | a body, a region, a substance with no fixed shape |
@@ -68,13 +70,30 @@ not a database, and a gas is not a queue. An unknown kind falls back to
 | `particle` | a small speck with two neighbours | a molecule, a drop, one unit of a substance |
 | `source` | a disc throwing rays | the sun, a spring, wherever something comes from |
 
-Three fields only some kinds read:
+**Every shape is a claim.** A cylinder says "durable storage" and a row of
+slots says "a queue", whether or not that is what you meant; drawn on a field
+name, either one says something the explanation does not. A shape that fits
+nothing is a false statement, so when nothing in the table fits, that is a
+signal to say so in words rather than to reach for the nearest one.
+
+A `field` is the shape for a named value: a column of a CSV, a field of a
+message on a topic, a key in a config, a member of a DTO. It is about software
+and is not a piece of infrastructure, which the eight furniture kinds cannot
+say — they all assert that the thing is a component and what kind. The field
+is a card with one corner notched, and the notch is on the side the value
+runs: a field that gives a value notches right, towards whatever it feeds,
+and a field that only receives one notches left, back towards whatever it came
+from. On a mapping board that mirrors the two sides against each other, so
+source and target are told apart by the shape and not by a colour.
+
+Four fields only some kinds read:
 
 | field | kinds | effect |
 |---|---|---|
 | `sub` | all but `note` | a second, smaller line under the label |
 | `replicas` | `compute` | how many boxes are stacked |
 | `depth` | `queue` | how many slots are drawn filled |
+| `notch` | `field` | which corner is notched: `left` or `right` |
 
 ## Saying something *about* a thing
 

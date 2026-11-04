@@ -37,6 +37,7 @@
  * @property {number} [slots]
  * @property {number} [depth]
  * @property {number} [replicas]
+ * @property {'left'|'right'} [notch]
  * @property {string[]} [members]
  * @property {string} [tint]
  */
