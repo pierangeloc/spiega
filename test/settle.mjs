@@ -7,7 +7,9 @@ import { promisify } from 'node:util';
 import vm from 'node:vm';
 import { emptyBoard, applyOps as applyStateOps, boardOps } from '../src/board/state.js';
 import { applySettlingOps as applyOps } from '../src/board/settle.js';
-import { assign } from '../src/render/layout.js';
+import { assign, layout } from '../src/render/layout.js';
+import { renderSVG } from '../src/render/render.js';
+import { planEdges } from '../src/render/edges.js';
 import { specToOps } from '../src/spec.js';
 
 const spec = JSON.parse(fs.readFileSync(new URL('./boards/issue-96-long-span.json', import.meta.url)));
@@ -33,6 +35,70 @@ applyOps(compact, boardOps(board));
 assert.deepEqual(assign(compact), assign(board));
 assert.equal(compact.settled, true);
 console.log('  ok  settle reorders the long-span board and logs replayable positions');
+
+const long = board.edges.find(e => e.from === 'notif' && e.to === 'log');
+assert.deepEqual(long.via?.map(p => p.col), [3, 4, 5, 6],
+  'the long edge retains one dagre dummy lane per intermediate column');
+const routed = renderSVG(board);
+const ribbon = routed.planned.find(r => r.key === 'notif>log');
+for (const p of long.via) {
+  const peers = Object.values(routed.boxes).filter(b => b.col === p.col);
+  const left = Math.min(...peers.map(b => b.x));
+  const right = Math.max(...peers.map(b => b.x + b.w));
+  assert.ok(ribbon.pts.some((a, i) => i && a[0] >= right
+    && ribbon.pts[i - 1][0] <= left && a[1] === ribbon.pts[i - 1][1]),
+  `the polyline crosses column ${p.col} horizontally in its reserved lane`);
+}
+for (const [id, b] of Object.entries(routed.boxes)) {
+  if (['notif', 'log'].includes(id)) continue;
+  for (let i = 1; i < ribbon.pts.length; i++) {
+    const [a, z] = [ribbon.pts[i - 1], ribbon.pts[i]];
+    assert.ok(!(a[1] === z[1] && a[1] > b.y && a[1] < b.y + b.h + (b.labelBelow || 0)
+      && Math.max(a[0], z[0]) > b.x && Math.min(a[0], z[0]) < b.x + b.w),
+    'the reserved lane does not cross another box or its label');
+  }
+}
+assert.equal(renderSVG(restored).svg, routed.svg, 'log replay reproduces the lane pixels');
+assert.equal(renderSVG(compact).svg, routed.svg, 'compaction preserves lanes');
+assert.deepEqual(result.applied[0].routes['notif>log'], long.via);
+const historicalVia = structuredClone(result.applied[0].routes);
+long.via[0].row++;
+assert.deepEqual(result.applied[0].routes, historicalVia, 'edge state does not alias the logged routes');
+long.via[0].row--;
+const legacySettle = structuredClone(board);
+applyStateOps(legacySettle, { op: 'settle', positions: result.applied[0].positions });
+assert.equal(legacySettle.edges.some(e => e.via), false, 'a new result replaces stale routes, including a legacy positions-only op');
+
+const pixels = layout(board, assign(board));
+for (const lane of pixels.lanes['notif>log']) {
+  assert.ok(ribbon.pts.some((p, i) => i && p[1] === lane.y && ribbon.pts[i - 1][1] === lane.y
+    && p[0] >= lane.x + lane.w && ribbon.pts[i - 1][0] <= lane.x),
+  'the polyline crosses at the pixel height assigned to each frozen waypoint');
+}
+const straight = { ...long, bend: 'straight' };
+assert.equal(planEdges([straight], pixels.boxes, pixels.lanes)[0].pts.length, 2,
+  'an explicit straight bend wins over waypoints');
+const cycleEdges = [{ from: 'log', to: 'notif' }, { ...long, from: 'notif', to: 'log' }];
+const cycleBoxes = { log: pixels.boxes.log, ...pixels.boxes };
+assert.equal(planEdges(cycleEdges, cycleBoxes, pixels.lanes).at(-1).back, true);
+assert.deepEqual(planEdges(cycleEdges, cycleBoxes, pixels.lanes).at(-1).pts,
+  planEdges(cycleEdges, cycleBoxes).at(-1).pts, 'a back edge keeps its floor route despite via');
+const aligned = emptyBoard();
+applyStateOps(aligned, [
+  { op: 'node', id: 'a', col: 0, row: 0 },
+  { op: 'node', id: 'obstacle', col: 1, row: 0 },
+  { op: 'node', id: 'b', col: 2, row: 0 },
+  { op: 'edge', from: 'a', to: 'b', via: [{ col: 1, row: 1 }] },
+]);
+assert.ok(renderSVG(aligned).planned[0].pts.length > 2,
+  'aligned endpoints do not bypass a frozen lane');
+applyStateOps(aligned, { op: 'node', id: 'feedback', col: 1 });
+assert.equal(assign(aligned).feedback.row, 2, 'feedback does not occupy an edge lane');
+for (const via of ['bad', [null], [{ col: 1, row: Infinity }]]) {
+  assert.equal(applyStateOps(aligned, { op: 'edge', from: 'a', to: 'b', via }).errors.length, 1);
+  assert.equal(applyStateOps(aligned, { op: 'settle', positions: {}, routes: { 'a>b': via } }).errors.length, 1);
+}
+console.log('  ok  the long-span polyline crosses every intermediate column in a reserved lane');
 
 const branches = JSON.parse(fs.readFileSync(new URL('./boards/issue-96-interleaved-branches.json', import.meta.url)));
 const branched = emptyBoard();
@@ -187,6 +253,8 @@ try {
     const onDisk = fs.readFileSync(boardFile('settle'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
     assert.equal(onDisk.at(-1).op, 'settle');
     assert.deepEqual(onDisk.at(-1).positions, app.board.log.at(-1).positions);
+    assert.deepEqual(onDisk.at(-1).routes, app.board.log.at(-1).routes);
+    assert.equal(renderSVG(restoreBoard(boardFile('settle')).board).svg, renderSVG(app.board).svg);
     assert.deepEqual(assign(restoreBoard(boardFile('settle')).board), assign(app.board));
     const nodes = structuredClone(app.board.nodes);
     await send({ op: 'node', id: 'feedback' });

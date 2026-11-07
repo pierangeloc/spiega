@@ -51,6 +51,7 @@
  * @property {boolean} [async]
  * @property {string} [style]
  * @property {string} [bend]
+ * @property {import('../render/layout.js').Placement[]} [via]
  */
 
 /**
@@ -132,7 +133,7 @@
 /** @typedef {{op: 'flow', steps?: FlowStep[]}} FlowOp */
 /** @typedef {{op: 'focus', step?: number|string|null}} FocusOp */
 /** @typedef {{op: 'remove', id: string}} RemoveOp */
-/** @typedef {{op: 'settle', positions: Placed}} SettleOp */
+/** @typedef {{op: 'settle', positions: Placed, routes?: Record<string, import('../render/layout.js').Placement[]>}} SettleOp */
 /**
  * @typedef {ClearOp | TitleOp | SayOp | TagOp | NodeOp | EdgeOp | CalloutOp
  *   | BoundaryOp | StepOp | FlowOp | FocusOp | RemoveOp | SettleOp} Op
@@ -301,6 +302,9 @@ const edgeId = e => `${e.from}>${e.to}`;
 /** @param {unknown} value */
 const stringIds = value => Array.isArray(value) && value.every(v => typeof v === 'string');
 
+/** @param {unknown} value */
+const waypoints = value => Array.isArray(value) && value.every(p => p && Number.isFinite(p.col) && Number.isFinite(p.row));
+
 /* An op is an object with a string `op` naming the operation. Anything else is
    refused rather than read: `[null]` in an ops array — the other thing a client
    can post by hand — used to throw on `op.op` inside the request handler, which
@@ -418,6 +422,9 @@ function applyOne(board, op, sweep) {
     case 'edge': {
       const { op: _op, ...fields } = op;
       if (!fields.from || !fields.to) break;
+      if (fields.via !== undefined && !waypoints(fields.via)) {
+        return { ok: false, error: 'edge: via must be an array of finite col and row pairs', fresh };
+      }
       /** @type {Edge} */
       const e = { ...fields, from: fields.from, to: fields.to };
       if (upsert(board.edges, e, edgeId, indexesFor(board).edges)) fresh.edges.push(edgeId(e));
@@ -483,6 +490,10 @@ function applyOne(board, op, sweep) {
         || Object.values(positions).some(p => !p || !Number.isFinite(p.col) || !Number.isFinite(p.row))) {
         return { ok: false, error: 'settle: positions must be an object of finite col and row pairs', fresh };
       }
+      if (op.routes !== undefined && (!op.routes || typeof op.routes !== 'object' || Array.isArray(op.routes)
+        || Object.values(op.routes).some(v => !waypoints(v)))) {
+        return { ok: false, error: 'settle: routes must be an object of waypoint arrays', fresh };
+      }
       // The log carries the answer, not just a request to run today's dagre.
       // Restores and browser replay therefore show exactly the same handover.
       // Compaction copies only the frozen subset. Feedback drawn since then
@@ -490,7 +501,16 @@ function applyOne(board, op, sweep) {
       const frozen = Object.fromEntries(board.nodes.filter(n => positions[n.id]).map(n => [n.id, {
         col: positions[n.id].col, row: positions[n.id].row,
       }]));
-      op = { op: 'settle', positions: frozen };
+      /** @type {NonNullable<SettleOp['routes']>} */
+      const routes = {};
+      for (const e of board.edges) {
+        const via = op.routes?.[edgeId(e)];
+        if (via?.length) {
+          routes[edgeId(e)] = via.map(p => ({ col: p.col, row: p.row }));
+          e.via = routes[edgeId(e)].map(p => ({ ...p }));
+        } else delete e.via;
+      }
+      op = { op: 'settle', positions: frozen, ...(op.routes ? { routes } : {}) };
       for (const n of board.nodes) {
         if (!frozen[n.id]) continue;
         n.col = frozen[n.id].col;
@@ -587,7 +607,9 @@ export function boardOps(board) {
     if (line.edge) s.edge = line.edge;
     ops.push(s);
   }
-  if (board.settled) ops.push({ op: 'settle', positions: { ...board.placed } });
+  if (board.settled) ops.push({ op: 'settle', positions: { ...board.placed },
+    routes: Object.fromEntries(board.edges.filter(e => e.via?.length).map(e => [edgeId(e), (e.via || []).map(p => ({ ...p }))])),
+  });
   if (board.active != null) ops.push({ op: 'focus', step: board.active });
   return ops;
 }

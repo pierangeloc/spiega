@@ -6,4 +6,10 @@ export class Graph {
   node(id: string): { rank: number; order: number; x: number; y: number };
 }
 export const graphlib: { Graph: typeof Graph };
-export function layout(graph: Graph): void;
+interface OrderedGraph {
+  nodes(): string[];
+  node(id: string): { rank: number; order: number; dummy?: string; edgeObj?: { v: string; w: string } };
+}
+export function layout(graph: Graph, options?: {
+  customOrder?: (graph: OrderedGraph, order: (graph: OrderedGraph) => void) => void;
+}): void;

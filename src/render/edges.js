@@ -107,7 +107,7 @@ function spreadFan(list, side) {
 
 /* Spread the edges that share a side evenly across it, ordered so that lines
    never cross each other on the way out. */
-export function planEdges(edges, boxes) {
+export function planEdges(edges, boxes, lanes = {}) {
   const groups = {};
   /* An edge that closes a loop leaves the row and comes back underneath it,
      because that is what a loop looks like. Routed like any other edge it
@@ -130,7 +130,7 @@ export function planEdges(edges, boxes) {
     const [sa, sb] = isBack
       ? [blockedBelow(a, boxes) ? 'right' : 'bottom', blockedBelow(b, boxes) ? 'left' : 'bottom']
       : sides(a, b);
-    const r = { e, a, b, sa, sb, key: edgeKey(e), back: isBack, floor,
+    const r = { e, a, b, sa, sb, key: edgeKey(e), back: isBack, floor, via: lanes[edgeKey(e)],
       gutterA: colEdge(a, boxes, 'right'), gutterB: colEdge(b, boxes, 'left') };
     (groups[`${e.from}|${sa}`] ||= []).push({ r, end: 'a' });
     (groups[`${e.to}|${sb}`]   ||= []).push({ r, end: 'b' });
@@ -197,7 +197,7 @@ function colEdge(box, boxes, side) {
     : Math.min(...col.map(o => o.x)) - BACK_GUTTER;
 }
 
-function route({ a, b, sa, sb, ta = 0, tb = 0, e, back, floor, gutterA, gutterB }) {
+function route({ a, b, sa, sb, ta = 0, tb = 0, e, back, floor, gutterA, gutterB, via }) {
   const A = sidePoint(a, sa, ta);
   const B = sidePoint(b, sb, tb);
 
@@ -212,6 +212,24 @@ function route({ a, b, sa, sb, ta = 0, tb = 0, e, back, floor, gutterA, gutterB 
   }
 
   const horiz = sa === 'left' || sa === 'right';
+
+  // Cross each reserved row horizontally and change height only in the
+  // gutters, even when the endpoints happen to be level with one another.
+  if (e.bend !== 'straight' && via?.length && horiz) {
+    const pts = [A];
+    let last = A;
+    let right = gutterA - BACK_GUTTER + GAP;
+    for (const lane of via) {
+      const left = lane.x - GAP;
+      const gx = right + (left - right) * KNEE;
+      pts.push([gx, last[1]], [gx, lane.y], [left, lane.y], [lane.x + lane.w + GAP, lane.y]);
+      last = pts[pts.length - 1];
+      right = last[0];
+    }
+    const gx = right + (gutterB + BACK_GUTTER - GAP - right) * KNEE;
+    pts.push([gx, last[1]], [gx, B[1]], B);
+    return pts;
+  }
 
   if (e.bend === 'straight' || Math.abs(horiz ? A[1] - B[1] : A[0] - B[0]) < 2) {
     return [A, B];

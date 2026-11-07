@@ -23,7 +23,7 @@ MCP tool. Ops are applied in order and the board is their accumulation.
 | `focus` | light one step; `null` clears | `step` (0-based) |
 | `remove` | delete a node and everything touching it | `id` |
 | `clear` | wipe the board | `keepTitle` |
-| `settle` | tidy the finished board once, then freeze its positions | `positions` (recorded result; omit when asking to settle) |
+| `settle` | tidy the finished board once, then freeze positions and edge lanes | `positions`, `routes` (recorded result; omit when asking to settle) |
 
 `id` is optional — a label becomes one, so `"API Gateway"` is `api-gateway`.
 Pass it when you will refer to the node in an edge, which is most of the time.
@@ -221,9 +221,13 @@ Snapshot, narrate and replay settle implicitly if the board has never settled.
 They do not reflow it again after feedback adds another box. A whole-file spec
 can ask for the same final moment with `"settle": true`.
 
-This does not route a long edge through intermediate columns. Dagre's dummy
-nodes and pixel coordinates are not passed into the renderer, so a multi-column
-edge can still cross a box. Settle is ordering, not a guarantee of clear routes.
+Long edges also keep dagre's intermediate dummy slots as
+`routes: {"from>to": [{col, row}, ...]}` on the recorded op. State copies each
+chain to its edge's `via` field. These slots reserve room between the boxes in
+each intermediate column; the renderer supplies pixels and routes through them
+without loading dagre. An edge with `bend: "straight"` still draws straight,
+and a back edge still returns along the floor. Boards without `via` keep the
+incremental routing unchanged. This is not a general obstacle-avoidance solver.
 
 ## The flow, and the script
 

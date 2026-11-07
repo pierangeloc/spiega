@@ -35,7 +35,7 @@ export function applySettlingOps(board, ops) {
     if (op?.op === 'settle' && !('positions' in op)) {
       apply(batch);
       batch = [];
-      apply([{ op: 'settle', positions: settlePositions(board) }]);
+      apply([settleOp(board)]);
     } else batch.push(/** @type {import('./state.js').Op} */ (op));
   }
   apply(batch);
@@ -44,9 +44,9 @@ export function applySettlingOps(board, ops) {
 
 /**
  * @param {{nodes: Node[], edges: import('./state.js').Edge[]}} board
- * @returns {Placed}
+ * @returns {import('./state.js').SettleOp}
  */
-export function settlePositions(board) {
+export function settleOp(board) {
   const graph = new graphlib.Graph().setGraph({ rankdir: 'LR' })
     .setDefaultEdgeLabel(() => ({}));
   const byId = new Map(board.nodes.map(n => [n.id, n]));
@@ -54,11 +54,23 @@ export function settlePositions(board) {
   for (const e of board.edges) {
     if (byId.has(e.from) && byId.has(e.to)) graph.setEdge(e.from, e.to);
   }
-  if (!board.nodes.length) return {};
-  layout(graph);
+  if (!board.nodes.length) return { op: 'settle', positions: {}, routes: {} };
+  /** @type {{rank: number, order: number, from: string, to: string}[]} */
+  const dummies = [];
+  // The public ordering hook sees the normalized graph before dagre removes
+  // its dummy chains. Run the default order unchanged, then keep its answer.
+  layout(graph, { customOrder(g, order) {
+    order(g);
+    for (const id of g.nodes()) {
+      const n = g.node(id);
+      if (n.dummy && n.edgeObj) dummies.push({
+        rank: n.rank, order: n.order, from: n.edgeObj.v, to: n.edgeObj.w,
+      });
+    }
+  } });
 
-  // Dagre leaves room for its dummy ranks. Only real ranks become columns;
-  // dummy-node routing belongs to the edge renderer, not to this operation.
+  // Label-only ranks do not become columns; keep the chain's slots at the
+  // same real ranks that phase one projects onto the board.
   const ranks = [...new Set(board.nodes.map(n => graph.node(n.id).rank))].sort((a, b) => a - b);
   /** @type {Placed} */
   const proposed = {};
@@ -131,6 +143,21 @@ export function settlePositions(board) {
     visit(n, 0);
     blocks.push(block);
   }
+  /** @type {Map<string, {id: string, col: number}[]>} */
+  const chains = new Map();
+  for (const d of dummies) {
+    const col = ranks.indexOf(d.rank);
+    const from = byId.get(d.from), to = byId.get(d.to);
+    if (col < 0 || !from || !to || col <= column(from) || col >= column(to)) continue;
+    let id = `@lane:${d.from}>${d.to}:${col}`;
+    while (byId.has(id) || proposed[id]) id += ':';
+    const n = { id, col };
+    proposed[id] = { col, row: d.order };
+    blocks.push({ members: [{ n, offset: 0 }], order: d.order });
+    const key = `${d.from}>${d.to}`;
+    if (!chains.has(key)) chains.set(key, []);
+    chains.get(key)?.push({ id, col });
+  }
   blocks.sort((a, b) => Number(b.base != null) - Number(a.base != null) || a.order - b.order);
   for (const block of blocks) {
     let base = block.base ?? Math.max(0, ...block.members.map(m => -m.offset));
@@ -143,5 +170,14 @@ export function settlePositions(board) {
       slots(col).add(row);
     }
   }
-  return placed;
+  /** @type {Record<string, import('../render/layout.js').Placement[]>} */
+  const routes = {};
+  for (const [key, chain] of chains) {
+    routes[key] = chain.sort((a, b) => a.col - b.col).map(({ id }) => {
+      const p = placed[id];
+      delete placed[id];
+      return p;
+    });
+  }
+  return { op: 'settle', positions: placed, routes };
 }

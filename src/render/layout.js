@@ -40,7 +40,7 @@
  * @property {string[]} [lines]
  */
 
-/** @typedef {{from: string, to: string, label?: string, step?: number|null}} LayoutEdge */
+/** @typedef {{from: string, to: string, label?: string, step?: number|null, bend?: string, via?: Placement[]}} LayoutEdge */
 
 /** @typedef {{members?: string[]}} LayoutBoundary */
 
@@ -268,6 +268,7 @@ export function assign(spec, placed = {}) {
   /** @type {Record<string, Set<number>>} */
   const used = {};
   for (const p of Object.values(placed)) (used[p.col] ||= new Set()).add(p.row);
+  for (const e of spec.edges || []) for (const p of e.via || []) (used[p.col] ||= new Set()).add(p.row);
   /** @param {number} col @returns {number} */
   function nextRow(col) {
     const set = (used[col] ||= new Set());
@@ -291,7 +292,7 @@ export function assign(spec, placed = {}) {
  * @param {{nodes: LayoutNode[], edges?: LayoutEdge[], boundaries?: LayoutBoundary[]}} spec
  * @param {Placed} placed
  * @param {(e: LayoutEdge) => number|null|undefined} [stepFor]
- * @returns {{boxes: Record<string, Box>, width: number, height: number}}
+ * @returns {{boxes: Record<string, Box>, lanes: Record<string, Box[]>, width: number, height: number}}
  */
 export function layout(spec, placed, stepFor = e => e.step) {
   /** @type {Record<string, {n: LayoutNode, p: Placement, s: {w: number, h: number, labelBelow: number}}[]>} */
@@ -301,6 +302,28 @@ export function layout(spec, placed, stepFor = e => e.step) {
     if (!p) continue;
     const s = sizeOf(n);
     (cols[p.col] ||= []).push({ n, p, s });
+  }
+
+  /* A settled edge owns row slots just as its neighbours do, but no ink.
+     Keep those slots in the same separation pass as boxes so a boundary that
+     moves a neighbour cannot move it onto a lane. Nothing enters this path
+     on the incremental board. */
+  /** @type {Record<string, string[]>} */
+  const laneIds = {};
+  const ids = new Set(spec.nodes.map(n => n.id));
+  const back = backEdges(spec.nodes, spec.edges);
+  for (const e of spec.edges || []) {
+    const a = placed[e.from], b = placed[e.to];
+    if (!a || !b || e.bend === 'straight' || back.has(`${e.from}>${e.to}`)) continue;
+    const key = `${e.from}>${e.to}`;
+    for (const p of e.via || []) {
+      if (p.col <= a.col || p.col >= b.col) continue;
+      let id = `@lane:${key}:${p.col}`;
+      while (ids.has(id)) id += ':';
+      ids.add(id);
+      (laneIds[key] ||= []).push(id);
+      (cols[p.col] ||= []).push({ n: { id }, p, s: { w: 0, h: 0, labelBelow: 0 } });
+    }
   }
 
   const colKeys = Object.keys(cols).map(Number).sort((a, b) => a - b);
@@ -320,7 +343,6 @@ export function layout(spec, placed, stepFor = e => e.step) {
      out. Done after columns are assigned and before anything is placed: there
      is no placing a tag into a gap it cannot fit. A loop's return runs along
      the floor and never enters a gutter, so it asks for nothing. */
-  const back = backEdges(spec.nodes, spec.edges);
   /** @type {number[]} */
   const crossing = colKeys.map(() => 0);
   for (const e of spec.edges || []) {
@@ -381,7 +403,19 @@ export function layout(spec, placed, stepFor = e => e.step) {
       height = Math.round(bottom + PAD);
     }
   }
-  return { boxes, width, height };
+  /** @type {Record<string, Box[]>} */
+  const lanes = {};
+  for (const [key, ids] of Object.entries(laneIds)) {
+    lanes[key] = ids.map(id => {
+      const box = boxes[id], col = box.col ?? 0;
+      // A lane crosses the whole column, including wider neighbours, rather
+      // than just the zero-width slot that participated in row separation.
+      const lane = { ...box, x: box.x - colW[col] / 2, w: colW[col] };
+      delete boxes[id];
+      return lane;
+    });
+  }
+  return { boxes, lanes, width, height };
 }
 
 /* A boundary is the bounding box of its members, loosened. */

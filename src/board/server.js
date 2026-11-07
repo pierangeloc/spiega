@@ -24,7 +24,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps, boardOps } from './state.js';
-import { settlePositions, applySettlingOps } from './settle.js';
+import { settleOp, applySettlingOps } from './settle.js';
 import { restoreBoard, createLog, boardLogFile } from './log.js';
 import { home } from '../home.js';
 
@@ -199,9 +199,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
 
   const settle = entry => {
     if (entry.board.settled || !entry.board.nodes.length) return;
-    const { fresh, errors, applied } = applyOps(entry.board, {
-      op: 'settle', positions: settlePositions(entry.board),
-    });
+    const { fresh, errors, applied } = applyOps(entry.board, settleOp(entry.board));
     if (errors.length) throw new Error(errors.join('; '));
     entry.log?.push(applied);
     broadcast(entry, 'patch', { board: entry.board, fresh });
