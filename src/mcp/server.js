@@ -132,6 +132,14 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'board_settle',
+    description:
+      'Finish the explanation: tidy ranks and in-column order once, then freeze the positions. ' +
+      'Call when you hand the board to the person, not between draw batches. ' +
+      'Snapshot, narration and replay also settle a board that has not been settled yet.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'board_replay',
     description:
       'Play the board back as a movie: every line and box in the order it arrived, with the camera ' +
@@ -216,6 +224,9 @@ async function call(name, args = {}) {
 
     case 'board_draw':
       return send(listArg(args.ops, 'ops'));
+
+    case 'board_settle':
+      return send([{ op: 'settle' }]);
 
     case 'board_step':
       return send([{ op: 'focus', step: args.step == null ? null : Number(args.step) - 1 }]);

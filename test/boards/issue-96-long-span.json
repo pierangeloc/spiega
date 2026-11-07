@@ -1,0 +1,26 @@
+{
+  "title": "PR #81 — notification and command walkthrough",
+  "settle": true,
+  "nodes": [
+    { "id": "user", "kind": "client", "label": "User" },
+    { "id": "wf", "label": "Workflow" },
+    { "id": "notif", "label": "Notification" },
+    { "id": "rcpt", "label": "Recipient" },
+    { "id": "log", "kind": "datastore", "label": "Log" },
+    { "id": "cmd", "kind": "queue", "label": "Command" },
+    { "id": "cns", "label": "Console" },
+    { "id": "res", "kind": "queue", "label": "Result" },
+    { "id": "consumer", "label": "Consumer" }
+  ],
+  "edges": [
+    { "from": "user", "to": "wf", "label": "start" },
+    { "from": "wf", "to": "notif", "label": "notify" },
+    { "from": "notif", "to": "rcpt", "label": "deliver" },
+    { "from": "notif", "to": "log", "label": "record" },
+    { "from": "notif", "to": "cmd", "label": "publish" },
+    { "from": "cmd", "to": "cns", "label": "execute" },
+    { "from": "cns", "to": "res", "label": "respond" },
+    { "from": "res", "to": "consumer", "label": "consume" },
+    { "from": "consumer", "to": "log", "label": "append" }
+  ]
+}

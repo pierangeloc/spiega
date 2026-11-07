@@ -32,6 +32,7 @@ export function specToOps(spec) {
      over time; this one does not have to be edited again when it does. */
   for (const t of spec.transcript || [])
     ops.push({ op: 'say', ...(typeof t === 'string' ? { text: t } : t) });
+  if (spec.settle) ops.push({ op: 'settle' });
   return ops;
 }
 

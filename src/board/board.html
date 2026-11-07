@@ -515,10 +515,12 @@ $('voicepick').onchange = e => {
   narrator.sample();          // hear it immediately, which is how you choose
 };
 
-$('narrate').onclick = () => {
+async function narrate(action = () => narrator.toggle()) {
   if (!narrator.available) { $('narrate').textContent = 'no voice'; return; }
-  narrator.toggle();
-};
+  await finish();
+  action();
+}
+$('narrate').onclick = () => narrate();
 
 /* Click a line of the script to walk the step it explains.
 
@@ -647,6 +649,7 @@ function stopReplay() {
 
 async function replay() {
   if (replaying) return stopReplay();
+  await finish();
   const log = (board?.log || []).filter(e => e.op !== 'focus' && e.op !== 'clear');
   if (!log.length) return;
 
@@ -701,6 +704,18 @@ $('replay').onclick = replay;
 
 async function post(ops) {
   await fetch(API + 'op', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ops }) });
+}
+
+async function finish() {
+  if (!board || board.settled || !board.nodes.length || replaying) return;
+  const response = await fetch(API + 'settle', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+  });
+  if (!response.ok) throw new Error('spiega could not settle this board');
+  const result = await response.json();
+  // The stream may have delivered this already; otherwise show the result
+  // before starting the tape, rather than speaking over the old arrangement.
+  if (result.board.rev !== board.rev) onState(result.board);
 }
 
 function onState(b, fresh) {
@@ -855,9 +870,9 @@ addEventListener('keydown', e => {
      than as a stepper. Left and right keep their meaning here: they walk the
      flow, which is the board's own axis and not the tape's. */
   if (narrator.available) {
-    if (e.key === ' ') { e.preventDefault(); return narrator.toggle(); }
-    if (e.key === 'ArrowDown') { e.preventDefault(); return narrator.next(); }
-    if (e.key === 'ArrowUp') { e.preventDefault(); return narrator.prev(); }
+    if (e.key === ' ') { e.preventDefault(); return narrate(); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); return narrate(() => narrator.next()); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); return narrate(() => narrator.prev()); }
     if (e.key === 'r' && narrator.playing) { e.preventDefault(); return narrator.restart(); }
     if (e.key === '[') { e.preventDefault(); return narrator.setRate(narrator.rate - 0.1); }
     if (e.key === ']') { e.preventDefault(); return narrator.setRate(narrator.rate + 0.1); }

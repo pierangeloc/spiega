@@ -60,6 +60,11 @@
     "broke": "Follow-up to #58. A boundary that cannot be one true rectangle is drawn as several, with its label on each, and that is true about membership but says something else: two dashed rectangles under one name read as two boundaries that happen to share a name, not as one boundary that could not be drawn as one. Here `{b,d}` is drawn as a rectangle round `D` and another round `B`, and both cards read `B D`; nothing on the board says they are one. This is the spec of `issue-58-boundary-impossible`, kept under its own name because it is the picture this issue is read against. The overdrawn tab the issue also mentions was #87.",
     "fixed": "Each card of a split boundary says which piece it is, `B D (1/2)` and `B D (2/2)`, numbered the way the board is read, top to bottom and then left to right. A link between the pieces was not drawn: the pieces are apart because something that is not a member stands between them, so a line would have to run through or around the very boxes the split keeps out, and would read as an edge. A boundary that is one rectangle keeps its name exactly as written."
   },
+  "issue-96-long-span": {
+    "issue": 96,
+    "broke": "The PR #81 walkthrough is a horizontal ribbon: insertion-order placement leaves every column's first box on row zero, and notif>log spans five columns because consumer also writes the log. The frozen before picture is the original incremental layout, before any settle implementation existed.",
+    "fixed": "An explicit, logged settle gives dagre one turn at ranks and in-rank ordering when the explanation is over. Command now comes before Recipient in their shared column; the result is frozen as col/row on the nodes and in the settle op, so replay keeps the incremental drawing followed by this handover. Pixel spacing, gutters and ink are unchanged. The long notif>log edge still has no intermediate waypoints: dummy-node routing is deliberately a separate issue, not a claim made by this picture."
+  },
   "issue-93-field-mapping": {
     "issue": 93,
     "noBefore": true,

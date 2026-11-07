@@ -196,6 +196,14 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     for (const c of entry.clients) { try { c.write(frame); } catch { entry.clients.delete(c); } }
   };
 
+  const settle = entry => {
+    if (entry.board.settled || !entry.board.nodes.length) return;
+    const { fresh, errors, applied } = applyOps(entry.board, { op: 'settle' });
+    if (errors.length) throw new Error(errors.join('; '));
+    entry.log?.push(applied);
+    broadcast(entry, 'patch', { board: entry.board, fresh });
+  };
+
   const first = hold(name, board);
 
   /* Where this server is, as the client that is talking to us sees it. Taken
@@ -226,7 +234,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
        brand and is served from there rather than copied into src/. */
     if (p === '/icon.svg') return serveFile(res, path.join(ROOT, 'docs', 'logo', 'spiega-mark.svg'));
 
-    if (p.startsWith('/src/') && !p.includes('..')) {
+    if ((p.startsWith('/src/') || p.startsWith('/vendor/')) && !p.includes('..')) {
       return serveFile(res, path.join(ROOT, p.slice(1)));
     }
 
@@ -337,9 +345,18 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
        already here, so re-running an explanation costs nothing and the model
        never has to think the drawing out a second time. */
     if (rest === '/replay') {
+      try { settle(entry); } catch (e) { return failedOp(res, e); }
       const drawable = board.log.filter(e => e.op !== 'focus' && e.op !== 'clear').length;
       if (drawable) broadcast(entry, 'replay', { rev: board.rev });
       return json(res, 200, { ok: !!drawable, ops: drawable, viewers: entry.clients.size });
+    }
+
+    // Narration begins in the browser, but the handover belongs in the same
+    // server log as an agent's explicit settle, not just in that one window.
+    if (rest === '/settle' && req.method === 'POST') {
+      if (!wantsJSON(req)) return json(res, 415, { ok: false, error: 'expected content-type: application/json' });
+      try { settle(entry); } catch (e) { return failedOp(res, e); }
+      return json(res, 200, { ok: true, board });
     }
 
     /* Let this board go, and leave the other seven drawing. One process holds
@@ -352,6 +369,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
 
     // The board as one standalone file, for pasting into a PR or a doc.
     if (rest === '/snapshot') {
+      try { settle(entry); } catch (e) { return failedRender(res, e); }
       const { snapshotHTML } = await import('./snapshot.js');
       let html;
       try { html = snapshotHTML(board, { active: url.searchParams.get('step') }); }
@@ -360,6 +378,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
       return res.end(html);
     }
     if (rest === '/snapshot.svg') {
+      try { settle(entry); } catch (e) { return failedRender(res, e); }
       const { renderSVG } = await import('../render/render.js');
       let svg;
       try { svg = renderSVG(board, { margin: 16, active: board.active }).svg; }

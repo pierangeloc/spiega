@@ -113,7 +113,7 @@ const FLAGS = {
   draw: [], op: [],
   say: ['step', 'edge'],
   tag: ['step', 'edge', 'match'],
-  step: [], script: [], replay: [],
+  step: [], script: [], replay: [], settle: [],
   clear: ['keep-title', 'force'],
   render: ['o', 'out', 'step'],
   snapshot: ['o', 'out'],
@@ -264,6 +264,7 @@ const HELP = `spiega — a hand-drawn board an agent draws on while it explains
   script                        list the lines, numbered, with the step each is tied to
   tag <N> --step M              tie line N to step M (--match TEXT, --step off)
   replay                        play the board back from its own log, as a movie
+  settle                        tidy the finished board once and freeze its positions
   clear [--keep-title]          wipe the board
   render <spec.json> -o F.html  render a spec to a standalone file, no server
   snapshot [-o F.html]          save the live board as a standalone file
@@ -491,6 +492,9 @@ const main = async () => {
 
     case 'draw': case 'op':
       return void (await send(await readOps(positional()[0])));
+
+    case 'settle':
+      return void (await send([{ op: 'settle' }]));
 
     case 'say': {
       const step = flag('step'), edge = flag('edge');

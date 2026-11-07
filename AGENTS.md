@@ -150,6 +150,9 @@ for anything similar.
 
 - No dependencies, no build step. `git clone && node src/cli.js serve` is the
   point of the thing, and the code you read is the code that runs.
+  The one exception is dagre's checked-in ESM bundle in `vendor/`: it orders a
+  finished board once, at `settle`, without an install or a build. The live
+  layout and the ink stay ours. Do not turn that exception into a package tree.
 - The op log is append-only. Restore is `applyOps` over the lines read back,
   so there is no second representation to keep in step.
 - Below `LOG_CAP`, never compact: compaction loses the interleaving between

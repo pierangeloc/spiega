@@ -15,6 +15,9 @@
    `node:fs`. Importing one here takes the whole page down with it.
    ============================================================ */
 
+import { settlePositions } from './settle.js';
+import { assign } from '../render/layout.js';
+
 /** @typedef {import('../render/layout.js').Placed} Placed */
 
 /**
@@ -115,6 +118,7 @@
  * @property {Placed} placed
  * @property {LogEntry[]} log
  * @property {number} rev
+ * @property {boolean} settled
  */
 
 /* The wire format: one object per line in the log and one POST body per op. */
@@ -131,13 +135,14 @@
 /** @typedef {{op: 'flow', steps?: FlowStep[]}} FlowOp */
 /** @typedef {{op: 'focus', step?: number|string|null}} FocusOp */
 /** @typedef {{op: 'remove', id: string}} RemoveOp */
+/** @typedef {{op: 'settle', positions?: Placed}} SettleOp */
 /**
  * @typedef {ClearOp | TitleOp | SayOp | TagOp | NodeOp | EdgeOp | CalloutOp
- *   | BoundaryOp | StepOp | FlowOp | FocusOp | RemoveOp} Op
+ *   | BoundaryOp | StepOp | FlowOp | FocusOp | RemoveOp | SettleOp} Op
  */
 
 /** @typedef {{nodes: string[], edges: string[], boundaries: string[]}} Fresh */
-/** @typedef {{ok: true, fresh: Fresh} | {ok: false, error: string, fresh: Fresh}} ApplyResult */
+/** @typedef {{ok: true, fresh: Fresh, op: Op} | {ok: false, error: string, fresh: Fresh}} ApplyResult */
 /** @typedef {{fresh: Fresh, errors: string[], applied: Op[]}} ApplyOpsResult */
 
 /** @returns {Board} */
@@ -157,6 +162,7 @@ export const emptyBoard = () => ({
   // there is lost the moment it is drawn.
   log: [],
   rev: 0,
+  settled: false,
 });
 
 export const LOG_CAP = 4000;
@@ -261,7 +267,7 @@ const sweepRemoved = (board, sweep) => {
 /* The ops that read or write the four lists a sweep touches. `clear` is not
    here because it replaces the lists wholesale — it resets the sweep instead
    of paying for a sweep nobody will see. */
-const TOUCHES_LISTS = new Set(['node', 'note', 'edge', 'callout', 'boundary']);
+const TOUCHES_LISTS = new Set(['node', 'note', 'edge', 'callout', 'boundary', 'settle']);
 
 /**
  * @template T
@@ -466,6 +472,28 @@ function applyOne(board, op, sweep) {
         : Math.max(0, Math.min(board.flow.length - 1, Number(op.step)));
       break;
 
+    case 'settle': {
+      const positions = op.positions ?? settlePositions(board);
+      if (!positions || typeof positions !== 'object' || Array.isArray(positions)
+        || board.nodes.some(n => !positions[n.id]
+          || !Number.isFinite(positions[n.id].col) || !Number.isFinite(positions[n.id].row))) {
+        return { ok: false, error: 'settle: positions must give every node a finite col and row', fresh };
+      }
+      // The log carries the answer, not just a request to run today's dagre.
+      // Restores and browser replay therefore show exactly the same handover.
+      const frozen = Object.fromEntries(board.nodes.map(n => [n.id, {
+        col: positions[n.id].col, row: positions[n.id].row,
+      }]));
+      op = { op: 'settle', positions: frozen };
+      for (const n of board.nodes) {
+        n.col = frozen[n.id].col;
+        n.row = frozen[n.id].row;
+      }
+      board.placed = { ...frozen };
+      board.settled = true;
+      break;
+    }
+
     case 'remove': {
       // Collected, not filtered: see sweepRemoved. The placement goes now, so
       // a node re-drawn later in the same run still starts unplaced.
@@ -483,7 +511,7 @@ function applyOne(board, op, sweep) {
   }
   if (op.op !== 'clear') record();
   board.rev++;
-  return { ok: true, fresh };
+  return { ok: true, fresh, op };
 }
 
 /**
@@ -523,7 +551,7 @@ export function applyOps(board, ops) {
     if (sweep.ids.length && TOUCHES_LISTS.has(op.op)) sweepRemoved(board, sweep);
     const r = applyOne(board, op, sweep);
     if (!r.ok) errors.push(r.error);
-    else applied.push(op);
+    else applied.push(r.op);
     for (const k of /** @type {(keyof Fresh)[]} */ (Object.keys(all))) all[k].push(...r.fresh[k]);
   }
   sweepRemoved(board, sweep);
@@ -552,6 +580,7 @@ export function boardOps(board) {
     if (line.edge) s.edge = line.edge;
     ops.push(s);
   }
+  if (board.settled) ops.push({ op: 'settle', positions: assign(board) });
   if (board.active != null) ops.push({ op: 'focus', step: board.active });
   return ops;
 }

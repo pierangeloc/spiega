@@ -23,6 +23,7 @@ MCP tool. Ops are applied in order and the board is their accumulation.
 | `focus` | light one step; `null` clears | `step` (0-based) |
 | `remove` | delete a node and everything touching it | `id` |
 | `clear` | wipe the board | `keepTitle` |
+| `settle` | tidy the finished board once, then freeze its positions | `positions` (recorded result; omit when asking to settle) |
 
 `id` is optional — a label becomes one, so `"API Gateway"` is `api-gateway`.
 Pass it when you will refer to the node in an edge, which is most of the time.
@@ -196,6 +197,28 @@ layout consults them:
 Reach for these last. A layout you pinned by hand stops adapting as the board
 grows, and the common reason for wanting them — "this box is in the wrong
 place" — is usually an edge that has not been drawn yet.
+
+### Handing it over
+
+`spiega settle` (MCP: `board_settle`, op: `{"op":"settle"}`) gives dagre one
+turn at the ranks and the order inside each rank, when the explanation is
+finished. Not between draw batches, and not after a timer: thinking is not
+finishing. The renderer still owns pixels, tag-sized gutters and boundaries.
+
+The op records its result as `positions: {id: {col, row}}` and writes those
+coordinates onto the nodes. Replay shows the incremental drawing first and
+that reflow last, even after a restart or a dagre update. Explicit `col` and
+`row` hints stay fixed; `place` relations constrain the new placement. Absolute
+coordinates win if a hint contradicts them. New boxes use free slots without
+moving the frozen ones. `clear` starts an unsettled explanation again.
+
+Snapshot, narrate and replay settle implicitly if the board has never settled.
+They do not reflow it again after feedback adds another box. A whole-file spec
+can ask for the same final moment with `"settle": true`.
+
+This does not route a long edge through intermediate columns. Dagre's dummy
+nodes and pixel coordinates are not passed into the renderer, so a multi-column
+edge can still cross a box. Settle is ordering, not a guarantee of clear routes.
 
 ## The flow, and the script
 
