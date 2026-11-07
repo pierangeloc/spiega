@@ -134,6 +134,9 @@
   .caption[hidden]{display:none}
   .caption.on{opacity:1}
   .caption b{color:var(--accent)}
+  /* A failed handover must stay in the viewport even when the toolbar makes
+     the board wider than a narrow pane. Ordinary replay captions follow it. */
+  .caption.problem{position:fixed;left:50vw;max-width:min(680px,88vw)}
   .warnings{position:absolute;left:0;right:0;top:0;z-index:6}
   /* flex-wrap, because a board is often a narrow split pane and the sentence
      that matters is the second half of this one. Without it the warning reads
@@ -517,7 +520,7 @@ $('voicepick').onchange = e => {
 
 async function narrate(action = () => narrator.toggle()) {
   if (!narrator.available) { $('narrate').textContent = 'no voice'; return; }
-  await finish();
+  if (!await finish()) return;
   action();
 }
 $('narrate').onclick = () => narrate();
@@ -627,8 +630,9 @@ function panTo(key) {
 }
 
 /* Put a line on screen, or clear it. */
-function say(text) {
+function say(text, problem = false) {
   const c = $('caption');
+  c.classList.toggle('problem', problem);
   if (!text) { c.classList.remove('on'); setTimeout(() => { if (!c.classList.contains('on')) c.hidden = true; }, 320); return; }
   c.innerHTML = mdish(text);
   c.hidden = false;
@@ -649,7 +653,7 @@ function stopReplay() {
 
 async function replay() {
   if (replaying) return stopReplay();
-  await finish();
+  if (!await finish()) return;
   const log = (board?.log || []).filter(e => e.op !== 'focus' && e.op !== 'clear');
   if (!log.length) return;
 
@@ -707,15 +711,22 @@ async function post(ops) {
 }
 
 async function finish() {
-  if (!board || board.settled || !board.nodes.length || replaying) return;
-  const response = await fetch(API + 'settle', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
-  });
-  if (!response.ok) throw new Error('spiega could not settle this board');
-  const result = await response.json();
-  // The stream may have delivered this already; otherwise show the result
-  // before starting the tape, rather than speaking over the old arrangement.
-  if (result.board.rev !== board.rev) onState(result.board);
+  if (!board || board.settled || !board.nodes.length || replaying) return true;
+  try {
+    const response = await fetch(API + 'settle', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    });
+    if (!response.ok) throw new Error('settle request failed');
+    const result = await response.json();
+    // The stream may have delivered this already; otherwise show the result
+    // before starting the tape, rather than speaking over the old arrangement.
+    if (result.board.rev !== board.rev) onState(result.board);
+    say(null);
+    return true;
+  } catch {
+    say('spiega could not tidy this board — narration and replay have not started. Try again when the server is connected.', true);
+    return false;
+  }
 }
 
 function onState(b, fresh) {

@@ -4,11 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { emptyBoard, applyOps, boardOps } from '../src/board/state.js';
+import vm from 'node:vm';
+import { emptyBoard, applyOps as applyStateOps, boardOps } from '../src/board/state.js';
+import { applySettlingOps as applyOps } from '../src/board/settle.js';
 import { assign } from '../src/render/layout.js';
 import { specToOps } from '../src/spec.js';
 
 const spec = JSON.parse(fs.readFileSync(new URL('./boards/issue-96-long-span.json', import.meta.url)));
+assert.match(applyStateOps(emptyBoard(), { op: 'settle' }).errors[0], /positions must be an object/,
+  'state requires recorded coordinates and never computes dagre');
 const board = emptyBoard();
 applyOps(board, specToOps({ ...spec, settle: false }));
 const before = assign(board);
@@ -30,6 +34,17 @@ assert.deepEqual(assign(compact), assign(board));
 assert.equal(compact.settled, true);
 console.log('  ok  settle reorders the long-span board and logs replayable positions');
 
+const branches = JSON.parse(fs.readFileSync(new URL('./boards/issue-96-interleaved-branches.json', import.meta.url)));
+const branched = emptyBoard();
+applyStateOps(branched, specToOps({ ...branches, settle: false }));
+const crossings = placed => branches.edges.reduce((total, a, i) => total + branches.edges.slice(i + 1).filter(b =>
+  placed[a.from].col === placed[b.from].col && placed[a.to].col === placed[b.to].col
+  && (placed[a.from].row - placed[b.from].row) * (placed[a.to].row - placed[b.to].row) < 0).length, 0);
+assert.equal(crossings(assign(branched)), 4);
+applyOps(branched, { op: 'settle' });
+assert.equal(crossings(assign(branched)), 0);
+console.log('  ok  settle removes all four between-rank crossings from interleaved branches');
+
 // A stored result is authoritative, not a request to run the current dagre.
 const frozen = emptyBoard();
 applyOps(frozen, [
@@ -47,9 +62,20 @@ assert.deepEqual(assign(frozen).a, base.a);
 assert.deepEqual(assign(frozen).b, base.b);
 applyOps(frozen, { op: 'node', id: 'gap', col: 4 });
 assert.deepEqual(assign(frozen).gap, { col: 4, row: 1 }, 'feedback fills a free slot');
+const feedbackRestore = emptyBoard();
+applyStateOps(feedbackRestore, boardOps(frozen));
+assert.deepEqual(assign(feedbackRestore), assign(frozen), 'compaction keeps frozen slots and unpinned feedback');
+assert.equal(feedbackRestore.nodes.find(n => n.id === 'c').col, undefined,
+  'compaction must not pin feedback that has not been settled');
+applyOps(frozen, { op: 'node', id: 'a', col: 6, row: 3 });
+assert.deepEqual(frozen.log.find(op => op.op === 'settle').positions.a, base.a,
+  'updating a frozen node must not rewrite the old settle moment');
+const movedRestore = emptyBoard();
+applyStateOps(movedRestore, boardOps(frozen));
+assert.deepEqual(assign(movedRestore).a, { col: 6, row: 3 });
 assert.deepEqual(applyOps(frozen, { op: 'settle', positions: { a: { col: 0, row: NaN } } }).errors,
-  ['settle: positions must give every node a finite col and row']);
-assert.deepEqual(assign(frozen).a, base.a, 'bad positions do not half-apply');
+  ['settle: positions must be an object of finite col and row pairs']);
+assert.deepEqual(assign(frozen).a, { col: 6, row: 3 }, 'bad positions do not half-apply');
 applyOps(frozen, { op: 'clear' });
 assert.equal(frozen.settled, false);
 console.log('  ok  frozen positions are authoritative, feedback fills gaps, and clear unfreezes');
@@ -98,6 +124,38 @@ const removed = emptyBoard();
 applyOps(removed, [{ op: 'node', id: 'a' }, { op: 'remove', id: 'a' }, { op: 'settle' }]);
 assert.deepEqual(removed.log.at(-1).positions, {}, 'settle sees pending removes');
 console.log('  ok  cycles, disconnected nodes, dangling edges and pending removes settle safely');
+
+const page = fs.readFileSync(new URL('../src/board/board.html', import.meta.url), 'utf8');
+for (const failure of [async () => ({ ok: false }), async () => { throw new Error('offline'); },
+  async () => ({ ok: true, json: async () => { throw new Error('bad JSON'); } })]) {
+  let actions = 0, requests = 0;
+  const captions = [], button = {};
+  const b = { nodes: [{}], settled: false };
+  const handlers = new vm.Script([
+    page.match(/async function finish\(\) \{[\s\S]*?\n}/)[0],
+    page.match(/async function narrate\([\s\S]*?\n\$\('narrate'\)\.onclick = [^\n]*/)[0],
+    page.match(/async function replay\(\) \{[\s\S]*?\n}/)[0],
+    '({ click: () => $("narrate").onclick(), next: () => narrate(() => narrator.next()),',
+    'prev: () => narrate(() => narrator.prev()), replay })',
+  ].join('\n')).runInNewContext({
+    board: b, replaying: false, API: '/', Error,
+    fetch: async () => { requests++; return failure(); },
+    $: () => button, say: text => captions.push(text),
+    narrator: { available: true, toggle: () => actions++, next: () => actions++, prev: () => actions++ },
+  });
+  await handlers.click();
+  await handlers.next();
+  await handlers.prev();
+  await handlers.replay();
+  assert.equal(actions, 0, 'failed settle does not start a transport action');
+  assert.equal(captions.length, 4);
+  assert.match(captions[0], /could not tidy this board/);
+  b.settled = true;
+  await handlers.next();
+  assert.equal(requests, 4, 'settled transport keys make no network request');
+  assert.equal(actions, 1);
+}
+console.log('  ok  narration and replay handle HTTP, network and JSON settle failures without rejection');
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-settle-'));
 process.env.HOME = home;

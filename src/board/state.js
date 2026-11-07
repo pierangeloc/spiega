@@ -15,9 +15,6 @@
    `node:fs`. Importing one here takes the whole page down with it.
    ============================================================ */
 
-import { settlePositions } from './settle.js';
-import { assign } from '../render/layout.js';
-
 /** @typedef {import('../render/layout.js').Placed} Placed */
 
 /**
@@ -135,7 +132,7 @@ import { assign } from '../render/layout.js';
 /** @typedef {{op: 'flow', steps?: FlowStep[]}} FlowOp */
 /** @typedef {{op: 'focus', step?: number|string|null}} FocusOp */
 /** @typedef {{op: 'remove', id: string}} RemoveOp */
-/** @typedef {{op: 'settle', positions?: Placed}} SettleOp */
+/** @typedef {{op: 'settle', positions: Placed}} SettleOp */
 /**
  * @typedef {ClearOp | TitleOp | SayOp | TagOp | NodeOp | EdgeOp | CalloutOp
  *   | BoundaryOp | StepOp | FlowOp | FocusOp | RemoveOp | SettleOp} Op
@@ -407,6 +404,14 @@ function applyOne(board, op, sweep) {
       /** @type {Node} */
       const n = { ...fields, id, kind: op.op === 'note' ? 'note' : (fields.kind || 'service') };
       if (upsert(board.nodes, n, x => x.id, indexesFor(board).nodes)) fresh.nodes.push(n.id);
+      // Keep frozen slots current without pinning feedback nodes, or mutating
+      // the coordinates held by an earlier settle op in the log.
+      if (board.placed[id]) {
+        board.placed[id] = {
+          col: fields.col ?? board.placed[id].col,
+          row: fields.row ?? board.placed[id].row,
+        };
+      }
       break;
     }
 
@@ -473,19 +478,21 @@ function applyOne(board, op, sweep) {
       break;
 
     case 'settle': {
-      const positions = op.positions ?? settlePositions(board);
+      const positions = op.positions;
       if (!positions || typeof positions !== 'object' || Array.isArray(positions)
-        || board.nodes.some(n => !positions[n.id]
-          || !Number.isFinite(positions[n.id].col) || !Number.isFinite(positions[n.id].row))) {
-        return { ok: false, error: 'settle: positions must give every node a finite col and row', fresh };
+        || Object.values(positions).some(p => !p || !Number.isFinite(p.col) || !Number.isFinite(p.row))) {
+        return { ok: false, error: 'settle: positions must be an object of finite col and row pairs', fresh };
       }
       // The log carries the answer, not just a request to run today's dagre.
       // Restores and browser replay therefore show exactly the same handover.
-      const frozen = Object.fromEntries(board.nodes.map(n => [n.id, {
+      // Compaction copies only the frozen subset. Feedback drawn since then
+      // stays unpinned instead of gaining a new layout just because we saved.
+      const frozen = Object.fromEntries(board.nodes.filter(n => positions[n.id]).map(n => [n.id, {
         col: positions[n.id].col, row: positions[n.id].row,
       }]));
       op = { op: 'settle', positions: frozen };
       for (const n of board.nodes) {
+        if (!frozen[n.id]) continue;
         n.col = frozen[n.id].col;
         n.row = frozen[n.id].row;
       }
@@ -580,7 +587,7 @@ export function boardOps(board) {
     if (line.edge) s.edge = line.edge;
     ops.push(s);
   }
-  if (board.settled) ops.push({ op: 'settle', positions: assign(board) });
+  if (board.settled) ops.push({ op: 'settle', positions: { ...board.placed } });
   if (board.active != null) ops.push({ op: 'focus', step: board.active });
   return ops;
 }

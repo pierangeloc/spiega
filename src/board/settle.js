@@ -3,9 +3,44 @@
    gets a turn when the explanation is handed over. Keep its ranks and order;
    the board's layout still owns the size of the ink and the air around it. */
 import { graphlib, layout } from '../../vendor/dagre.esm.js';
+import { applyOps } from './state.js';
 
 /** @typedef {import('./state.js').Node} Node */
 /** @typedef {import('../render/layout.js').Placed} Placed */
+/** @typedef {import('./state.js').Op | {op: 'settle'}} DrawingOp */
+
+/* Only callers author a fresh layout. State and browser replay consume the
+   recorded coordinates without loading dagre. Split a batch at each request
+   so the calculation sees every earlier draw or removal, but nothing later. */
+/** @param {import('./state.js').Board} board @param {DrawingOp|DrawingOp[]} ops */
+export function applySettlingOps(board, ops) {
+  const list = Array.isArray(ops) ? ops : [ops];
+  if (!list.some(op => op?.op === 'settle' && !('positions' in op))) {
+    return applyOps(board, /** @type {import('./state.js').Op[]} */ (list));
+  }
+  /** @type {import('./state.js').ApplyOpsResult} */
+  const result = { fresh: { nodes: [], edges: [], boundaries: [] }, errors: [], applied: [] };
+  /** @param {import('./state.js').Op[]} batch */
+  const apply = batch => {
+    const next = applyOps(board, batch);
+    for (const key of /** @type {(keyof import('./state.js').Fresh)[]} */ (Object.keys(result.fresh))) {
+      result.fresh[key].push(...next.fresh[key]);
+    }
+    result.errors.push(...next.errors);
+    result.applied.push(...next.applied);
+  };
+  /** @type {import('./state.js').Op[]} */
+  let batch = [];
+  for (const op of list) {
+    if (op?.op === 'settle' && !('positions' in op)) {
+      apply(batch);
+      batch = [];
+      apply([{ op: 'settle', positions: settlePositions(board) }]);
+    } else batch.push(/** @type {import('./state.js').Op} */ (op));
+  }
+  apply(batch);
+  return result;
+}
 
 /**
  * @param {{nodes: Node[], edges: import('./state.js').Edge[]}} board

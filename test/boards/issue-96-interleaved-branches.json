@@ -1,0 +1,23 @@
+{
+  "title": "Three branches declared out of flow order",
+  "settle": true,
+  "nodes": [
+    { "id": "a1", "label": "Branch A" },
+    { "id": "b1", "label": "Branch B" },
+    { "id": "c1", "label": "Branch C" },
+    { "id": "c2", "label": "Stage C" },
+    { "id": "a2", "label": "Stage A" },
+    { "id": "b2", "label": "Stage B" },
+    { "id": "b3", "label": "Sink B" },
+    { "id": "c3", "label": "Sink C" },
+    { "id": "a3", "label": "Sink A" }
+  ],
+  "edges": [
+    { "from": "a1", "to": "a2", "label": "A" },
+    { "from": "a2", "to": "a3", "label": "A" },
+    { "from": "b1", "to": "b2", "label": "B" },
+    { "from": "b2", "to": "b3", "label": "B" },
+    { "from": "c1", "to": "c2", "label": "C" },
+    { "from": "c2", "to": "c3", "label": "C" }
+  ]
+}

@@ -212,6 +212,11 @@ that reflow last, even after a restart or a dagre update. Explicit `col` and
 coordinates win if a hint contradicts them. New boxes use free slots without
 moving the frozen ones. `clear` starts an unsettled explanation again.
 
+The server resolves a fresh request before passing the op to state. State,
+restore and browser replay require recorded `positions` and never load dagre.
+Compaction copies the stored frozen positions, leaving feedback nodes that have
+not been settled unpinned; a compacted settle may therefore name only a subset.
+
 Snapshot, narrate and replay settle implicitly if the board has never settled.
 They do not reflow it again after feedback adds another box. A whole-file spec
 can ask for the same final moment with `"settle": true`.

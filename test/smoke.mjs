@@ -4035,6 +4035,8 @@ await atest('nothing the browser imports reaches for a node builtin', async () =
 
   assert.deepEqual(bad, [], 'the board page would fail to load:\n  ' + bad.join('\n  '));
   assert.ok(seen.size >= 8, 'the walk should reach the whole renderer, not stop at the first file');
+  assert.ok(![...seen].some(file => file.includes('/vendor/') || file.endsWith('/board/settle.js')),
+    'an unsettled board page must not fetch or evaluate dagre');
 });
 
 await atest('the board server belongs to this machine, not to the web', async () => {

@@ -6,9 +6,9 @@
     { "id": "wf", "label": "Workflow" },
     { "id": "notif", "label": "Notification" },
     { "id": "rcpt", "label": "Recipient" },
-    { "id": "log", "kind": "datastore", "label": "Log" },
+    { "id": "log", "kind": "datastore", "label": "notifications table" },
     { "id": "cmd", "kind": "queue", "label": "Command" },
-    { "id": "cns", "label": "Console" },
+    { "id": "cns", "label": "CNS" },
     { "id": "res", "kind": "queue", "label": "Result" },
     { "id": "consumer", "label": "Consumer" }
   ],

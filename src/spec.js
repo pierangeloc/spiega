@@ -13,6 +13,8 @@
    nobody, which is the kind of mistake that shows up in a picture.
    ============================================================ */
 
+import { settlePositions } from './board/settle.js';
+
 /**
  * @param {any} spec a board as a single object
  * @returns {any[]} the ops that draw it, in drawing order
@@ -32,7 +34,9 @@ export function specToOps(spec) {
      over time; this one does not have to be edited again when it does. */
   for (const t of spec.transcript || [])
     ops.push({ op: 'say', ...(typeof t === 'string' ? { text: t } : t) });
-  if (spec.settle) ops.push({ op: 'settle' });
+  if (spec.settle) ops.push({ op: 'settle', positions: settlePositions({
+    nodes: spec.nodes || [], edges: spec.edges || [],
+  }) });
   return ops;
 }
 

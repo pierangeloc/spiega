@@ -24,6 +24,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps, boardOps } from './state.js';
+import { settlePositions, applySettlingOps } from './settle.js';
 import { restoreBoard, createLog, boardLogFile } from './log.js';
 import { home } from '../home.js';
 
@@ -198,7 +199,9 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
 
   const settle = entry => {
     if (entry.board.settled || !entry.board.nodes.length) return;
-    const { fresh, errors, applied } = applyOps(entry.board, { op: 'settle' });
+    const { fresh, errors, applied } = applyOps(entry.board, {
+      op: 'settle', positions: settlePositions(entry.board),
+    });
     if (errors.length) throw new Error(errors.join('; '));
     entry.log?.push(applied);
     broadcast(entry, 'patch', { board: entry.board, fresh });
@@ -326,7 +329,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
       /* applyOps refuses what it can see is wrong; this is for what it cannot,
          so a malformed batch still costs one request rather than the process.
          The body itself can be `null`, so even reading `ops.ops` is in here. */
-      try { result = applyOps(board, ops && ops.ops ? ops.ops : ops); }
+      try { result = applySettlingOps(board, ops && ops.ops ? ops.ops : ops); }
       catch (e) { return failedOp(res, e); }
       const { fresh, errors, applied } = result;
       /* No file I/O and no await here: the ops go into the log writer's buffer
