@@ -216,6 +216,7 @@ async function send(ops, { quiet = false } = {}) {
   const body = await res.json().catch(() => ({}));
   if (!quiet) {
     if (body.errors?.length) console.error(body.errors.join('\n'));
+    if (body.warnings?.length) console.error(body.warnings.join('\n'));
     console.log(`${url}  ${body.nodes ?? 0} boxes, ${body.edges ?? 0} lines, ${body.steps ?? 0} steps`);
   }
   // A rejected op must not leave a zero exit behind the summary line: scripts

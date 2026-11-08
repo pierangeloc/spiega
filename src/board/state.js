@@ -15,6 +15,8 @@
    `node:fs`. Importing one here takes the whole page down with it.
    ============================================================ */
 
+import { KINDS } from '../render/glyphs.js';
+
 /** @typedef {import('../render/layout.js').Placed} Placed */
 
 /**
@@ -141,7 +143,7 @@
 
 /** @typedef {{nodes: string[], edges: string[], boundaries: string[]}} Fresh */
 /** @typedef {{ok: true, fresh: Fresh, op: Op} | {ok: false, error: string, fresh: Fresh}} ApplyResult */
-/** @typedef {{fresh: Fresh, errors: string[], applied: Op[]}} ApplyOpsResult */
+/** @typedef {{fresh: Fresh, errors: string[], warnings: string[], applied: Op[]}} ApplyOpsResult */
 
 /** @returns {Board} */
 export const emptyBoard = () => ({
@@ -331,9 +333,10 @@ const notAnOp = op => {
  * @param {Board} board
  * @param {Op} op
  * @param {Sweep} sweep
+ * @param {string[]} [warnings] where applyOne says what it drew but could not draw right
  * @returns {ApplyResult}
  */
-function applyOne(board, op, sweep) {
+function applyOne(board, op, sweep, warnings = []) {
   /** @type {Fresh} */
   const fresh = { nodes: [], edges: [], boundaries: [] };
   // `applyOp` reaches here directly, so the check cannot live only in applyOps
@@ -405,6 +408,14 @@ function applyOne(board, op, sweep) {
         return { ok: false, error: `${op.op}: "lines" must be an array of strings`, fresh };
       }
       const id = fields.id || (fields.label || 'n').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+      /* A kind nobody has a glyph for falls back to a service box, so the board
+         says something confidently wrong rather than nothing — a datastore the
+         agent asked for, drawn as a plain box, and no way for it to find out.
+         The op still lands: a wrong outline mid-sentence beats a missing box,
+         and the agent can redraw the node once it has been told. */
+      if (op.op === 'node' && fields.kind && !KINDS.includes(fields.kind)) {
+        warnings.push(`node "${id}": no glyph for kind "${fields.kind}", drawn as a service. Kinds: ${KINDS.join(', ')}.`);
+      }
       /** @type {Node} */
       const n = { ...fields, id, kind: op.op === 'note' ? 'note' : (fields.kind || 'service') };
       if (upsert(board.nodes, n, x => x.id, indexesFor(board).nodes)) fresh.nodes.push(n.id);
@@ -563,6 +574,8 @@ export function applyOps(board, ops) {
   const all = { nodes: [], edges: [], boundaries: [] };
   /** @type {string[]} */
   const errors = [];
+  /** @type {string[]} */
+  const warnings = [];
   /** @type {Op[]} */
   const applied = [];
   const list = Array.isArray(ops) ? ops : [ops];
@@ -576,13 +589,13 @@ export function applyOps(board, ops) {
     // End the run of removes before anything that can see the lists, so the
     // op is applied to the board as if each remove had landed on its own.
     if (sweep.ids.length && TOUCHES_LISTS.has(op.op)) sweepRemoved(board, sweep);
-    const r = applyOne(board, op, sweep);
+    const r = applyOne(board, op, sweep, warnings);
     if (!r.ok) errors.push(r.error);
     else applied.push(r.op);
     for (const k of /** @type {(keyof Fresh)[]} */ (Object.keys(all))) all[k].push(...r.fresh[k]);
   }
   sweepRemoved(board, sweep);
-  return { fresh: all, errors, applied };
+  return { fresh: all, errors, warnings, applied };
 }
 
 /* The smallest op set that rebuilds the current board.

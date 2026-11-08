@@ -58,6 +58,31 @@ test('an unknown op is reported, not thrown', () => {
   assert.equal(errors.length, 1);
 });
 
+/* `"kind": "db"` is the mistake a real board was drawn with: two Postgres
+   tables asked for as `db`, rendered as plain service boxes, and the counts
+   that came back said `9 boxes, 9 lines` as if nothing were wrong. An unknown
+   kind cannot refuse the op — the box belongs on the board mid-sentence — so
+   it is the one thing the board has to volunteer. */
+test('a kind with no glyph is drawn, and said out loud', () => {
+  const b = emptyBoard();
+  const { errors, warnings } = applyOps(b, [
+    { op: 'node', id: 'rcpt', kind: 'db', label: 'workflow_notification_recipients' },
+    { op: 'node', id: 'wf', kind: 'service', label: 'WorkflowService' },
+  ]);
+  assert.deepEqual(errors, []);
+  assert.equal(b.nodes.length, 2, 'the box still lands');
+  assert.equal(warnings.length, 1, 'and only the unknown one is mentioned');
+  assert.match(warnings[0], /rcpt/);
+  assert.match(warnings[0], /"db"/);
+  for (const kind of KINDS) assert.match(warnings[0], new RegExp(kind), `${kind} is offered`);
+});
+
+test('every kind the renderer draws is accepted in silence', () => {
+  const b = emptyBoard();
+  const { warnings } = applyOps(b, KINDS.map((kind, i) => ({ op: 'node', id: `n${i}`, kind })));
+  assert.deepEqual(warnings, []);
+});
+
 /* `"members": "[\"a\",\"b\"]"` is the plausible mistake, not a fuzz case: the
    op body is JSON inside a tool argument, so a model hand-writing it encodes
    the list twice. It used to be stored, and the renderer then called `.map` on
