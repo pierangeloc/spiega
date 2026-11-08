@@ -19,7 +19,7 @@ export function applySettlingOps(board, ops) {
     return applyOps(board, /** @type {import('./state.js').Op[]} */ (list));
   }
   /** @type {import('./state.js').ApplyOpsResult} */
-  const result = { fresh: { nodes: [], edges: [], boundaries: [] }, errors: [], applied: [] };
+  const result = { fresh: { nodes: [], edges: [], boundaries: [] }, errors: [], warnings: [], applied: [] };
   /** @param {import('./state.js').Op[]} batch */
   const apply = batch => {
     const next = applyOps(board, batch);
@@ -27,6 +27,7 @@ export function applySettlingOps(board, ops) {
       result.fresh[key].push(...next.fresh[key]);
     }
     result.errors.push(...next.errors);
+    result.warnings.push(...next.warnings);
     result.applied.push(...next.applied);
   };
   /** @type {import('./state.js').Op[]} */

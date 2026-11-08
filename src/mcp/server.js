@@ -28,7 +28,12 @@ async function send(ops) {
   });
   const b = await r.json();
   if (b.errors?.length) throw new Error(b.errors.join('; '));
-  return `${u} — ${b.nodes} boxes, ${b.edges} lines, ${b.steps} steps`;
+  /* The counts are the whole of what an agent learns about what it just drew,
+     so anything the board could not draw properly has to arrive in the same
+     breath. It is not an error — the box is on the board — and throwing would
+     stop an explanation over a wrong outline. */
+  const summary = `${u} — ${b.nodes} boxes, ${b.edges} lines, ${b.steps} steps`;
+  return b.warnings?.length ? `${summary}\n${b.warnings.join('\n')}` : summary;
 }
 
 /* ---------- tools ---------- */

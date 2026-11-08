@@ -329,14 +329,17 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
          The body itself can be `null`, so even reading `ops.ops` is in here. */
       try { result = applySettlingOps(board, ops && ops.ops ? ops.ops : ops); }
       catch (e) { return failedOp(res, e); }
-      const { fresh, errors, applied } = result;
+      const { fresh, errors, warnings, applied } = result;
       /* No file I/O and no await here: the ops go into the log writer's buffer
          and the flush happens on its own timer. This route is on the critical
          path of somebody talking. */
       if (applied.length) entry.log?.push(applied);
       broadcast(entry, 'patch', { board, fresh });
+      /* A warning is not a refusal: the op landed, and the status says so.
+         It rides back on the same response because the agent that drew the
+         box is listening to exactly one thing, and only until its next turn. */
       return json(res, errors.length ? 207 : 200, {
-        ok: !errors.length, errors, rev: board.rev,
+        ok: !errors.length, errors, warnings, rev: board.rev,
         nodes: board.nodes.length, edges: board.edges.length, steps: board.flow.length,
         viewers: entry.clients.size,
       });
