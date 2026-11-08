@@ -342,6 +342,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
         ok: !errors.length, errors, warnings, rev: board.rev,
         nodes: board.nodes.length, edges: board.edges.length, steps: board.flow.length,
         viewers: entry.clients.size,
+        ...(ops && ops.audit ? { audit: await auditBoard(board) } : {}),
       });
     }
 
@@ -425,6 +426,28 @@ function index(res, boards) {
   res.end(`<!doctype html><meta charset=utf-8><title>spiega boards</title>` +
     `<body style="font:14px system-ui;padding:3rem"><h1 style="font-weight:600">spiega</h1>` +
     (rows ? `<ul>${rows}</ul>` : `<p>No boards yet.`));
+}
+
+/* What the drawing came out like, for the agent that cannot see it (#56).
+
+   Asked for by name — `{"ops": [...], "audit": true}` — because it costs a
+   render and most ops do not want one: a line of transcript cannot change
+   where an arrow runs. It is computed after the broadcast, so the pane has
+   already moved and the millisecond is spent on the caller's own reply rather
+   than on the drawing appearing.
+
+   A board that cannot be rendered says nothing here. The ops landed, the
+   status says so, and an explanation does not stop because the measurement
+   of it failed. */
+async function auditBoard(board) {
+  try {
+    const { renderSVG } = await import('../render/render.js');
+    const { audit, report } = await import('../render/audit.js');
+    const found = audit(board, renderSVG(board, { margin: 16, active: board.active }));
+    return { ...found, lines: report(found) };
+  } catch {
+    return null;
+  }
 }
 
 function serveFile(res, file) {

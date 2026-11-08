@@ -20,20 +20,24 @@ const url = async () => {
   return u;
 };
 
-async function send(ops) {
+async function send(ops, { audit = false } = {}) {
   const u = await url();
   const r = await fetch(u + '/op', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ ops: [].concat(ops) }),
+    body: JSON.stringify({ ops: [].concat(ops), ...(audit ? { audit: true } : {}) }),
   });
   const b = await r.json();
   if (b.errors?.length) throw new Error(b.errors.join('; '));
   /* The counts are the whole of what an agent learns about what it just drew,
      so anything the board could not draw properly has to arrive in the same
      breath. It is not an error — the box is on the board — and throwing would
-     stop an explanation over a wrong outline. */
+     stop an explanation over a wrong outline.
+
+     Counts first, because that is what is read when all is well. Then the
+     warnings, then what the drawing came out like (#56): the counts say the
+     ops were accepted, and only the audit says anything about the picture. */
   const summary = `${u} — ${b.nodes} boxes, ${b.edges} lines, ${b.steps} steps`;
-  return b.warnings?.length ? `${summary}\n${b.warnings.join('\n')}` : summary;
+  return [summary, ...(b.warnings || []), ...(b.audit?.lines || [])].join('\n');
 }
 
 /* ---------- tools ---------- */
@@ -77,7 +81,12 @@ const TOOLS = [
       '  {"op":"tag","match":"Flyway V25","step":6}   ties a line said earlier; step:null unties it\n' +
       '  {"op":"title","text":"Placing an order"}\n' +
       'Columns are derived from the edges, so draw a node and then the edge into it and it lands in the right place. ' +
-      'Draw a few things at a time as you explain them — not the whole diagram in one call.',
+      'Draw a few things at a time as you explain them — not the whole diagram in one call.\n' +
+      'The reply says what the drawing came out like, since you cannot see it: a line such as ' +
+      '"2 arrows cross a box that is not an end of it" means the picture is crowded, not that an op failed. ' +
+      'It is about the next thing you draw, not the last one — stop adding to this board and tell the person, ' +
+      'who is the one looking at it. Redrawing the same ops cannot help, since layout is derived and the same ' +
+      'board gives the same picture; drawing a different board (one fewer note, a shorter label) can.',
     inputSchema: {
       type: 'object', required: ['ops'],
       properties: {
@@ -228,10 +237,13 @@ async function call(name, args = {}) {
     }
 
     case 'board_draw':
-      return send(listArg(args.ops, 'ops'));
+      return send(listArg(args.ops, 'ops'), { audit: true });
 
+    /* The settled board is the one the person is left with, so its measurement
+       is the one that counts: everything before it was drawn against positions
+       that settling may still move. */
     case 'board_settle':
-      return send([{ op: 'settle' }]);
+      return send([{ op: 'settle' }], { audit: true });
 
     case 'board_step':
       return send([{ op: 'focus', step: args.step == null ? null : Number(args.step) - 1 }]);
