@@ -51,6 +51,7 @@
  * @property {boolean} [async]
  * @property {string} [style]
  * @property {string} [bend]
+ * @property {import('../render/layout.js').Placement[]} [via]
  */
 
 /**
@@ -115,6 +116,7 @@
  * @property {Placed} placed
  * @property {LogEntry[]} log
  * @property {number} rev
+ * @property {boolean} settled
  */
 
 /* The wire format: one object per line in the log and one POST body per op. */
@@ -131,13 +133,14 @@
 /** @typedef {{op: 'flow', steps?: FlowStep[]}} FlowOp */
 /** @typedef {{op: 'focus', step?: number|string|null}} FocusOp */
 /** @typedef {{op: 'remove', id: string}} RemoveOp */
+/** @typedef {{op: 'settle', positions: Placed, routes?: Record<string, import('../render/layout.js').Placement[]>}} SettleOp */
 /**
  * @typedef {ClearOp | TitleOp | SayOp | TagOp | NodeOp | EdgeOp | CalloutOp
- *   | BoundaryOp | StepOp | FlowOp | FocusOp | RemoveOp} Op
+ *   | BoundaryOp | StepOp | FlowOp | FocusOp | RemoveOp | SettleOp} Op
  */
 
 /** @typedef {{nodes: string[], edges: string[], boundaries: string[]}} Fresh */
-/** @typedef {{ok: true, fresh: Fresh} | {ok: false, error: string, fresh: Fresh}} ApplyResult */
+/** @typedef {{ok: true, fresh: Fresh, op: Op} | {ok: false, error: string, fresh: Fresh}} ApplyResult */
 /** @typedef {{fresh: Fresh, errors: string[], applied: Op[]}} ApplyOpsResult */
 
 /** @returns {Board} */
@@ -157,6 +160,7 @@ export const emptyBoard = () => ({
   // there is lost the moment it is drawn.
   log: [],
   rev: 0,
+  settled: false,
 });
 
 export const LOG_CAP = 4000;
@@ -261,7 +265,7 @@ const sweepRemoved = (board, sweep) => {
 /* The ops that read or write the four lists a sweep touches. `clear` is not
    here because it replaces the lists wholesale — it resets the sweep instead
    of paying for a sweep nobody will see. */
-const TOUCHES_LISTS = new Set(['node', 'note', 'edge', 'callout', 'boundary']);
+const TOUCHES_LISTS = new Set(['node', 'note', 'edge', 'callout', 'boundary', 'settle']);
 
 /**
  * @template T
@@ -297,6 +301,9 @@ const edgeId = e => `${e.from}>${e.to}`;
    string where the elements are read is the inconsistency this closes. */
 /** @param {unknown} value */
 const stringIds = value => Array.isArray(value) && value.every(v => typeof v === 'string');
+
+/** @param {unknown} value */
+const waypoints = value => Array.isArray(value) && value.every(p => p && Number.isFinite(p.col) && Number.isFinite(p.row));
 
 /* An op is an object with a string `op` naming the operation. Anything else is
    refused rather than read: `[null]` in an ops array — the other thing a client
@@ -401,12 +408,23 @@ function applyOne(board, op, sweep) {
       /** @type {Node} */
       const n = { ...fields, id, kind: op.op === 'note' ? 'note' : (fields.kind || 'service') };
       if (upsert(board.nodes, n, x => x.id, indexesFor(board).nodes)) fresh.nodes.push(n.id);
+      // Keep frozen slots current without pinning feedback nodes, or mutating
+      // the coordinates held by an earlier settle op in the log.
+      if (board.placed[id]) {
+        board.placed[id] = {
+          col: fields.col ?? board.placed[id].col,
+          row: fields.row ?? board.placed[id].row,
+        };
+      }
       break;
     }
 
     case 'edge': {
       const { op: _op, ...fields } = op;
       if (!fields.from || !fields.to) break;
+      if (fields.via !== undefined && !waypoints(fields.via)) {
+        return { ok: false, error: 'edge: via must be an array of finite col and row pairs', fresh };
+      }
       /** @type {Edge} */
       const e = { ...fields, from: fields.from, to: fields.to };
       if (upsert(board.edges, e, edgeId, indexesFor(board).edges)) fresh.edges.push(edgeId(e));
@@ -466,6 +484,43 @@ function applyOne(board, op, sweep) {
         : Math.max(0, Math.min(board.flow.length - 1, Number(op.step)));
       break;
 
+    case 'settle': {
+      const positions = op.positions;
+      if (!positions || typeof positions !== 'object' || Array.isArray(positions)
+        || Object.values(positions).some(p => !p || !Number.isFinite(p.col) || !Number.isFinite(p.row))) {
+        return { ok: false, error: 'settle: positions must be an object of finite col and row pairs', fresh };
+      }
+      if (op.routes !== undefined && (!op.routes || typeof op.routes !== 'object' || Array.isArray(op.routes)
+        || Object.values(op.routes).some(v => !waypoints(v)))) {
+        return { ok: false, error: 'settle: routes must be an object of waypoint arrays', fresh };
+      }
+      // The log carries the answer, not just a request to run today's dagre.
+      // Restores and browser replay therefore show exactly the same handover.
+      // Compaction copies only the frozen subset. Feedback drawn since then
+      // stays unpinned instead of gaining a new layout just because we saved.
+      const frozen = Object.fromEntries(board.nodes.filter(n => positions[n.id]).map(n => [n.id, {
+        col: positions[n.id].col, row: positions[n.id].row,
+      }]));
+      /** @type {NonNullable<SettleOp['routes']>} */
+      const routes = {};
+      for (const e of board.edges) {
+        const via = op.routes?.[edgeId(e)];
+        if (via?.length) {
+          routes[edgeId(e)] = via.map(p => ({ col: p.col, row: p.row }));
+          e.via = routes[edgeId(e)].map(p => ({ ...p }));
+        } else delete e.via;
+      }
+      op = { op: 'settle', positions: frozen, ...(op.routes ? { routes } : {}) };
+      for (const n of board.nodes) {
+        if (!frozen[n.id]) continue;
+        n.col = frozen[n.id].col;
+        n.row = frozen[n.id].row;
+      }
+      board.placed = { ...frozen };
+      board.settled = true;
+      break;
+    }
+
     case 'remove': {
       // Collected, not filtered: see sweepRemoved. The placement goes now, so
       // a node re-drawn later in the same run still starts unplaced.
@@ -483,7 +538,7 @@ function applyOne(board, op, sweep) {
   }
   if (op.op !== 'clear') record();
   board.rev++;
-  return { ok: true, fresh };
+  return { ok: true, fresh, op };
 }
 
 /**
@@ -523,7 +578,7 @@ export function applyOps(board, ops) {
     if (sweep.ids.length && TOUCHES_LISTS.has(op.op)) sweepRemoved(board, sweep);
     const r = applyOne(board, op, sweep);
     if (!r.ok) errors.push(r.error);
-    else applied.push(op);
+    else applied.push(r.op);
     for (const k of /** @type {(keyof Fresh)[]} */ (Object.keys(all))) all[k].push(...r.fresh[k]);
   }
   sweepRemoved(board, sweep);
@@ -552,6 +607,9 @@ export function boardOps(board) {
     if (line.edge) s.edge = line.edge;
     ops.push(s);
   }
+  if (board.settled) ops.push({ op: 'settle', positions: { ...board.placed },
+    routes: Object.fromEntries(board.edges.filter(e => e.via?.length).map(e => [edgeId(e), (e.via || []).map(p => ({ ...p }))])),
+  });
   if (board.active != null) ops.push({ op: 'focus', step: board.active });
   return ops;
 }

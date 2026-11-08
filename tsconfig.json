@@ -22,6 +22,7 @@
   },
   "include": [
     "src/board/state.js",
+    "src/board/settle.js",
     "src/board/script.js",
     "src/render/render.js",
     "src/render/layout.js",

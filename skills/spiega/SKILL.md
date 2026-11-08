@@ -239,6 +239,18 @@ or when someone asks to see it once more; it is the cheapest thing in the tool.
 
 ## Finishing
 
+When the explanation is over, hand the board to the person:
+
+```bash
+spiega settle
+```
+
+MCP: `board_settle`. The board tidies ranks and in-column order once, then
+freezes the result so feedback can add boxes without moving the ones being
+read. Do not settle between batches while you are still explaining. Replay,
+narrate and snapshot also settle a board that has not settled yet, and replay
+keeps the incremental drawing followed by that final reflow.
+
 ```bash
 spiega snapshot -o docs/order-flow.html
 ```

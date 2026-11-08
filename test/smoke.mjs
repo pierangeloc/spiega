@@ -1353,13 +1353,13 @@ await atest('a replay can be asked for remotely, and re-sends nothing', async ()
     await settle();
 
     const r = await (await fetch(U + '/replay')).json();
-    assert.equal(r.ops, 4, 'the log is what gets replayed');
+    assert.equal(r.ops, 5, 'the log includes the final settle moment');
     assert.equal(r.viewers, 1);
     await settle();
     const all = frames.join('');
     assert.ok(/event: replay/.test(all), 'the viewer should be told to replay');
-    assert.equal((all.match(/event: patch/g) || []).length, 1,
-      'asking for a replay must not push the ops again');
+    assert.equal((all.match(/event: patch/g) || []).length, 2,
+      'replay adds only the settle patch, not the drawing ops again');
     await reader.cancel().catch(() => {});
     await pump;
   } finally {
@@ -1835,7 +1835,7 @@ await atest('the MCP server exits when its client closes the pipe', async () => 
     child.stdout.once('data', d => { clearTimeout(t); res(JSON.parse(String(d).split('\n')[0])); });
   });
   const names = reply.result.tools.map(t => t.name);
-  for (const want of ['board_say', 'board_tag', 'board_script', 'board_replay']) {
+  for (const want of ['board_say', 'board_tag', 'board_script', 'board_replay', 'board_settle']) {
     assert.ok(names.includes(want), `tools/list should offer ${want}`);
   }
 
@@ -1922,6 +1922,12 @@ await atest('board_draw and board_tag take their list as a JSON string, as some 
     const tagged = await callTool('board_tag', { tags: JSON.stringify([{ match: 'checks the token', step: 1 }]) });
     assert.ok(!tagged.isError, 'a stringified array of tags should tag: ' + tagged.content[0].text);
     assert.deepEqual(scriptSteps(await state()), [0]);
+    const settled = await callTool('board_settle', {});
+    assert.ok(!settled.isError, settled.content[0].text);
+    const finished = await state();
+    assert.equal(finished.settled, true);
+    assert.equal(finished.log.at(-1).op, 'settle');
+    assert.ok(finished.log.at(-1).positions.gw);
   } finally {
     child.stdin.end();
     child.kill('SIGKILL');
@@ -4029,6 +4035,8 @@ await atest('nothing the browser imports reaches for a node builtin', async () =
 
   assert.deepEqual(bad, [], 'the board page would fail to load:\n  ' + bad.join('\n  '));
   assert.ok(seen.size >= 8, 'the walk should reach the whole renderer, not stop at the first file');
+  assert.ok(![...seen].some(file => file.includes('/vendor/') || file.endsWith('/board/settle.js')),
+    'an unsettled board page must not fetch or evaluate dagre');
 });
 
 await atest('the board server belongs to this machine, not to the web', async () => {
@@ -4046,6 +4054,13 @@ await atest('a board that is not being saved says so', async () => {
   const { stdout } = await promisify(execFile)(
     process.execPath, [path.join(ROOT, 'test/saving.mjs')],
     { env: { ...process.env }, maxBuffer: 4 << 20 });
+  process.stdout.write(stdout);
+});
+
+await atest('finished boards settle once, with replayable coordinates', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { stdout } = await promisify(execFile)(process.execPath, [path.join(ROOT, 'test/settle.mjs')]);
   process.stdout.write(stdout);
 });
 

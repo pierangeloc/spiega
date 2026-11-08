@@ -122,7 +122,7 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   /** @param {{e: any, key: string}} r */
   const stepFor = r => (r.e.step != null ? r.e.step : (stepOf[r.key] ?? null));
   // the gutters are sized for the tags that cross them, step numbers included
-  const { boxes, width, height } = layout({ nodes, edges, boundaries: spec.boundaries }, place, e => stepFor({ e, key: edgeKey(e) }));
+  const { boxes, lanes, width, height } = layout({ nodes, edges, boundaries: spec.boundaries }, place, e => stepFor({ e, key: edgeKey(e) }));
   const focus = focusAt(spec, steps, active);
   const notches = notchSides(nodes, edges);
 
@@ -145,7 +145,7 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
       box.inkSpan = side => inkSpan(n, box, side);
     }
   }
-  const planned = planEdges(edges, boxes);
+  const planned = planEdges(edges, boxes, lanes);
   /* The rectangles a boundary is drawn as, and the cards that carry its name.
      A boundary that cannot be one true rectangle is drawn as several, and each
      piece carries its own card, and the card says which piece it is. */
