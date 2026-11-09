@@ -2932,46 +2932,9 @@ await atest('a box is centred in its own slack, not with a pinned neighbour', as
    The synthetic board is not the one #48 was reported from, which is not
    available. It has the shape the report describes — one store fanning out to
    seven rules that reconverge on two budgets, a note among them and a callout
-   aimed into the fan — and it is here because it broke in the same ways. */
-const sevenWayFan = {
-  title: 'seven rules, two budgets (synthetic, the shape of #48)',
-  nodes: [
-    { id: 'store', kind: 'datastore', label: 'cohort store', sub: 'daily snapshots' },
-    { id: 'r1', kind: 'service', label: 'rule 1', sub: 'tenure bands' },
-    { id: 'r2', kind: 'service', label: 'rule 2', sub: 'first vs second month' },
-    { id: 'r3', kind: 'service', label: 'rule 3', sub: 'dormancy bands' },
-    { id: 'r4', kind: 'service', label: 'rule 4', sub: 'span ladder' },
-    { id: 'r5', kind: 'service', label: 'rule 5', sub: 'speed' },
-    { id: 'r6', kind: 'service', label: 'rule 6', sub: 'drift' },
-    { id: 'r7', kind: 'service', label: 'rule 7', sub: 'convergence' },
-    { id: 'cost', kind: 'service', label: 'cost budget', sub: '0.15 per account' },
-    { id: 'risk', kind: 'service', label: 'risk budget', sub: 'two sigma' },
-    { id: 'ext', kind: 'service', label: 'extremes de-risk', sub: 'clip the tails' },
-    { id: 'out', kind: 'datastore', label: 'decisions' },
-    { id: 'n1', kind: 'note', label: 'every rule reads the same snapshot', col: 1, row: 7 },
-    { id: 'n2', kind: 'note', label: 'budgets are checked after every rule', col: 2, row: 2 },
-  ],
-  edges: [
-    { from: 'store', to: 'r1', label: '40 / 160 / 320 days' },
-    { from: 'store', to: 'r2', label: 'first month vs second month' },
-    { from: 'store', to: 'r3', label: '0 / 120 / 240 days' },
-    { from: 'store', to: 'r4', label: '3 spans 8 16 32 64' },
-    { from: 'store', to: 'r5', label: 'speed' },
-    { from: 'store', to: 'r6', label: 'drift' },
-    { from: 'store', to: 'r7', label: 'convergent' },
-    { from: 'r1', to: 'cost' },
-    { from: 'r2', to: 'cost' },
-    { from: 'r3', to: 'cost', label: 'over budget' },
-    { from: 'r4', to: 'risk' },
-    { from: 'r5', to: 'cost', label: 'too fast' },
-    { from: 'r6', to: 'risk', label: 'divergent' },
-    { from: 'r7', to: 'ext', label: 'convergent' },
-    { from: 'cost', to: 'ext', label: 'within budget' },
-    { from: 'risk', to: 'ext', label: 'within sigma' },
-    { from: 'ext', to: 'out' },
-  ],
-  callouts: [{ at: 'store>r5', side: 'below', label: 'cost gate drops any speed past the 0.15 budget' }],
-};
+   aimed into the fan — and it is here because it broke in the same ways. It is
+   `test/boards/issue-56-arrow-under-box.json` and comes in with every other
+   board below, since #56 kept it for the arrow it runs under a note. */
 
 await atest('no tag or callout prints over words, a note, or a box it is drawn under', async () => {
   const { overprints } = await import('./readable.mjs');
@@ -2984,7 +2947,6 @@ await atest('no tag or callout prints over words, a note, or a box it is drawn u
     ...['above', 'below', 'left', 'right'].map(side => [`kalman, gain callout ${side}`,
       { ...kalman, callouts: kalman.callouts.map((c, i) => (i ? c : { ...c, side })) }]),
     ['crowded', crowded],
-    ['seven-way fan', sevenWayFan],
   ];
   const found = [];
   for (const [name, spec] of boards)
@@ -4079,6 +4041,13 @@ await atest('a board that is not being saved says so', async () => {
   const { stdout } = await promisify(execFile)(
     process.execPath, [path.join(ROOT, 'test/saving.mjs')],
     { env: { ...process.env }, maxBuffer: 4 << 20 });
+  process.stdout.write(stdout);
+});
+
+await atest('an agent is told what the drawing came out like, and only when it drew', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { stdout } = await promisify(execFile)(process.execPath, [path.join(ROOT, 'test/audit.mjs')]);
   process.stdout.write(stdout);
 });
 

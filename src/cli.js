@@ -207,16 +207,17 @@ async function boardIdentity(url) {
 const describeBoard = b =>
   `"${b.name}"${b.title ? ` \u2014 "${b.title}"` : ' \u2014 untitled'}  ${b.url}`;
 
-async function send(ops, { quiet = false } = {}) {
+async function send(ops, { quiet = false, audit = false } = {}) {
   const url = await boardURL({ autostart: true });
   const res = await fetch(url + '/op', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ ops }),
+    body: JSON.stringify({ ops, ...(audit ? { audit: true } : {}) }),
   });
   const body = await res.json().catch(() => ({}));
   if (!quiet) {
     if (body.errors?.length) console.error(body.errors.join('\n'));
     if (body.warnings?.length) console.error(body.warnings.join('\n'));
+    if (body.audit?.lines?.length) console.error(body.audit.lines.join('\n'));
     console.log(`${url}  ${body.nodes ?? 0} boxes, ${body.edges ?? 0} lines, ${body.steps ?? 0} steps`);
   }
   // A rejected op must not leave a zero exit behind the summary line: scripts
@@ -492,10 +493,10 @@ const main = async () => {
     }
 
     case 'draw': case 'op':
-      return void (await send(await readOps(positional()[0])));
+      return void (await send(await readOps(positional()[0]), { audit: true }));
 
     case 'settle':
-      return void (await send([{ op: 'settle' }]));
+      return void (await send([{ op: 'settle' }], { audit: true }));
 
     case 'say': {
       const step = flag('step'), edge = flag('edge');

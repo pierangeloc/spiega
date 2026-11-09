@@ -162,6 +162,20 @@ Each step's number appears on its line, so the board and your prose share one
 numbering. Walk a step as you explain it, not all at once — the person can also
 walk them with the arrow keys.
 
+### Steps are also how a dense board is read
+
+Order is not the only reason to number something. Six nutrients mapping onto
+four functions is ten lines and no sequence at all, and drawn flat it is a
+tangle nobody can trace — the eye has to follow one line through nine others.
+Stepping it dims all but one relationship at a time, which is the only way
+that picture ever becomes readable.
+
+So reach for steps whenever the board is **dense**, not only when it is
+sequential: a mapping, a dependency web, a comparison with lines across it.
+The step text says what the relationship *is* rather than what happens next —
+`{"op":"step","edge":"iron>oxygen","step":"Iron carries the oxygen"}` — and
+you walk them in whatever order explains best.
+
 ### Tag the line with the step it explains
 
 **Whenever a line you say is about one step, say which step.** The board has two
@@ -284,6 +298,36 @@ explanation was worth keeping; do not save one every time.
   you are deliberately grouping things that the kinds do not already group.
 - Starting a new explanation? `spiega clear` first. A board holding two
   unrelated systems is worse than no board.
+
+## What the reply tells you about the picture
+
+You never see the board you are drawing. The reply to a draw says how many
+boxes and lines are on it, and then, when the drawing came out crowded, a line
+or two about what it came out like:
+
+```
+2 arrows cross a box that is not an end of it: r7>ext through risk, r7>ext through n2
+```
+
+That is a measurement, not a refusal: everything you drew is on the board. It
+is also not a verdict — *"two arrows cross a box"* is a fact, *"this board is
+unreadable"* is not something the board can know.
+
+**It is about the next thing you draw, not the last one.** Stop adding to this
+board, and say so: *"this is getting crowded — the arrow from rule 7 runs
+under the note. Want me to clear and take the rest fresh, or keep going?"*
+They are the one looking at the pane, and how much board they want is theirs
+to decide. If one arrow in particular is buried, do not then walk that step as
+though it were visible; say that hop in words.
+
+Redrawing the same ops is the one thing that cannot help: layout is derived,
+so the same board gives you the same picture. Changing the board — one fewer
+note, a shorter label, the decorative edge dropped — is not redrawing it, and
+does.
+
+A count of crossings is the one that usually has a remedy you can apply on the
+spot: **step it**. A dense board is unreadable flat and readable one
+relationship at a time, so add the steps and walk them, as above.
 
 ## When something is wrong
 
