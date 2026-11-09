@@ -18,7 +18,11 @@
     margin:0; background:var(--paper); color:var(--ink);
     font:13px/1.55 var(--mono);
     background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='p'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 .42  0 0 0 0 .39  0 0 0 0 .33  .14 0 0 0 0'/></filter><rect width='100%' height='100%' filter='url(%23p)'/></svg>");
-    display:grid; grid-template-rows:auto 1fr; overflow:hidden;
+    /* bar, chapter strip, board. One row each, and only the board stretches:
+       a pane that is not in this list falls into an implicit auto row, which
+       takes the 1fr away from whatever was meant to have it and collapses the
+       drawing to the height of its own content. */
+    display:grid; grid-template-rows:auto auto 1fr; overflow:hidden;
   }
 
   /* ---- top bar ---- */
@@ -44,6 +48,26 @@
   .btn:disabled{opacity:.3;cursor:default}
   .btn.on{background:var(--ink);color:var(--paper);box-shadow:2px 2px 0 var(--accent)}
   .count{font-size:11px;color:var(--muted);letter-spacing:.06em}
+  /* The chapters of one explanation. A tab per chapter, in the order they were
+     taught, the one being read marked — the whole point of #51 is that the
+     parts already explained stay visible, so this strip is the board saying
+     they exist. Hidden until there is a second one, since a single tab says
+     nothing a title does not. */
+  .chapters{display:flex;align-items:stretch;gap:6px;padding:0 18px;border-bottom:1px solid var(--rule);
+    overflow-x:auto;scrollbar-width:none}
+  .chapters[hidden]{display:none}
+  .chapters::-webkit-scrollbar{display:none}
+  .chapters button{font:inherit;font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+    border:0;border-bottom:3px solid transparent;background:transparent;color:var(--muted);
+    padding:9px 4px;margin-right:8px;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:7px}
+  .chapters button:hover{color:var(--ink)}
+  .chapters button.here{color:var(--ink);border-bottom-color:var(--accent)}
+  .chapters .num{font-size:10px;color:var(--muted);font-weight:400}
+  .chapters button.here .num{color:var(--accent)}
+  /* The live chapter grew while you were reading an earlier one. Not a number
+     and not a jump: a mark that something is happening where you are not. */
+  .chapters .growing{width:7px;height:7px;border-radius:50%;background:var(--accent);
+    animation:pulse 1.4s ease-in-out infinite}
 
   /* ---- the two panes ---- */
   main{display:grid;grid-template-columns:var(--rail) 1fr;min-height:0;position:relative}
@@ -173,6 +197,8 @@
     <button class="btn" id="snap" title="open a standalone copy of this board">snapshot</button>
   </div>
 
+  <nav class="chapters" id="chapters" hidden></nav>
+
   <main id="main">
     <aside class="rail" id="rail"><div class="empty">Nothing said yet.</div></aside>
     <div class="stage" id="stage">
@@ -234,7 +260,26 @@ let lastBoxes = {};
 let lastOffset = { x: 0, y: 0 };
 let lastActive;                 // the step the camera last framed
 const MARGIN = 18;
-const view_of = () => shown || board;
+
+/* ---------- chapters ----------
+
+   One explanation, several surfaces. The chapter being drawn on lives on the
+   board itself; the ones already finished sit in `board.chapters`, whole, and
+   reading one is a matter of handing the renderer that surface instead.
+
+   Reading an earlier chapter is a *view*, not a board state: walking its steps
+   must not post anything, because the agent may well be drawing on the live
+   chapter while someone reads chapter one, and a reader should not be able to
+   move what the explainer is standing at. So the step lives here. */
+let viewing = null;             // index into board.chapters, or null for the live chapter
+let chapterStep = null;         // the step a reader is walking in a finished chapter
+let grew = false;               // the live chapter moved while an earlier one was open
+
+const view_of = () => {
+  if (shown) return shown;
+  const ch = viewing == null ? null : board?.chapters?.[viewing];
+  return ch ? { ...ch, active: chapterStep } : board;
+};
 let drawn = new Set();          // keys already on the board, so they animate once
 let view = { x: 0, y: 0, k: 1 };
 let userMoved = false;
@@ -383,7 +428,67 @@ function renderSteps() {
   $('next').disabled = i != null && i >= f.length - 1;
 }
 
-const focus = step => post([{ op: 'focus', step }]);
+/* Walking a step. On the live chapter it is a board state, so it is posted and
+   comes back down the stream to every window; in a finished chapter it is one
+   reader's place in something nobody is drawing on any more. */
+const focus = step => {
+  if (viewing == null) return post([{ op: 'focus', step }]);
+  chapterStep = step;
+  renderRail(); render(); renderSteps(); frameStep();
+};
+
+/* ---------- the chapter strip ---------- */
+
+/* Every surface of this explanation, the finished ones and the live one last,
+   in the order they were taught. */
+const surfaces = () => [...(board?.chapters || []).map((c, i) => ({ c, i })), { c: null, i: null }];
+
+function renderChapters() {
+  const strip = $('chapters');
+  const all = surfaces();
+  // one surface is not a chaptered explanation, it is a board
+  strip.hidden = replaying || all.length < 2;
+  if (strip.hidden) { strip.innerHTML = ''; return; }
+  strip.innerHTML = '';
+  for (const { c, i } of all) {
+    const b = document.createElement('button');
+    const live = i == null;
+    const title = (live ? board?.chapter : c.title) || 'untitled';
+    b.className = (i === viewing ? 'here ' : '') + 'tab';
+    b.innerHTML = `<span class="num">${(i == null ? all.length : i + 1)}</span>` +
+      `<span>${title.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span>` +
+      (live && grew && viewing != null ? '<span class="growing"></span>' : '');
+    b.title = live ? 'the chapter being drawn now' : `chapter ${i + 1}`;
+    b.onclick = () => showChapter(i);
+    strip.appendChild(b);
+    /* In a split pane the strip scrolls, and the chapter being read is the one
+       that has to be on screen — otherwise the tab that says where you are is
+       the one you cannot see. */
+    if (i === viewing) requestAnimationFrame(() => b.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+  }
+}
+
+/* `null` is the live chapter. Switching is a local move: nothing is posted,
+   so two people reading the same board can be in different chapters. */
+function showChapter(i) {
+  if (i != null && !board?.chapters?.[i]) i = null;
+  viewing = i;
+  chapterStep = i == null ? null : (board.chapters[i].active ?? null);
+  if (i == null) grew = false;
+  drawn = new Set();
+  userMoved = false;
+  const hash = i == null ? '' : `#${i + 1}`;
+  if (location.hash !== hash) history.replaceState(null, '', location.pathname + location.search + hash);
+  renderChapters(); renderRail(); render(); renderSteps(); fit(true);
+}
+
+/* A link into one chapter — /b/<name>#2 — opens there. The number is a
+   finished chapter's position, which never moves once it is finished. */
+const chapterFromHash = () => {
+  const n = Number((location.hash || '').slice(1));
+  return Number.isInteger(n) && n >= 1 && n <= (board?.chapters?.length || 0) ? n - 1 : null;
+};
+addEventListener('hashchange', () => showChapter(chapterFromHash()));
 
 /* ---------- following the step ----------
 
@@ -647,7 +752,7 @@ function stopReplay() {
   drawn = new Set();
   $('replay').classList.remove('on');
   $('replay').textContent = 'replay';
-  render(); renderRail(); renderSteps();
+  render(); renderRail(); renderSteps(); renderChapters();
   userMoved = false; fit(true);
 }
 
@@ -661,6 +766,8 @@ async function replay() {
   const live = () => replaying && gen === mine;
   replaying = true;
   userMoved = false;
+  // a replay owns the screen, and it walks the chapters itself
+  viewing = null; grew = false; renderChapters();
   $('replay').classList.add('on');
   $('replay').textContent = 'stop';
 
@@ -684,6 +791,17 @@ async function replay() {
       continue;   // the loop head re-checks live()
     }
     if (entry.op === 'title') { $('title').textContent = rb.title; continue; }
+
+    /* A chapter break, played as one: the surface empties, its name is held on
+       screen for a beat, and the next chapter is drawn on from nothing. The
+       whole explanation plays straight through, which is the half of a
+       chaptered board that `clear` could never give back (#51). */
+    if (entry.op === 'chapter') {
+      drawn = new Set();
+      renderRail(); render(); renderSteps();
+      if (rb.chapter) { say(`**${rb.chapter}**`); await beat(1500); say(null); await beat(260); }
+      continue;
+    }
 
     const drawMs = render() || 400;
     renderSteps();
@@ -731,7 +849,14 @@ async function finish() {
 
 function onState(b, fresh) {
   const first = !board;
+  const broke = (b.chapters?.length || 0) !== (board?.chapters?.length || 0);
   board = b;
+  /* A chapter break empties the live surface, so what was on it is no longer
+     "already drawn" — without this the next chapter's first boxes would appear
+     without being drawn on, which is the one thing this board does. */
+  if (broke && viewing == null) { drawn = new Set(); userMoved = false; }
+  // Something arrived on the live chapter while an earlier one is being read.
+  if (viewing != null && !first) grew = true;
   // A replay owns the screen while it runs; the live board keeps updating
   // underneath and is shown again when the replay ends.
   if (replaying) { $('count').textContent = 'replaying\u2026'; return; }
@@ -742,6 +867,8 @@ function onState(b, fresh) {
   setLink('live');
   clearTimeout(onState._t);
   onState._t = setTimeout(() => setLink(es && es.readyState === EventSource.OPEN ? 'idle' : 'down'), 2500);
+  if (first && chapterFromHash() != null) return void showChapter(chapterFromHash());
+  renderChapters();
   renderRail();
   render(fresh);
   renderSteps();

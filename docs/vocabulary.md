@@ -22,6 +22,7 @@ MCP tool. Ops are applied in order and the board is their accumulation.
 | `title` | the board's title | `text` |
 | `focus` | light one step; `null` clears | `step` (0-based) |
 | `remove` | delete a node and everything touching it | `id` |
+| `chapter` | set this surface aside and start the next one, under the same title | `title` |
 | `clear` | wipe the board | `keepTitle` |
 | `settle` | tidy the finished board once, then freeze positions and edge lanes | `positions`, `routes` (recorded result; omit when asking to settle) |
 
@@ -244,6 +245,32 @@ a `step` and walking that step lights those words with that hop; leave it
 untagged and it never dims, which is right for an opening or closing remark.
 
 An edge is named `from>to`, which is how `step` and `tag` refer to one.
+
+## Chapters
+
+One explanation, several surfaces:
+
+```json
+{"op":"chapter","title":"Enzymes"}
+```
+
+What is on the board is set aside whole — its drawing, its script, its steps,
+all still walkable — and a clean surface is started under the same title. The
+board grows a strip of tabs, one per chapter, and `/b/<name>#2` opens at one
+of them. `replay` plays straight through the breaks, so a long explanation is
+still one thing to watch.
+
+Called before anything is drawn, it names the chapter you are on rather than
+setting an empty one aside.
+
+Each chapter is its own namespace: `gw` in chapter 3 is a different box from
+`gw` in chapter 1, and drawing it again does not reach back. Ops always land
+in the chapter being drawn on now — a chapter you have left is for the reader
+to walk, not for you to edit.
+
+Use it when the subject moves on within one explanation, and when a board has
+got too full to read. Use `clear` only to start a different explanation: it
+destroys what is on screen, which chapters exist to stop.
 
 ## What the board does not model
 
