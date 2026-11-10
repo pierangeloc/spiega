@@ -814,7 +814,7 @@ const main = async () => {
 
     /* Which boards exist, and who is watching them. */
     case 'boards': {
-      const { listBoards, boardName, readServer, DEFAULT_BOARD, SESSION_FILE, alive: up } =
+      const { listBoards, savedBoards, boardName, readServer, DEFAULT_BOARD, SESSION_FILE, alive: up } =
         await import('./board/server.js');
       const { c, sym, pad, shortPath, heading } = await import('./term.js');
       const g = sym();
@@ -829,13 +829,19 @@ const main = async () => {
         } catch { /* none */ }
       }
       const names = Object.keys(all);
-      if (!names.length) {
+      /* The boards that are only on disk. A restart prunes the registry down
+         to whatever the new server holds, so without these the answer to
+         "which boards do I have" is "the one that survived", and twelve
+         drawings that are sitting in ~/.spiega/boards go unmentioned. */
+      const closed = savedBoards().filter(s => !(s.name in all));
+      if (!names.length && !closed.length) {
         return void console.log(`\n  ${c.dim('No boards running.')} ${c.dim(`${g.arrow} spiega open`)}\n`);
       }
 
       const here = boardName();
       const srv = readServer();
-      const w = Math.max(...names.map(n => n.length)) + 2;   // a name is a task name, so it can be long
+      // a name is a task name, so it can be long
+      const w = Math.max(0, ...names.map(n => n.length), ...closed.map(s => s.name.length)) + 2;
       console.log(heading('spiega boards'));
       for (const name of names) {
         const { url } = all[name];
@@ -856,9 +862,30 @@ const main = async () => {
         console.log(`  ${mine ? c.accent(g.arrow) : ' '} ${c.bold(pad(name, w))}` +
           `${c.dim(pad(':' + where, 8))}${pad(c.dim(size), 10)}${note}${tail}`);
       }
+      /* Saved and not open, under the live ones and visibly quieter: the
+         drawing is on disk and opening it is all it takes. Dimmed rather than
+         left out, because the state they are in is "nobody is holding this
+         right now", not "this is gone". */
+      if (closed.length) {
+        /* When it was last drawn on, which is the only thing that tells two
+           old boards apart once the names have stopped meaning anything. */
+        const ago = at => {
+          const m = Math.round((Date.now() - at) / 60000);
+          if (m < 1) return 'just now';
+          if (m < 60) return `${m}m ago`;
+          if (m < 60 * 36) return `${Math.round(m / 60)}h ago`;
+          return `${Math.round(m / 1440)}d ago`;
+        };
+        if (names.length) console.log('');
+        console.log(`  ${c.dim('saved, not open')}`);
+        for (const s of closed) console.log(`    ${c.dim(pad(s.name, w))}${c.dim(ago(s.written))}`);
+      }
       const own = names.filter(n => !all[n].legacy && srv && all[n].pid !== srv.pid).length;
       console.log(`\n  ${c.accent(g.arrow)} ${c.dim("this shell's board")}   ` +
         `${c.dim(`boxes ${g.dot} lines   \u2014 switch with --board NAME`)}`);
+      if (closed.length) {
+        console.log(`  ${c.dim(`A saved board comes back as it was   ${g.arrow} spiega open --board NAME`)}`);
+      }
       if (srv) {
         console.log(`  ${c.dim(`One server on :${(srv.url.match(/:(\d+)/) || [, '?'])[1]} holds ` +
           `${names.length - own} of them${own ? `; ${own} on ${own === 1 ? 'its' : 'their'} own` : ''}.`)}`);
