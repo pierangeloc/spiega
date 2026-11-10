@@ -183,7 +183,7 @@ export function overprints(spec, r) {
   const bodies = Object.entries(r.boxes).filter(([id]) => kinds[id] !== 'note').map(([id, b]) => ({ id, ...at(b) }));
   const routes = r.planned.map(p => ({ key: p.key, pts: p.pts.map(([x, y]) => [x + ox, y + oy]) }));
 
-  const text = [], lines = [];
+  const text = [], astray = [];
   const floats = [
     ...drawn.tags.map(t => ({ ...t, what: `tag "${t.text}"` , tag: true })),
     ...drawn.callouts.map(c => ({ ...c, what: `callout "${c.text}"`, tag: false })),
@@ -203,18 +203,22 @@ export function overprints(spec, r) {
     for (let j = i + 1; j < floats.length; j++)
       if (meets(floats[i], floats[j])) text.push(`${floats[i].what} prints over ${floats[j].what}`);
 
+  /* A label on a line that is not its own. The words are legible — this is
+     the fallback the placement pass is allowed to take — but a label the
+     reader cannot attribute has failed at the one thing a label is for, so
+     it is kept as what it is rather than as a sentence. */
   for (const t of drawn.tags)
     for (const p of routes)
-      if (p.key !== t.key && crosses(p.pts, t)) lines.push(`tag "${t.text}" sits on ${p.key}`);
+      if (p.key !== t.key && crosses(p.pts, t)) astray.push({ kind: 'tag', text: t.text, on: p.key });
   for (const c of drawn.callouts)
     for (const p of routes)
-      if (crosses(p.pts, c)) lines.push(`callout "${c.text}" sits on ${p.key}`);
+      if (crosses(p.pts, c)) astray.push({ kind: 'callout', text: c.text, on: p.key });
   /* A card is painted under the edges, so a line across it strikes the name
      through — worse than a pill laid over a line, which only hides the line. */
   for (const t of drawn.tabs)
     for (const p of routes)
-      if (crosses(p.pts, t)) lines.push(`tab "${t.text}" sits on ${p.key}`);
-  return { text, lines };
+      if (crosses(p.pts, t)) astray.push({ kind: 'tab', text: t.text, on: p.key });
+  return { text, astray, lines: astray.map(a => `${a.kind} "${a.text}" sits on ${a.on}`) };
 }
 
 /* Every arrow that passes through a box which is neither of its ends. The
@@ -259,8 +263,10 @@ export function crossings(planned) {
 
 /* The whole measurement, over a board the renderer has just drawn. */
 export function audit(spec, r) {
+  const { text, astray } = overprints(spec, r);
   return {
-    over: overprints(spec, r).text,
+    over: text,
+    astray,
     buried: buriedArrows(r),
     crossings: crossings(r.planned),
   };
@@ -274,8 +280,18 @@ export function audit(spec, r) {
    say what to do: the remedy for a board that cannot be placed is fewer things
    on it, and a report that provoked a blind redraw would be worse than
    silence. */
-export function report({ over = [], buried = [], crossings = 0 }) {
+export function report({ over = [], astray = [], buried = [], crossings = 0 }) {
   const lines = [...over];
+  /* A label on somebody else's line. Named rather than counted, because
+     "a label is ambiguous" is nothing to act on and "this label, on that
+     line" is. */
+  if (astray.length) {
+    const named = astray.slice(0, NAMED).map(a => `"${a.text}" on ${a.on}`).join(', ');
+    const rest = astray.length - NAMED;
+    lines.push(`${astray.length} label${astray.length > 1 ? 's' : ''} ` +
+      `sit${astray.length > 1 ? '' : 's'} on a line that is not ` +
+      `${astray.length > 1 ? 'their' : 'its'} own: ` + named + (rest > 0 ? `, and ${rest} more` : ''));
+  }
   if (buried.length) {
     const named = buried.slice(0, NAMED).map(b => `${b.edge} through ${b.box}`).join(', ');
     const rest = buried.length - NAMED;

@@ -350,7 +350,13 @@ or two about what it came out like:
 
 ```
 2 arrows cross a box that is not an end of it: r7>ext through risk, r7>ext through n2
+1 label sits on a line that is not its own: "burns fast" on fat>energy
 ```
+
+The second one means a reader cannot tell which arrow that label belongs to.
+It is worth a word out loud — *"the label on the carbohydrate arrow is sitting
+across the fat one"* — because the person is looking at the picture and you
+are not.
 
 That is a measurement, not a refusal: everything you drew is on the board. It
 is also not a verdict — *"two arrows cross a box"* is a fact, *"this board is

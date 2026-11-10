@@ -62,9 +62,38 @@ await test('the board in test/boards says exactly which arrows run under a box',
   assert.deepEqual(found.buried.map(b => `${b.edge} through ${b.box}`),
     ['r7>ext through risk', 'r7>ext through n2'],
     'the arrow from rule 7 passes under the risk budget and under the note');
-  assert.deepEqual(report(found),
-    ['2 arrows cross a box that is not an end of it: r7>ext through risk, r7>ext through n2'],
-    'and that is the whole of what the agent is told: the condition, the count, no advice');
+  assert.deepEqual(report(found), [
+    '2 labels sit on a line that is not their own: "FIRST MONTH VS SECOND MONTH" on store>r1, "OVER BUDGET" on r2>cost',
+    '2 arrows cross a box that is not an end of it: r7>ext through risk, r7>ext through n2',
+  ], 'and that is the whole of what the agent is told: the condition, the count, no advice');
+});
+
+/* A label on somebody else's line is what the placement pass falls back to
+   when nothing is clear, and it was left out of the first report for that
+   reason — "legible, only worse". A board drawn in anger said otherwise: the
+   reader could not tell which of two arrows `2 BURNS FAST` belonged to, the
+   person had to say so, and the agent had been told nothing (#103). */
+await test('a label on a line that is not its own is named, not counted', async () => {
+  const one = report({ astray: [{ kind: 'tag', text: 'burns fast', on: 'fat>energy' }] });
+  assert.deepEqual(one, ['1 label sits on a line that is not its own: "burns fast" on fat>energy']);
+
+  const many = report({ astray: Array.from({ length: 6 },
+    (_, i) => ({ kind: 'tag', text: `label ${i}`, on: `a>b${i}` })) });
+  assert.match(many[0], /^6 labels sit on a line that is not their own: /);
+  assert.equal((many[0].match(/ on a>b/g) || []).length, 4, 'four named');
+  assert.match(many[0], /, and 2 more$/);
+});
+
+/* It has to stay rare enough to be read. Measured before it was switched on:
+   1 of 19 committed boards and 36 of 200 random boards of real size — against
+   ~70% of random boards for an arrow through a foreign box. */
+await test('the boards that are meant to look good have no stray labels', async () => {
+  const stray = [];
+  for (const [name, spec] of [...specs('test/boards'), ...specs('examples')]) {
+    if (name.includes('issue-56-arrow-under-box')) continue;   // the known-bad one
+    for (const a of auditOf(spec).astray) stray.push(`${name}: "${a.text}" on ${a.on}`);
+  }
+  assert.deepEqual(stray, []);
 });
 
 /* Every other committed board is clean on this axis, which is what makes the
@@ -135,8 +164,10 @@ await test('POST /op renders nothing unless the caller asks for the audit', asyn
     assert.equal(quiet.nodes, 14, 'the counts are unchanged either way');
 
     const asked = await post(s.U, { ops: [{ op: 'say', text: 'and that is the fan' }], audit: true });
-    assert.deepEqual(asked.audit.lines,
-      ['2 arrows cross a box that is not an end of it: r7>ext through risk, r7>ext through n2']);
+    assert.deepEqual(asked.audit.lines, [
+      '2 labels sit on a line that is not their own: "FIRST MONTH VS SECOND MONTH" on store>r1, "OVER BUDGET" on r2>cost',
+      '2 arrows cross a box that is not an end of it: r7>ext through risk, r7>ext through n2',
+    ]);
     assert.equal(asked.audit.crossings, 2, 'the numbers come back too, for a caller that wants them');
   } finally { await s.close(); }
 });
