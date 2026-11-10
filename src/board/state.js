@@ -75,10 +75,15 @@ import { scriptSteps } from './script.js';
  */
 
 /**
+ * A step may name the phase of the explanation it belongs to. The step names
+ * its group and never the other way round: the log is append-only and step
+ * indices renumber the moment one is inserted, while a key does not.
+ *
  * @typedef {Object} FlowStep
  * @property {string} [edge]
  * @property {string[]} [lights]
  * @property {string} [label]
+ * @property {string} [group]
  * @property {number|null} [_n]
  * @property {number} [_i]
  */
@@ -119,6 +124,7 @@ import { scriptSteps } from './script.js';
  * @property {FlowStep[]} flow
  * @property {Callout[]} callouts
  * @property {TranscriptLine[]} transcript
+ * @property {Record<string, string>} groups
  * @property {number|null} active
  * @property {Placed} placed
  * @property {boolean} settled
@@ -141,6 +147,7 @@ import { scriptSteps } from './script.js';
  * @property {FlowStep[]} flow
  * @property {Callout[]} callouts
  * @property {TranscriptLine[]} transcript
+ * @property {Record<string, string>} groups
  * @property {number|null} active
  * @property {Placed} placed
  * @property {LogEntry[]} log
@@ -161,14 +168,15 @@ import { scriptSteps } from './script.js';
 /** @typedef {{op: 'callout'} & Partial<Callout>} CalloutOp */
 /** @typedef {{op: 'boundary'} & Partial<Boundary>} BoundaryOp */
 /** @typedef {{op: 'step'} & FlowStep} StepOp */
+/** @typedef {{op: 'group', id?: string, label?: string}} GroupOp */
 /** @typedef {{op: 'flow', steps?: FlowStep[]}} FlowOp */
 /** @typedef {{op: 'focus', step?: number|string|null}} FocusOp */
 /** @typedef {{op: 'remove', id: string}} RemoveOp */
 /** @typedef {{op: 'settle', positions: Placed, routes?: Record<string, import('../render/layout.js').Placement[]>}} SettleOp */
 /**
  * @typedef {ClearOp | ChapterOp | AmendOp | TitleOp | SayOp | TagOp | NodeOp
- *   | EdgeOp | CalloutOp | BoundaryOp | StepOp | FlowOp | FocusOp | RemoveOp
- *   | SettleOp} Op
+ *   | EdgeOp | CalloutOp | BoundaryOp | StepOp | GroupOp | FlowOp | FocusOp
+ *   | RemoveOp | SettleOp} Op
  */
 
 /** @typedef {{nodes: string[], edges: string[], boundaries: string[]}} Fresh */
@@ -186,6 +194,7 @@ export const emptySurface = () => ({
   flow: [],
   callouts: [],
   transcript: [],
+  groups: {},
   active: null,
   placed: {},
   settled: false,
@@ -202,6 +211,10 @@ export const emptyBoard = () => ({
   flow: [],
   callouts: [],
   transcript: [],
+  // group id -> the name to show for it. A phase of the explanation is named
+  // by its own op, which may land before or after the steps that join it, so
+  // the names live beside the flow rather than inside it.
+  groups: {},
   active: null,
   placed: {},        // sticky column/row assignments — see render/layout.js
   // Every op, in the order it arrived. A board is a session, not a diagram, so
@@ -216,7 +229,12 @@ export const emptyBoard = () => ({
 export const LOG_CAP = 4000;
 
 /* Nothing drawn and nothing said. A `chapter` op here is naming the surface
-   rather than ending it. */
+   rather than ending it.
+
+   The names of phases are not counted. An agent that declares its groups and
+   then names its first chapter means to use them in that chapter, and
+   counting them would file a chapter with nothing in it but a dictionary —
+   and take the names away from the steps that were about to use them. */
 /** @param {Board} b */
 const blankSurface = b => !b.nodes.length && !b.edges.length && !b.boundaries.length &&
   !b.callouts.length && !b.flow.length && !b.transcript.length;
@@ -242,6 +260,7 @@ function closeChapter(board) {
     callouts: board.callouts,
     transcript: board.transcript.map((line, i) =>
       (line.step != null || at[i] == null ? line : { ...line, step: at[i] })),
+    groups: board.groups,
     active: board.active,
     placed: board.placed,
     settled: board.settled,
@@ -257,11 +276,13 @@ function swapSurface(board, to) {
     title: board.chapter,
     nodes: board.nodes, edges: board.edges, boundaries: board.boundaries,
     flow: board.flow, callouts: board.callouts, transcript: board.transcript,
+    groups: board.groups,
     active: board.active, placed: board.placed, settled: board.settled,
   };
   board.chapter = to.title;
   board.nodes = to.nodes; board.edges = to.edges; board.boundaries = to.boundaries;
   board.flow = to.flow; board.callouts = to.callouts; board.transcript = to.transcript;
+  board.groups = to.groups || {};
   board.active = to.active; board.placed = to.placed; board.settled = to.settled;
   return was;
 }
@@ -464,6 +485,26 @@ const edgeId = e => `${e.from}>${e.to}`;
    string where the elements are read is the inconsistency this closes. */
 /** @param {unknown} value */
 const stringIds = value => Array.isArray(value) && value.every(v => typeof v === 'string');
+
+/* The group a step says it belongs to, tidied in place.
+
+   Unlike `lights`, a group that arrives as something other than a string is
+   not worth refusing the step over: the step still draws, still lights and
+   still reads, it simply joins no phase. So the group is dropped and the
+   agent is told, the way a kind with no glyph is — a header missing from the
+   rail is a smaller loss than a hop missing from the flow. */
+/** @param {FlowStep} step @param {string[]} warnings */
+const phase = (step, warnings) => {
+  const id = typeof step.group === 'string' ? step.group.trim() : '';
+  if (!id) {
+    if (step.group !== '' && typeof step.group !== 'string') {
+      warnings.push(`step: "group" must be the id of a group, got ${typeof step.group}; drawn without one.`);
+    }
+    delete step.group;
+    return;
+  }
+  step.group = id;
+};
 
 /** @param {unknown} value */
 const waypoints = value => Array.isArray(value) && value.every(p => p && Number.isFinite(p.col) && Number.isFinite(p.row));
@@ -695,7 +736,23 @@ function applyOne(board, op, sweep, warnings = []) {
       if (step.lights !== undefined && !stringIds(step.lights)) {
         return { ok: false, error: 'step: "lights" must be an array of string ids', fresh };
       }
+      if (step.group !== undefined) phase(step, warnings);
       board.flow.push(step);
+      break;
+    }
+
+    /* The display name of a phase of the explanation.
+
+       Only a name: a group never lists its steps, each step names its group,
+       so this op may arrive before the steps that join it or long after them
+       and neither order is special. A step naming a group nobody declared is
+       not an error either — it groups under that id and is shown as the id,
+       because the alternative is an op refused in the middle of somebody
+       talking over nothing worse than a missing label. */
+    case 'group': {
+      const id = String(op.id || '').trim();
+      if (!id) return { ok: false, error: 'group: "id" must name the group', fresh };
+      board.groups[id] = op.label == null ? id : String(op.label);
       break;
     }
 
@@ -706,7 +763,11 @@ function applyOne(board, op, sweep, warnings = []) {
       if (bad >= 0) {
         return { ok: false, error: `flow: steps[${bad}].lights must be an array of string ids`, fresh };
       }
-      board.flow = steps.slice();
+      board.flow = steps.map(s => {
+        const step = { ...s };
+        if (step.group !== undefined) phase(step, warnings);
+        return step;
+      });
       break;
     }
 
@@ -836,24 +897,36 @@ export function boardOps(board) {
     ops.push(...surfaceOps(c));
   }
   if (board.chapters.length || board.chapter) ops.push({ op: 'chapter', title: board.chapter || '' });
-  ops.push(...surfaceOps(board));
+  /* The chapter being drawn on has not had its script attributed yet — a
+     finished one froze it on the way out (closeChapter), and this one is still
+     relying on the log walk that compaction is about to throw away. Resolve it
+     here or every line that was attributed by having been said while a step
+     was lit comes back tied to nothing, and the rail stops highlighting on a
+     board long enough to have been compacted at all. */
+  ops.push(...surfaceOps(board, scriptSteps(board)));
   return ops;
 }
 
-/* One surface as the ops that rebuild it. */
-/** @param {Chapter|Board} s @returns {Op[]} */
-function surfaceOps(s) {
+/* One surface as the ops that rebuild it. `at` is the resolved step of each
+   line, for a surface whose attribution is not yet on its lines. */
+/** @param {Chapter|Board} s @param {(number|null)[]} [at] @returns {Op[]} */
+function surfaceOps(s, at = []) {
   /** @type {Op[]} */
   const ops = [];
   for (const n of s.nodes) ops.push({ op: 'node', ...n });
   for (const b of s.boundaries) ops.push({ op: 'boundary', ...b });
   for (const e of s.edges) ops.push({ op: 'edge', ...e });
   for (const c of s.callouts) ops.push({ op: 'callout', ...c });
+  /* Before the flow, though a group op is happy either side of its steps:
+     rebuilt ops read as the board being drawn again, and a phase is named
+     before the steps that belong to it. */
+  for (const [id, label] of Object.entries(s.groups || {})) ops.push({ op: 'group', id, label });
   if (s.flow.length) ops.push({ op: 'flow', steps: s.flow.slice() });
-  for (const line of s.transcript) {
+  for (const [i, line] of s.transcript.entries()) {
     /** @type {SayOp} */
     const say = { op: 'say', text: line.text };
-    if (line.step != null) say.step = line.step + 1;
+    const step = line.step ?? at[i];
+    if (step != null) say.step = step + 1;
     if (line.edge) say.edge = line.edge;
     ops.push(say);
   }

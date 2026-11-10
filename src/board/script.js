@@ -88,6 +88,42 @@ export function linesFor(board, step) {
   return at.map((s, i) => (s === step ? i : -1)).filter(i => i >= 0);
 }
 
+/* The phases of the explanation, as runs of lines in the rail.
+
+   A long explanation has parts — four steps that are all one reaction — and
+   the rail gives them no more relation to each other than to the remarks
+   above them. A step says which phase it belongs to; this turns that into the
+   thing a header can span: where a run of lines about one phase starts and
+   where it stops.
+
+   A phase whose lines are interrupted gets one run per stretch, with the same
+   name over each. The alternative is a header spanning lines that are not
+   about it, which would be a claim about somebody's transcript that nobody
+   made — and the rail is in the order things were said, which no grouping
+   gets to reorder. */
+/** @typedef {{id: string, label: string, from: number, to: number}} GroupRun */
+/**
+ * @param {Board} [board]
+ * @returns {GroupRun[]}
+ */
+export function groupRuns(board) {
+  const at = scriptSteps(board);
+  const flow = board?.flow || [];
+  const names = board?.groups || {};
+  /** @type {GroupRun[]} */
+  const runs = [];
+  at.forEach((step, line) => {
+    const id = step == null ? null : (flow[step]?.group || null);
+    if (!id) return;
+    const last = runs[runs.length - 1];
+    // a group nobody declared is shown as its own id: an undeclared phase is
+    // a missing label, not a mistake worth dropping the header over
+    if (last && last.id === id && last.to === line - 1) last.to = line;
+    else runs.push({ id, label: names[id] ?? id, from: line, to: line });
+  });
+  return runs;
+}
+
 /* How each line of the script should look at the board's current step.
 
      on    the step being walked is about this line

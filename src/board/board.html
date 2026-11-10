@@ -126,6 +126,13 @@
   .said{transition:opacity .28s ease, border-color .28s ease, box-shadow .28s ease, filter .28s ease}
   .said .tag{display:block;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
     color:var(--muted);font-weight:700;margin-bottom:3px}
+  /* A phase of the explanation, over the run of lines about it. Written as a
+     heading with a rule running off it rather than as another card, because a
+     card would read as one more thing that was said. */
+  .phase{display:flex;align-items:center;gap:8px;margin:7px 0 -2px;
+    font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--muted);font-weight:700}
+  .phase:first-child{margin-top:0}
+  .phase::after{content:"";flex:1;height:1.5px;background:var(--rule)}
   .said b{font-weight:700}
   .said code{background:var(--soft);padding:1px 4px;border-radius:4px;font-size:11.5px}
   .rail .empty{color:var(--muted);font-size:12px;padding:6px 2px}
@@ -242,7 +249,7 @@
 import { renderSVG } from '/src/render/render.js';
 import { animateIn, seedOf } from '/src/board/draw-on.js';
 import { emptyBoard, applyOps } from '/src/board/state.js';
-import { lineStates, clickStep } from '/src/board/script.js';
+import { lineStates, groupRuns, clickStep } from '/src/board/script.js';
 import { createNarrator, wrapWords, wordAt } from '/src/board/narrate.js';
 import { frame, unionBox, litKeys } from '/src/board/camera.js';
 
@@ -435,6 +442,23 @@ function renderRail() {
       wrapWords(node.querySelector('.said-body'));
     }
   });
+
+  /* The phases, as headers over the runs of lines they cover — board/script.js
+     works out where each run starts and stops.
+
+     Rebuilt every time, where the lines are not: a run changes shape whenever
+     a line lands or a tag moves, and there is no append-only way to say "a
+     header now belongs three lines further up". Taking the headers out and
+     putting them back costs nothing a reader can see, because the headers are
+     not the elements carrying the fade-in. */
+  rail.querySelectorAll('.phase').forEach(h => h.remove());
+  for (const run of groupRuns(board)) {
+    const h = document.createElement('div');
+    h.className = 'phase';
+    h.dataset.group = run.id;
+    h.innerHTML = `<span>${mdish(run.label)}</span>`;
+    rail.insertBefore(h, nodes[run.from]);
+  }
 
   loadTape();
 
