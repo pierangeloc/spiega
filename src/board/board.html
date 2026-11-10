@@ -25,6 +25,15 @@
     display:grid; grid-template-rows:auto auto 1fr; overflow:hidden;
   }
 
+  /* Each pane in its own row, by name. Auto-placement cannot be trusted here:
+     a pane that is `hidden` is not a grid item at all, so the panes below it
+     slide up a row — which put the board in the strip's `auto` row and
+     collapsed the drawing to the height of its own content every time the
+     chapter strip went away. */
+  .bar{grid-row:1}
+  .chapters{grid-row:2}
+  main{grid-row:3}
+
   /* ---- top bar ---- */
   .bar{display:flex;align-items:center;gap:14px;padding:12px 18px;border-bottom:1px solid var(--rule)}
   /* the voice picker wears the same clothes as the buttons beside it */
@@ -64,8 +73,9 @@
   .chapters button.here{color:var(--ink);border-bottom-color:var(--accent)}
   .chapters .num{font-size:10px;color:var(--muted);font-weight:400}
   .chapters button.here .num{color:var(--accent)}
-  /* The live chapter grew while you were reading an earlier one. Not a number
-     and not a jump: a mark that something is happening where you are not. */
+  /* A chapter moved while you were reading a different one — the live one
+     being drawn on, or an earlier one the agent went back and added to. Not a
+     number and not a jump: a mark that something happened where you are not. */
   .chapters .growing{width:7px;height:7px;border-radius:50%;background:var(--accent);
     animation:pulse 1.4s ease-in-out infinite}
 
@@ -273,14 +283,40 @@ const MARGIN = 18;
    move what the explainer is standing at. So the step lives here. */
 let viewing = null;             // index into board.chapters, or null for the live chapter
 let chapterStep = null;         // the step a reader is walking in a finished chapter
-let grew = false;               // the live chapter moved while an earlier one was open
+/* Chapters that moved while someone was reading a different one. Keyed the way
+   `viewing` is — an index, or null for the live chapter — because that is the
+   question being asked: did this change while I was not looking at it. */
+let changed = new Set();
+
+let replayAt = null;            // a chapter a replay has stepped back into
 
 const view_of = () => {
-  if (shown) return shown;
+  if (shown) {
+    const back = replayAt == null ? null : shown.chapters?.[replayAt];
+    return back ? { ...back, active: null } : shown;
+  }
   const ch = viewing == null ? null : board?.chapters?.[viewing];
   return ch ? { ...ch, active: chapterStep } : board;
 };
-let drawn = new Set();          // keys already on the board, so they animate once
+
+/* One set of already-drawn keys per surface, so each chapter remembers what
+   it has on it.
+
+   Two things need that memory. A replay that steps back into chapter one must
+   not redraw the whole of chapter four when it returns. And a reader moving
+   between tabs is navigating, not watching an explanation: a chapter already
+   seen should simply be there, where it was, rather than drawing itself again
+   every time its tab is clicked. What they have not seen still draws on —
+   a chapter opened for the first time, or the boxes an amendment added while
+   they were reading somewhere else. */
+const inked = new Map();
+const inkFor = key => {
+  if (!inked.has(key)) inked.set(key, new Set());
+  return inked.get(key);
+};
+// the key for a surface: the live chapter, or a finished one by its index
+const inkKey = i => (i == null ? 'live' : `ch${i}`);
+let drawn = inkFor('live');     // the ink of the surface on screen, so each key animates once
 let view = { x: 0, y: 0, k: 1 };
 let userMoved = false;
 let playing = null;
@@ -295,7 +331,7 @@ function render(fresh = null) {
   const empty = !board.nodes.length;
   // during a replay an empty board is the opening frame, not an invitation
   $('blank').hidden = !empty || replaying;
-  if (empty) { pan.innerHTML = ''; drawn = new Set(); return; }
+  if (empty) { pan.innerHTML = ''; drawn.clear(); return; }
 
   const r = renderSVG(board, { margin: MARGIN, active: board.active, hand: false });
   pan.innerHTML = r.svg;
@@ -447,24 +483,35 @@ function renderChapters() {
   const strip = $('chapters');
   const all = surfaces();
   // one surface is not a chaptered explanation, it is a board
-  strip.hidden = replaying || all.length < 2;
+  strip.hidden = all.length < 2;
   if (strip.hidden) { strip.innerHTML = ''; return; }
   strip.innerHTML = '';
+  /* Which tab is the one being looked at, counting the live chapter last. A
+     replay says so too: it walks the chapters itself, and a strip that went
+     blank for the length of the movie would hide the structure exactly while
+     the movie was explaining it. */
+  const here = replaying
+    ? (replayAt != null ? replayAt : (shown?.chapters?.length ?? 0))
+    : (viewing == null ? all.length - 1 : viewing);
   for (const { c, i } of all) {
     const b = document.createElement('button');
     const live = i == null;
+    const at = i == null ? all.length - 1 : i;
     const title = (live ? board?.chapter : c.title) || 'untitled';
-    b.className = (i === viewing ? 'here ' : '') + 'tab';
+    b.className = (at === here ? 'here ' : '') + 'tab';
+    const marked = !replaying && changed.has(i);
     b.innerHTML = `<span class="num">${(i == null ? all.length : i + 1)}</span>` +
       `<span>${title.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span>` +
-      (live && grew && viewing != null ? '<span class="growing"></span>' : '');
-    b.title = live ? 'the chapter being drawn now' : `chapter ${i + 1}`;
-    b.onclick = () => showChapter(i);
+      (marked ? '<span class="growing"></span>' : '');
+    b.title = live ? 'the chapter being drawn now'
+      : marked ? `chapter ${i + 1} — something was added to it` : `chapter ${i + 1}`;
+    // a replay owns the screen while it runs, and it is walking these itself
+    b.onclick = () => { if (!replaying) showChapter(i); };
     strip.appendChild(b);
     /* In a split pane the strip scrolls, and the chapter being read is the one
        that has to be on screen — otherwise the tab that says where you are is
        the one you cannot see. */
-    if (i === viewing) requestAnimationFrame(() => b.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
+    if (at === here) requestAnimationFrame(() => b.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
   }
 }
 
@@ -474,8 +521,8 @@ function showChapter(i) {
   if (i != null && !board?.chapters?.[i]) i = null;
   viewing = i;
   chapterStep = i == null ? null : (board.chapters[i].active ?? null);
-  if (i == null) grew = false;
-  drawn = new Set();
+  changed.delete(i);              // you are looking at it now
+  drawn = inkFor(inkKey(i));
   userMoved = false;
   const hash = i == null ? '' : `#${i + 1}`;
   if (location.hash !== hash) history.replaceState(null, '', location.pathname + location.search + hash);
@@ -749,17 +796,41 @@ function stopReplay() {
   gen++;
   say(null);
   shown = null;
-  drawn = new Set();
+  replayAt = null;
+  // the replay drew the live chapter last, under its own key: keep that ink
+  inked.set('live', inkFor(`ch${board?.chapters?.length ?? 0}`));
+  drawn = inkFor('live');
   $('replay').classList.remove('on');
   $('replay').textContent = 'replay';
   render(); renderRail(); renderSteps(); renderChapters();
   userMoved = false; fit(true);
 }
 
+/* The log as a replay should walk it.
+
+   Amendments to one chapter arrive in a run — a box, the edge into it, the
+   line that explains it, all aimed at chapter one in the same breath — and
+   played one at a time the replay bounces out of the chapter and back for
+   each. Six trips to say one thing. A run of them to the same chapter was one
+   thought, so it is played as one visit. */
+export function replayEntries(log) {
+  const out = [];
+  for (const e of log) {
+    if (e.op === 'focus' || e.op === 'clear') continue;
+    const prev = out[out.length - 1];
+    if (e.op === 'amend' && prev?.op === 'amend' && prev.chapter === e.chapter) {
+      prev.ops = [...prev.ops, ...[].concat(e.ops || [])];
+      continue;
+    }
+    out.push(e.op === 'amend' ? { ...e, ops: [].concat(e.ops || []) } : e);
+  }
+  return out;
+}
+
 async function replay() {
   if (replaying) return stopReplay();
   if (!await finish()) return;
-  const log = (board?.log || []).filter(e => e.op !== 'focus' && e.op !== 'clear');
+  const log = replayEntries(board?.log || []);
   if (!log.length) return;
 
   const mine = ++gen;
@@ -767,13 +838,14 @@ async function replay() {
   replaying = true;
   userMoved = false;
   // a replay owns the screen, and it walks the chapters itself
-  viewing = null; grew = false; renderChapters();
+  viewing = null; changed.clear(); renderChapters();
   $('replay').classList.add('on');
   $('replay').textContent = 'stop';
 
   const rb = emptyBoard();
   shown = rb;
-  drawn = new Set();
+  inked.clear();
+  drawn = inkFor('ch0');
   render(); renderRail(); renderSteps();
   await beat(400);
 
@@ -797,9 +869,34 @@ async function replay() {
        whole explanation plays straight through, which is the half of a
        chaptered board that `clear` could never give back (#51). */
     if (entry.op === 'chapter') {
-      drawn = new Set();
-      renderRail(); render(); renderSteps();
+      drawn = inkFor(`ch${rb.chapters.length}`);
+      renderRail(); render(); renderSteps(); renderChapters();
       if (rb.chapter) { say(`**${rb.chapter}**`); await beat(1500); say(null); await beat(260); }
+      continue;
+    }
+
+    /* An amendment happened at a moment in the session, to a chapter that was
+       no longer on screen. Played where it happened: the replay steps back
+       into that chapter, draws what was added, and returns to where the
+       explanation had got to. */
+    if (entry.op === 'amend') {
+      const i = Number(entry.chapter) - 1;
+      if (!(i >= 0 && i < (rb.chapters?.length || 0))) continue;
+      const home = drawn;
+      replayAt = i;
+      drawn = inkFor(`ch${i}`);
+      say(`back to **${rb.chapters[i].title || 'the chapter before'}**`);
+      renderChapters();
+      renderRail();
+      const ms = render() || 400;
+      renderSteps();
+      await beat(Math.max(1200, ms + 600));
+      if (!live()) return;
+      say(null);
+      replayAt = null;
+      drawn = home;
+      renderRail(); render(); renderSteps(); renderChapters();
+      await beat(320);
       continue;
     }
 
@@ -847,16 +944,33 @@ async function finish() {
   }
 }
 
-function onState(b, fresh) {
+function onState(b, fresh, amended = []) {
   const first = !board;
-  const broke = (b.chapters?.length || 0) !== (board?.chapters?.length || 0);
+  const had = board?.chapters?.length || 0;
+  const now = b.chapters?.length || 0;
   board = b;
-  /* A chapter break empties the live surface, so what was on it is no longer
-     "already drawn" — without this the next chapter's first boxes would appear
-     without being drawn on, which is the one thing this board does. */
-  if (broke && viewing == null) { drawn = new Set(); userMoved = false; }
+  /* A chapter was amended: mark its tab unless its reader is looking at it,
+     in which case the new boxes are drawn on in front of them instead. */
+  for (const n of amended) {
+    const i = Number(n) - 1 < (b.chapters?.length || 0) ? Number(n) - 1 : null;
+    if (i !== viewing) changed.add(i);
+  }
+  /* A chapter break empties the live surface, so the next chapter's first
+     boxes must draw themselves on — that is the one thing this board does.
+     The ink of what was just being drawn is not lost, though: it belongs to
+     the chapter that surface became, so going back to read it later shows it
+     as it was rather than drawing it again. */
+  if (now !== had) {
+    if (now > had) {
+      inked.set(inkKey(now - 1), inkFor('live'));
+      inked.set('live', new Set());
+    } else {
+      inked.clear();                 // cleared, or a board this window has not seen
+    }
+    if (viewing == null) { drawn = inkFor('live'); userMoved = false; }
+  }
   // Something arrived on the live chapter while an earlier one is being read.
-  if (viewing != null && !first) grew = true;
+  if (viewing != null && !first) changed.add(null);
   // A replay owns the screen while it runs; the live board keeps updating
   // underneath and is shown again when the replay ends.
   if (replaying) { $('count').textContent = 'replaying\u2026'; return; }
@@ -915,11 +1029,12 @@ function connect() {
   es.addEventListener('open', () => { retry = 0; setLink('idle'); });
   es.addEventListener('state', e => {
     // A full state means we may be looking at a different board than before,
-    // so forget what we thought was already drawn.
-    drawn = new Set();
+    // so forget what we thought was already drawn, on every surface.
+    inked.clear();
+    drawn = inkFor(inkKey(viewing));
     onState(JSON.parse(e.data));
   });
-  es.addEventListener('patch', e => { const d = JSON.parse(e.data); onState(d.board, d.fresh); });
+  es.addEventListener('patch', e => { const d = JSON.parse(e.data); onState(d.board, d.fresh, d.amended); });
   es.addEventListener('saving', e => setSaving(JSON.parse(e.data)));
   // `spiega replay` — or the agent's own tool — asking for the movie again.
   // Always a start, never a toggle: a remote caller cannot see the button.

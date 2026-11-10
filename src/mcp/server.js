@@ -36,7 +36,10 @@ async function send(ops, { audit = false } = {}) {
      Counts first, because that is what is read when all is well. Then the
      warnings, then what the drawing came out like (#56): the counts say the
      ops were accepted, and only the audit says anything about the picture. */
-  const summary = `${u} — ${b.nodes} boxes, ${b.edges} lines, ${b.steps} steps`;
+  const a = b.amended;
+  const summary = a
+    ? `${u} — chapter ${a.chapter} "${a.title || 'untitled'}": ${a.nodes} boxes, ${a.edges} lines, ${a.steps} steps`
+    : `${u} — ${b.nodes} boxes, ${b.edges} lines, ${b.steps} steps`;
   return [summary, ...(b.warnings || []), ...(b.audit?.lines || [])].join('\n');
 }
 
@@ -172,11 +175,37 @@ const TOOLS = [
       'after this one. Use it rather than board_clear, which destroys what is on screen and is for a new ' +
       'explanation altogether. Also reach for it when a board is getting full: the board tells you when the ' +
       'drawing is crowded, and a chapter is where the rest of it goes.\n' +
-      'Call it before drawing the first chapter too, to name it. Ops always land in the current chapter; ' +
-      'you cannot draw into one you have left.',
+      'Call it before drawing the first chapter too, to name it. Ops land in the current chapter; to add to or ' +
+      'correct a chapter you have already left, aim at it with board_amend.',
     inputSchema: {
       type: 'object', required: ['title'],
       properties: { title: { type: 'string', description: 'What this chapter is about. Short — it rides a tab.' } },
+    },
+  },
+  {
+    name: 'board_amend',
+    description:
+      'Add to a chapter you have already left, or correct it — the box you forgot, a label that was wrong, ' +
+      'one more line of script. Takes the same ops as board_draw, aimed at one chapter by its number on the ' +
+      'strip or by its title.\n' +
+      'What is being drawn now is untouched, and so is anyone reading it: the amendment lands in that chapter ' +
+      'and nowhere else, and the tab marks itself so the person can see something changed back there. ' +
+      'Say out loud that you have done it — a board the reader is not looking at changing quietly is worse ' +
+      'than saying "I have added X to chapter 2".\n' +
+      'Drawing the same id again corrects it, so a fix is the op again with the right fields. ' +
+      'Ids are per chapter: the ids in this chapter are its own.',
+    inputSchema: {
+      type: 'object', required: ['chapter', 'ops'],
+      properties: {
+        chapter: {
+          description: 'Which chapter: its number on the strip, counting from 1, or its exact title.',
+          oneOf: [{ type: 'integer' }, { type: 'string' }],
+        },
+        ops: {
+          description: 'One op object, or an array of them, as board_draw takes.',
+          oneOf: [{ type: 'object' }, { type: 'array', items: { type: 'object' } }],
+        },
+      },
     },
   },
   {
@@ -304,6 +333,12 @@ async function call(name, args = {}) {
 
     case 'board_chapter':
       return send([{ op: 'chapter', title: String(args.title ?? '') }]);
+
+    case 'board_amend': {
+      const chapter = typeof args.chapter === 'string' && /^\d+$/.test(args.chapter.trim())
+        ? Number(args.chapter) : args.chapter;
+      return send([{ op: 'amend', chapter, ops: listArg(args.ops, 'ops') }], { audit: true });
+    }
 
     case 'board_clear':
       return send([{ op: 'clear', keepTitle: !!args.keepTitle }]);

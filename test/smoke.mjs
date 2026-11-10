@@ -403,6 +403,122 @@ test('every pane on the board page has a row in the body grid', () => {
   }
   assert.equal(tracks, panes.length,
     `the body grid has ${tracks} rows for ${panes.length} panes (${panes.join(', ')})`);
+
+  /* And each pane says which row it is, rather than being placed by order.
+     A pane that is `hidden` stops being a grid item, so auto-placement moves
+     every pane below it up one row: hiding the chapter strip during a replay
+     handed the board the strip's `auto` row and collapsed the drawing to the
+     height of its own content. Naming the rows is what makes a pane that
+     comes and goes safe. */
+  const placed = [...html.matchAll(/grid-row:\s*\d+/g)].length;
+  assert.equal(placed, panes.length,
+    `${placed} of the ${panes.length} panes name their row; a pane that can be hidden must`);
+});
+
+/* The chapter strip, run out of the page against stubs.
+
+   The marks on it are the only thing that says a chapter changed while the
+   reader was somewhere else — an amendment lands in a chapter nobody is
+   looking at, and a board that changes quietly behind someone is the failure
+   chapters exist to prevent. Nothing throws when the mark is missing; the tab
+   simply looks like every other tab. */
+function strip({ chapters, chapter, viewing = null, changed = [], replaying = false, replayAt = null, shown = null }) {
+  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
+  const src = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
+  const m = src.match(/const surfaces = [\s\S]*?\n}\n/);
+  assert.ok(m, 'board.html should define surfaces() and renderChapters()');
+
+  const strip = { hidden: false, innerHTML: '', kids: [],
+    appendChild(el) { this.kids.push(el); this.innerHTML += el.innerHTML; } };
+  const context = {
+    $: () => strip,
+    document: { createElement: () => ({ innerHTML: '', className: '', title: '', onclick: null,
+      scrollIntoView() {} }) },
+    requestAnimationFrame: () => {},
+    board: { chapters, chapter },
+    viewing,
+    changed: new Set(changed),
+    replaying,
+    replayAt,
+    shown,
+    showChapter: () => {},
+  };
+  vm.createContext(context);
+  new vm.Script(`${m[0]}\nrenderChapters();`).runInContext(context, { displayErrors: true });
+  return { hidden: strip.hidden, tabs: strip.kids, html: strip.innerHTML };
+}
+
+test('the chapter strip marks the chapter that changed while you were elsewhere', () => {
+  const chapters = [{ title: 'Nutrients' }, { title: 'Spoilage' }];
+  const live = { chapters, chapter: 'Enzymes' };
+
+  // reading the live chapter, and chapter 1 was amended behind you
+  const marked = strip({ ...live, viewing: null, changed: [0] });
+  assert.equal(marked.tabs.length, 3, 'two finished chapters and the one being drawn');
+  assert.match(marked.tabs[0].innerHTML, /growing/, 'the amended chapter is marked');
+  assert.doesNotMatch(marked.tabs[1].innerHTML, /growing/);
+  assert.doesNotMatch(marked.tabs[2].innerHTML, /growing/, 'the one you are reading is not');
+  assert.match(marked.tabs[0].title, /something was added to it/);
+  assert.equal(marked.tabs[2].className.includes('here'), true, 'the live tab is the one you are on');
+
+  // reading chapter 1 while the live chapter grows: the mark is on the live tab
+  const away = strip({ ...live, viewing: 0, changed: [null] });
+  assert.match(away.tabs[2].innerHTML, /growing/);
+  assert.doesNotMatch(away.tabs[0].innerHTML, /growing/);
+  assert.equal(away.tabs[0].className.includes('here'), true);
+
+  // nothing changed anywhere: no marks at all
+  assert.doesNotMatch(strip(live).html, /growing/);
+  // and one surface is a board, not a chaptered explanation
+  assert.equal(strip({ chapters: [], chapter: '' }).hidden, true);
+
+  /* A replay walks the chapters itself, so the strip follows it rather than
+     going blank for the length of the movie — which would hide the structure
+     exactly while the movie is explaining it. It also stays *there*: a pane
+     that disappears is not a grid item, and the panes below it slide up a row.
+     See the body-grid test above. */
+  const mid = strip({ ...live, replaying: true, replayAt: null, shown: { chapters: [{ title: 'Nutrients' }] } });
+  assert.equal(mid.hidden, false, 'the strip stays through a replay');
+  assert.equal(mid.tabs[1].className.includes('here'), true, 'marking the chapter the replay has reached');
+  const back = strip({ ...live, replaying: true, replayAt: 0, changed: [0, null],
+    shown: { chapters: [{ title: 'Nutrients' }] } });
+  assert.equal(back.tabs[0].className.includes('here'), true, 'and the one it has stepped back into');
+  assert.doesNotMatch(back.html, /growing/, 'with no change-marks: a replay is not news about the live board');
+});
+
+/* A run of amendments to one chapter is one visit, not one per op. Played
+   literally, a replay leaves the chapter being drawn and comes back for each
+   — six round trips to say one thing, which reads as the board thrashing. */
+test('a replay visits an amended chapter once per run of amendments', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
+  const src = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
+  const m = src.match(/export function replayEntries\(log\)[\s\S]*?\n}\n/);
+  assert.ok(m, 'board.html should define replayEntries');
+  const replayEntries = new vm.Script(`${m[0].replace('export ', '')}\nreplayEntries`)
+    .runInNewContext({}, { displayErrors: true });
+
+  const walked = replayEntries([
+    { op: 'chapter', title: 'Nutrients' },
+    { op: 'node', id: 'fat' },
+    { op: 'focus', step: 0 },
+    { op: 'chapter', title: 'Enzymes' },
+    { op: 'node', id: 'lipase' },
+    { op: 'amend', chapter: 1, ops: [{ op: 'node', id: 'protein' }] },
+    { op: 'amend', chapter: 1, ops: [{ op: 'edge', from: 'protein', to: 'energy' }] },
+    { op: 'amend', chapter: 1, ops: [{ op: 'say', text: 'Protein too.' }] },
+    { op: 'node', id: 'bile' },
+    { op: 'amend', chapter: 1, ops: [{ op: 'node', id: 'iron' }] },
+  ]);
+
+  // Array.from, not .map: the arrays come out of the vm's realm, and strict
+  // deepEqual compares prototypes before it compares contents.
+  assert.deepEqual(Array.from(walked, e => e.op),
+    ['chapter', 'node', 'chapter', 'node', 'amend', 'node', 'amend'],
+    'focus is not drawn, and the run of three amendments is one visit');
+  assert.deepEqual(Array.from(walked[4].ops, o => o.op), ['node', 'edge', 'say'],
+    'carrying everything that run did');
+  assert.equal(walked[6].ops.length, 1, 'but an amendment after other work is its own visit');
+  assert.equal(walked[4].chapter, 1, 'and still aimed where it was aimed');
 });
 
 test('the browser-side modules parse', () => {

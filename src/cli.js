@@ -110,10 +110,11 @@ const FLAGS = {
   install: ['detect', 'list', 'path', 'no-path', 'bin-dir'],
   'mcp-config': ['shape'],
   bench: ['list', 'models', 'out', 'timeout'],
-  draw: [], op: [],
+  draw: ['chapter'], op: ['chapter'],
   say: ['step', 'edge'],
   tag: ['step', 'edge', 'match'],
   step: [], script: [], replay: [], settle: [],
+  chapter: [], chapters: [],
   clear: ['keep-title', 'force'],
   render: ['o', 'out', 'step'],
   snapshot: ['o', 'out'],
@@ -218,7 +219,10 @@ async function send(ops, { quiet = false, audit = false } = {}) {
     if (body.errors?.length) console.error(body.errors.join('\n'));
     if (body.warnings?.length) console.error(body.warnings.join('\n'));
     if (body.audit?.lines?.length) console.error(body.audit.lines.join('\n'));
-    console.log(`${url}  ${body.nodes ?? 0} boxes, ${body.edges ?? 0} lines, ${body.steps ?? 0} steps`);
+    const a = body.amended;
+    console.log(a
+      ? `${url}  chapter ${a.chapter} "${a.title || 'untitled'}"  ${a.nodes} boxes, ${a.edges} lines, ${a.steps} steps`
+      : `${url}  ${body.nodes ?? 0} boxes, ${body.edges ?? 0} lines, ${body.steps ?? 0} steps`);
   }
   // A rejected op must not leave a zero exit behind the summary line: scripts
   // and agents read the status, and "it printed something" is not success.
@@ -261,6 +265,7 @@ const HELP = `spiega — a hand-drawn board an agent draws on while it explains
   mcp-config [--shape S]        print the MCP entry to paste into any other harness
   bench <prompt> --models a,b   draw the same explanation with several models
   draw <json|file|->            add to the board (one op, or a list, or a whole spec)
+       [--chapter N|title]      aim them at a chapter already taught instead
   say  <text> [--step N]        put a line in the transcript beside the drawing
   step [N|next|prev|off]        light up one step of the flow
   script                        list the lines, numbered, with the step each is tied to
@@ -494,8 +499,16 @@ const main = async () => {
       return;
     }
 
-    case 'draw': case 'op':
-      return void (await send(await readOps(positional()[0]), { audit: true }));
+    /* `--chapter` aims the same ops at a chapter already taught: the box that
+       was forgotten, the label that was wrong. Without it they land where the
+       drawing is happening now. */
+    case 'draw': case 'op': {
+      const ops = await readOps(positional()[0]);
+      const at = flag('chapter');
+      if (at == null) return void (await send(ops, { audit: true }));
+      const chapter = /^\d+$/.test(String(at).trim()) ? Number(at) : at;
+      return void (await send([{ op: 'amend', chapter, ops }], { audit: true }));
+    }
 
     case 'settle':
       return void (await send([{ op: 'settle' }], { audit: true }));

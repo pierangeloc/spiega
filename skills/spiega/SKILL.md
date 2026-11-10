@@ -260,9 +260,17 @@ Three things to know:
 
 - **Each chapter is its own namespace.** `gw` in this chapter is not the `gw`
   of the last one, so you can re-use the obvious ids.
-- **You draw in the current chapter only.** A chapter you have left is for the
-  reader to walk, not for you to go back and edit. If you realise something is
-  missing there, say so in words.
+- **Going back is aimed, not entered.** To add to a chapter already taught, or
+  fix something in it, aim the ops at it:
+
+  ```bash
+  spiega draw '{"op":"node","id":"protein","label":"Protein"}' --chapter 1
+  ```
+
+  MCP: `board_amend`. The ops are the ordinary ones — drawing the same id again
+  corrects it — and what you are drawing now is untouched. **Say that you have
+  done it**: the person may be looking at a different chapter, and a board
+  changing quietly behind them is worse than one sentence telling them.
 - **`clear` is not this.** `clear` wipes the board and is for starting a
   *different* explanation. Reaching for it between the parts of one is what
   this replaces, and it destroys what the person was just shown.
@@ -342,7 +350,13 @@ or two about what it came out like:
 
 ```
 2 arrows cross a box that is not an end of it: r7>ext through risk, r7>ext through n2
+1 label sits on a line that is not its own: "burns fast" on fat>energy
 ```
+
+The second one means a reader cannot tell which arrow that label belongs to.
+It is worth a word out loud — *"the label on the carbohydrate arrow is sitting
+across the fat one"* — because the person is looking at the picture and you
+are not.
 
 That is a measurement, not a refusal: everything you drew is on the board. It
 is also not a verdict — *"two arrows cross a box"* is a fact, *"this board is

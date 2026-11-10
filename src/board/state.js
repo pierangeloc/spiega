@@ -152,6 +152,7 @@ import { scriptSteps } from './script.js';
 
 /** @typedef {{op: 'clear', keepTitle?: boolean}} ClearOp */
 /** @typedef {{op: 'chapter', title?: string}} ChapterOp */
+/** @typedef {{op: 'amend', chapter: number|string, ops?: Op|Op[]}} AmendOp */
 /** @typedef {{op: 'title', text?: string}} TitleOp */
 /** @typedef {{op: 'say', text?: string, step?: number|string|null, edge?: string}} SayOp */
 /** @typedef {{op: 'tag', match?: string, line?: number|string, step?: number|string|null|false, edge?: string}} TagOp */
@@ -165,8 +166,8 @@ import { scriptSteps } from './script.js';
 /** @typedef {{op: 'remove', id: string}} RemoveOp */
 /** @typedef {{op: 'settle', positions: Placed, routes?: Record<string, import('../render/layout.js').Placement[]>}} SettleOp */
 /**
- * @typedef {ClearOp | ChapterOp | TitleOp | SayOp | TagOp | NodeOp | EdgeOp
- *   | CalloutOp | BoundaryOp | StepOp | FlowOp | FocusOp | RemoveOp
+ * @typedef {ClearOp | ChapterOp | AmendOp | TitleOp | SayOp | TagOp | NodeOp
+ *   | EdgeOp | CalloutOp | BoundaryOp | StepOp | FlowOp | FocusOp | RemoveOp
  *   | SettleOp} Op
  */
 
@@ -245,6 +246,86 @@ function closeChapter(board) {
     placed: board.placed,
     settled: board.settled,
   };
+}
+
+/* Put a surface on the board and take back whatever was there. Called twice,
+   it is a swap: the second call returns the surface the first lent out, with
+   whatever has been drawn on it in between. */
+/** @param {Board} board @param {Chapter} to @returns {Chapter} */
+function swapSurface(board, to) {
+  const was = {
+    title: board.chapter,
+    nodes: board.nodes, edges: board.edges, boundaries: board.boundaries,
+    flow: board.flow, callouts: board.callouts, transcript: board.transcript,
+    active: board.active, placed: board.placed, settled: board.settled,
+  };
+  board.chapter = to.title;
+  board.nodes = to.nodes; board.edges = to.edges; board.boundaries = to.boundaries;
+  board.flow = to.flow; board.callouts = to.callouts; board.transcript = to.transcript;
+  board.active = to.active; board.placed = to.placed; board.settled = to.settled;
+  return was;
+}
+
+/* Every chapter in the order it was taught, the live one last. Numbered from
+   one, as the strip numbers them, because that is the number a person reads
+   off the board and says out loud. */
+/** @param {Board} board @returns {{title: string, live?: boolean}[]} */
+const everyChapter = board =>
+  [...board.chapters.map(c => ({ title: c.title })), { title: board.chapter, live: true }];
+
+/* Which chapter an amendment is aimed at: the number on the strip, or the
+   name on the tab. Returns an index into `everyChapter`, or a sentence saying
+   why not — an agent that has the number wrong is told what the numbers are,
+   because it cannot look at the board to find out. */
+/** @param {Board} board @param {number|string} want @returns {number|string} */
+function chapterWanted(board, want) {
+  const all = everyChapter(board);
+  const list = all.map((c, i) => `${i + 1} ${c.title || 'untitled'}${c.live ? ' (being drawn)' : ''}`).join(', ');
+  if (typeof want === 'number' || /^\d+$/.test(String(want))) {
+    const i = Number(want) - 1;
+    if (i >= 0 && i < all.length) return i;
+    return `there is no chapter ${want}. The chapters are: ${list}.`;
+  }
+  const name = String(want).trim().toLowerCase();
+  const hits = all
+    .map((c, i) => ({ name: (c.title || '').trim().toLowerCase(), i }))
+    .filter(c => c.name === name);
+  if (hits.length === 1) return hits[0].i;
+  if (!hits.length) return `no chapter is called "${want}". The chapters are: ${list}.`;
+  return `"${want}" names ${hits.length} chapters, so say which by number. The chapters are: ${list}.`;
+}
+
+/* What an amendment may not carry. Each of these is about the explanation as a
+   whole, not about one chapter, and inside an amendment each would do
+   something nobody could mean: `clear` would wipe the board from within an
+   edit to one chapter of it. */
+const NOT_AMENDABLE = new Set(['amend', 'chapter', 'clear', 'title']);
+
+/* Draw into a chapter that is no longer the one being drawn on.
+
+   The surface is lent to the board for the length of the amendment: its lists
+   are swapped in, the ops run through exactly the same `applyOps` as anything
+   else, and the surface takes its lists back. That is the whole reason this is
+   small — `node`, `edge`, `remove`, `say`, `step` and `settle` all work on a
+   chapter because none of them can tell the difference.
+
+   The log is lent a scratch array meanwhile: the amendment is one entry in the
+   board's log, carrying the ops it applied, rather than a handful of ops that
+   would replay into the wrong chapter. */
+/** @param {Board} board @param {number} i @param {Op[]} ops @returns {ApplyOpsResult} */
+function amendChapter(board, i, ops) {
+  const live = swapSurface(board, board.chapters[i]);
+  const log = board.log;
+  board.log = [];
+  dropIndexes(board);
+  try {
+    return applyOps(board, ops);
+  } finally {
+    // the second swap hands the amended chapter back and takes the live one
+    board.chapters[i] = swapSurface(board, live);
+    board.log = log;
+    dropIndexes(board);
+  }
 }
 
 /* An id -> index map per board and per upserted list.
@@ -455,6 +536,43 @@ function applyOne(board, op, sweep, warnings = []) {
       }
       board.chapter = title;
       break;
+    }
+
+    /* Something to add to a chapter already taught, or a correction to it.
+
+       Aimed rather than entered: an agent that could *move* to chapter one
+       would have to remember to come back, and the turn it forgot would put
+       the rest of the explanation in the wrong chapter with nothing to say so.
+       An op that names its chapter cannot be left switched on.
+
+       It lands where it is aimed and nowhere else: what is being drawn now is
+       untouched, and so is whoever is reading it. */
+    case 'amend': {
+      const inner = /** @type {Op[]} */ (op.ops == null ? [] : [].concat(/** @type {never} */ (op.ops)));
+      const refused = inner.find(o => o && NOT_AMENDABLE.has(o.op));
+      if (refused) {
+        return { ok: false, fresh, error:
+          `amend: "${refused.op}" is about the whole explanation, not about one chapter of it, ` +
+          `so it cannot go inside an amendment.` };
+      }
+      const where = chapterWanted(board, op.chapter);
+      if (typeof where === 'string') return { ok: false, fresh, error: `amend: ${where}` };
+      /* The live chapter is not an amendment at all: the ops are simply drawn,
+         and they log and replay as the drawing they are. */
+      if (where === board.chapters.length) {
+        const r = applyOps(board, inner);
+        warnings.push(...r.warnings);
+        if (r.errors.length) return { ok: false, fresh: r.fresh, error: r.errors.join('; ') };
+        return { ok: true, fresh: r.fresh, op: { op: 'amend', chapter: where + 1, ops: r.applied } };
+      }
+      const r = amendChapter(board, where, inner);
+      warnings.push(...r.warnings);
+      if (r.errors.length) return { ok: false, fresh: r.fresh, error: r.errors.join('; ') };
+      // logged as one entry, carrying what actually landed
+      board.log.push({ op: 'amend', chapter: where + 1, ops: r.applied, at: Date.now() });
+      if (board.log.length > LOG_CAP) board.log.splice(0, board.log.length - LOG_CAP);
+      board.rev++;
+      return { ok: true, fresh: r.fresh, op: { op: 'amend', chapter: where + 1, ops: r.applied } };
     }
 
     case 'title':
