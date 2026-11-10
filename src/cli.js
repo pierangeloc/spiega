@@ -267,6 +267,8 @@ const HELP = `spiega — a hand-drawn board an agent draws on while it explains
   tag <N> --step M              tie line N to step M (--match TEXT, --step off)
   replay                        play the board back from its own log, as a movie
   settle                        tidy the finished board once and freeze its positions
+  chapter <title>               start the next chapter, keeping the one just drawn
+  chapters                      the chapters of this explanation, and which is live
   clear [--keep-title]          wipe the board
   render <spec.json> -o F.html  render a spec to a standalone file, no server
   snapshot [-o F.html]          save the live board as a standalone file
@@ -497,6 +499,32 @@ const main = async () => {
 
     case 'settle':
       return void (await send([{ op: 'settle' }], { audit: true }));
+
+    /* The break that keeps what came before. `clear` is still there for a new
+       subject; this is for the next part of the same explanation. */
+    case 'chapter': {
+      const title = positional().join(' ');
+      if (!title) die('spiega chapter: name the chapter');
+      return void (await send([{ op: 'chapter', title }]));
+    }
+
+    case 'chapters': {
+      const url = await boardURL({ autostart: false });
+      if (!url) die('spiega chapters: no board is running');
+      const b = await (await fetch(url + '/state')).json();
+      const { c, sym, heading } = await import('./term.js');
+      const g = sym();
+      const all = [...(b.chapters || []).map(ch => ({ ...ch, live: false })),
+        { title: b.chapter, nodes: b.nodes, transcript: b.transcript, live: true }];
+      if (all.length === 1 && !b.chapter) return void console.log('one board, no chapters');
+      console.log(heading('spiega chapters'));
+      all.forEach((ch, i) => {
+        const name = ch.title || c.dim('untitled');
+        const size = c.dim(`${ch.nodes.length} boxes ${g.dot} ${ch.transcript.length} lines`);
+        console.log(`  ${c.dim(String(i + 1).padStart(3))} ${ch.live ? c.accent(g.dot) : ' '} ${name}  ${size}`);
+      });
+      return;
+    }
 
     case 'say': {
       const step = flag('step'), edge = flag('edge');

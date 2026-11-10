@@ -237,6 +237,40 @@ lines are tied to nothing, the person is reading an unlit rail; if it says the
 tags run backwards, the script and the flow are telling two different stories
 and the reader has to reconcile them.
 
+## When the subject moves on: chapters
+
+An explanation with parts — four topics in a chapter of a book, three
+subsystems in a design, the files of a review — is one explanation, not four
+boards. Break it:
+
+```bash
+spiega chapter "Enzymes"
+```
+
+MCP: `board_chapter`. What is on the board is set aside whole — its drawing,
+its script, its steps, all still walkable — and you get a clean surface under
+the same title. The board grows a strip of tabs, so the person can see that
+the earlier parts exist and walk back to them, and `replay` plays straight
+through the breaks as one thing.
+
+Name the first chapter before you draw it, so the strip reads as an
+explanation rather than as "untitled, Enzymes".
+
+Three things to know:
+
+- **Each chapter is its own namespace.** `gw` in this chapter is not the `gw`
+  of the last one, so you can re-use the obvious ids.
+- **You draw in the current chapter only.** A chapter you have left is for the
+  reader to walk, not for you to go back and edit. If you realise something is
+  missing there, say so in words.
+- **`clear` is not this.** `clear` wipes the board and is for starting a
+  *different* explanation. Reaching for it between the parts of one is what
+  this replaces, and it destroys what the person was just shown.
+
+Reach for a chapter when the subject moves on, and when the board is filling
+up: ten boxes is a board someone can hold in their head, and the next ten
+belong on the next chapter rather than crammed into this one.
+
 ## Playing it back
 
 A board keeps the order it was drawn in, so the explanation can be run again
@@ -297,7 +331,8 @@ explanation was worth keeping; do not save one every time.
   pass `body` (`tomato` `mustard` `mint` `cobalt` `blush` `slate` `paper`) when
   you are deliberately grouping things that the kinds do not already group.
 - Starting a new explanation? `spiega clear` first. A board holding two
-  unrelated systems is worse than no board.
+  unrelated systems is worse than no board. The *next part of the same*
+  explanation is `spiega chapter` instead, which keeps what you have drawn.
 
 ## What the reply tells you about the picture
 
@@ -325,9 +360,11 @@ so the same board gives you the same picture. Changing the board — one fewer
 note, a shorter label, the decorative edge dropped — is not redrawing it, and
 does.
 
-A count of crossings is the one that usually has a remedy you can apply on the
-spot: **step it**. A dense board is unreadable flat and readable one
-relationship at a time, so add the steps and walk them, as above.
+Two remedies you can apply on the spot. A count of crossings usually means
+**step it**: a dense board is unreadable flat and readable one relationship at
+a time, so add the steps and walk them. A board that has simply grown too big
+wants **the next chapter** — `spiega chapter "<what comes next>"` keeps
+everything already explained and gives the rest its own surface.
 
 ## When something is wrong
 

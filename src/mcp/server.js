@@ -163,8 +163,25 @@ const TOOLS = [
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'board_chapter',
+    description:
+      'Start the next chapter of this explanation. What is on the board is set aside whole — it keeps its ' +
+      'drawing, its script and its steps, and the person can walk back to it — and you get a clean surface ' +
+      'under the same title.\n' +
+      'Use it when the subject moves on within one explanation: the second system, the next topic, the part ' +
+      'after this one. Use it rather than board_clear, which destroys what is on screen and is for a new ' +
+      'explanation altogether. Also reach for it when a board is getting full: the board tells you when the ' +
+      'drawing is crowded, and a chapter is where the rest of it goes.\n' +
+      'Call it before drawing the first chapter too, to name it. Ops always land in the current chapter; ' +
+      'you cannot draw into one you have left.',
+    inputSchema: {
+      type: 'object', required: ['title'],
+      properties: { title: { type: 'string', description: 'What this chapter is about. Short — it rides a tab.' } },
+    },
+  },
+  {
     name: 'board_clear',
-    description: 'Wipe the board and start a new explanation.',
+    description: 'Wipe the board and start a new explanation. For the next part of the same one, use board_chapter.',
     inputSchema: {
       type: 'object',
       properties: { keepTitle: { type: 'boolean', description: 'Keep the current title.' } },
@@ -284,6 +301,9 @@ async function call(name, args = {}) {
         ? `replaying ${r.ops} ops for ${r.viewers} viewer${r.viewers === 1 ? '' : 's'}`
         : `${r.ops} ops ready, but no window is watching \u2014 call board_open first`;
     }
+
+    case 'board_chapter':
+      return send([{ op: 'chapter', title: String(args.title ?? '') }]);
 
     case 'board_clear':
       return send([{ op: 'clear', keepTitle: !!args.keepTitle }]);

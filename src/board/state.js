@@ -16,6 +16,7 @@
    ============================================================ */
 
 import { KINDS } from '../render/glyphs.js';
+import { scriptSteps } from './script.js';
 
 /** @typedef {import('../render/layout.js').Placed} Placed */
 
@@ -106,8 +107,34 @@ import { KINDS } from '../render/glyphs.js';
  */
 
 /**
+ * One drawing surface: everything a board held before chapters existed. A
+ * finished chapter is exactly this, set aside whole, which is why the renderer
+ * and the rail take one without knowing chapters are a thing.
+ *
+ * @typedef {Object} Chapter
+ * @property {string} title
+ * @property {Node[]} nodes
+ * @property {Edge[]} edges
+ * @property {Boundary[]} boundaries
+ * @property {FlowStep[]} flow
+ * @property {Callout[]} callouts
+ * @property {TranscriptLine[]} transcript
+ * @property {number|null} active
+ * @property {Placed} placed
+ * @property {boolean} settled
+ */
+
+/**
+ * The board is one explanation. Its current chapter lives directly on it —
+ * `nodes`, `edges` and the rest, where they have always been — and the
+ * chapters it has finished sit beside it in `chapters`, in the order they were
+ * taught. One title names the explanation; `chapter` names the surface being
+ * drawn on now.
+ *
  * @typedef {Object} Board
  * @property {string} title
+ * @property {string} chapter
+ * @property {Chapter[]} chapters
  * @property {Node[]} nodes
  * @property {Edge[]} edges
  * @property {Boundary[]} boundaries
@@ -124,6 +151,7 @@ import { KINDS } from '../render/glyphs.js';
 /* The wire format: one object per line in the log and one POST body per op. */
 
 /** @typedef {{op: 'clear', keepTitle?: boolean}} ClearOp */
+/** @typedef {{op: 'chapter', title?: string}} ChapterOp */
 /** @typedef {{op: 'title', text?: string}} TitleOp */
 /** @typedef {{op: 'say', text?: string, step?: number|string|null, edge?: string}} SayOp */
 /** @typedef {{op: 'tag', match?: string, line?: number|string, step?: number|string|null|false, edge?: string}} TagOp */
@@ -137,17 +165,36 @@ import { KINDS } from '../render/glyphs.js';
 /** @typedef {{op: 'remove', id: string}} RemoveOp */
 /** @typedef {{op: 'settle', positions: Placed, routes?: Record<string, import('../render/layout.js').Placement[]>}} SettleOp */
 /**
- * @typedef {ClearOp | TitleOp | SayOp | TagOp | NodeOp | EdgeOp | CalloutOp
- *   | BoundaryOp | StepOp | FlowOp | FocusOp | RemoveOp | SettleOp} Op
+ * @typedef {ClearOp | ChapterOp | TitleOp | SayOp | TagOp | NodeOp | EdgeOp
+ *   | CalloutOp | BoundaryOp | StepOp | FlowOp | FocusOp | RemoveOp
+ *   | SettleOp} Op
  */
 
 /** @typedef {{nodes: string[], edges: string[], boundaries: string[]}} Fresh */
 /** @typedef {{ok: true, fresh: Fresh, op: Op} | {ok: false, error: string, fresh: Fresh}} ApplyResult */
 /** @typedef {{fresh: Fresh, errors: string[], warnings: string[], applied: Op[]}} ApplyOpsResult */
 
+/* The fields a chapter owns. A chapter break puts these aside and starts them
+   again; everything else on the board — its title, its log, its revision — is
+   the explanation's and outlives any one chapter. */
+/** @returns {Omit<Chapter, 'title'>} */
+export const emptySurface = () => ({
+  nodes: [],
+  edges: [],
+  boundaries: [],
+  flow: [],
+  callouts: [],
+  transcript: [],
+  active: null,
+  placed: {},
+  settled: false,
+});
+
 /** @returns {Board} */
 export const emptyBoard = () => ({
   title: '',
+  chapter: '',
+  chapters: [],
   nodes: [],
   edges: [],
   boundaries: [],
@@ -166,6 +213,39 @@ export const emptyBoard = () => ({
 });
 
 export const LOG_CAP = 4000;
+
+/* Nothing drawn and nothing said. A `chapter` op here is naming the surface
+   rather than ending it. */
+/** @param {Board} b */
+const blankSurface = b => !b.nodes.length && !b.edges.length && !b.boundaries.length &&
+  !b.callouts.length && !b.flow.length && !b.transcript.length;
+
+/* A chapter as it is set aside, with its script already attributed.
+
+   Which line belongs to which step is partly worked out by walking the log and
+   counting `say` ops positionally (board/script.js). That walk can only line
+   up with the transcript of the chapter being drawn now — the log holds every
+   chapter's lines, the transcript holds one chapter's — so a finished chapter
+   has to carry its own answer, resolved here while the walk still applies to
+   it. The arrays themselves are handed over rather than copied: the live
+   fields are replaced wholesale a line later, so nothing is shared. */
+/** @param {Board} board @returns {Chapter} */
+function closeChapter(board) {
+  const at = scriptSteps(board);
+  return {
+    title: board.chapter,
+    nodes: board.nodes,
+    edges: board.edges,
+    boundaries: board.boundaries,
+    flow: board.flow,
+    callouts: board.callouts,
+    transcript: board.transcript.map((line, i) =>
+      (line.step != null || at[i] == null ? line : { ...line, step: at[i] })),
+    active: board.active,
+    placed: board.placed,
+    settled: board.settled,
+  };
+}
 
 /* An id -> index map per board and per upserted list.
 
@@ -355,6 +435,28 @@ function applyOne(board, op, sweep, warnings = []) {
       sweep.ids.length = 0;
       break;
     }
+    /* A chapter break. The surface being drawn on is set aside whole and a new
+       one started, so the explanation keeps everything it has taught so far
+       instead of `clear` destroying it on screen — which is the only chapter
+       break there used to be, and is why four chapters of one explanation
+       ended up as four orphan files in ~/Downloads (#51).
+
+       Naming an empty surface rather than setting it aside: `chapter` at the
+       start of an explanation is how the first chapter gets its name, and
+       pushing a blank one there would put an empty tab in front of everything
+       that follows. */
+    case 'chapter': {
+      const title = String(op.title || '');
+      if (!blankSurface(board)) {
+        board.chapters.push(closeChapter(board));
+        Object.assign(board, emptySurface());
+        dropIndexes(board);
+        sweep.ids.length = 0;
+      }
+      board.chapter = title;
+      break;
+    }
+
     case 'title':
       board.title = op.text || '';
       break;
@@ -608,22 +710,39 @@ export function applyOps(board, ops) {
 export function boardOps(board) {
   /** @type {Op[]} */
   const ops = [{ op: 'title', text: board.title || '' }];
-  for (const n of board.nodes) ops.push({ op: 'node', ...n });
-  for (const b of board.boundaries) ops.push({ op: 'boundary', ...b });
-  for (const e of board.edges) ops.push({ op: 'edge', ...e });
-  for (const c of board.callouts) ops.push({ op: 'callout', ...c });
-  if (board.flow.length) ops.push({ op: 'flow', steps: board.flow.slice() });
-  for (const line of board.transcript) {
-    /** @type {SayOp} */
-    const s = { op: 'say', text: line.text };
-    if (line.step != null) s.step = line.step + 1;
-    if (line.edge) s.edge = line.edge;
-    ops.push(s);
+  /* Each chapter rebuilt in the order it was taught, each opened by the op
+     that starts it. The first `chapter` lands on an empty surface and so only
+     names it, which is exactly what it did the first time round. */
+  for (const c of board.chapters) {
+    ops.push({ op: 'chapter', title: c.title || '' });
+    ops.push(...surfaceOps(c));
   }
-  if (board.settled) ops.push({ op: 'settle', positions: { ...board.placed },
-    routes: Object.fromEntries(board.edges.filter(e => e.via?.length).map(e => [edgeId(e), (e.via || []).map(p => ({ ...p }))])),
+  if (board.chapters.length || board.chapter) ops.push({ op: 'chapter', title: board.chapter || '' });
+  ops.push(...surfaceOps(board));
+  return ops;
+}
+
+/* One surface as the ops that rebuild it. */
+/** @param {Chapter|Board} s @returns {Op[]} */
+function surfaceOps(s) {
+  /** @type {Op[]} */
+  const ops = [];
+  for (const n of s.nodes) ops.push({ op: 'node', ...n });
+  for (const b of s.boundaries) ops.push({ op: 'boundary', ...b });
+  for (const e of s.edges) ops.push({ op: 'edge', ...e });
+  for (const c of s.callouts) ops.push({ op: 'callout', ...c });
+  if (s.flow.length) ops.push({ op: 'flow', steps: s.flow.slice() });
+  for (const line of s.transcript) {
+    /** @type {SayOp} */
+    const say = { op: 'say', text: line.text };
+    if (line.step != null) say.step = line.step + 1;
+    if (line.edge) say.edge = line.edge;
+    ops.push(say);
+  }
+  if (s.settled) ops.push({ op: 'settle', positions: { ...s.placed },
+    routes: Object.fromEntries(s.edges.filter(e => e.via?.length).map(e => [edgeId(e), (e.via || []).map(p => ({ ...p }))])),
   });
-  if (board.active != null) ops.push({ op: 'focus', step: board.active });
+  if (s.active != null) ops.push({ op: 'focus', step: s.active });
   return ops;
 }
 

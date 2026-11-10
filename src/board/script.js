@@ -51,14 +51,21 @@ export function scriptSteps(board) {
   /** @param {number|null} i @returns {number|null} */
   const clamp = i => (typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < flow.length ? i : null);
 
-  // What was lit when each line was said, in log order. The log holds `say`
-  // ops in the same order as the transcript, so the two line up by counting.
+  /* What was lit when each line was said, in log order. The log holds `say`
+     ops in the same order as the transcript, so the two line up by counting.
+
+     One log, several chapters: the transcript is the current chapter's and the
+     log is the whole explanation's, so counting from the top would file this
+     chapter's lines under the steps of the one before it. Every chapter break
+     starts the count again, and a chapter already set aside carries its own
+     answer and never reaches this walk (see closeChapter in state.js). */
   /** @type {(number|null)[]} */
-  const whileLit = [];
+  let whileLit = [];
   /** @type {number|null} */
   let lit = null;
   for (const e of board?.log || []) {
-    if (e.op === 'focus') lit = e.step == null ? null : Number(e.step);
+    if (e.op === 'chapter') { whileLit = []; lit = null; }
+    else if (e.op === 'focus') lit = e.step == null ? null : Number(e.step);
     else if (e.op === 'say') whileLit.push(lit);
   }
 

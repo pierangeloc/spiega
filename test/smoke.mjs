@@ -378,6 +378,33 @@ test('the board page module parses', () => {
   parses(m[1], 'board.html <script type=module>');
 });
 
+/* The page is one grid: a row for the bar, a row for the chapter strip, and
+   the rest for the board. Adding a pane to the markup without adding its row
+   is silent and total — the new pane takes the `1fr` and the board collapses
+   to the height of its own content, which is how the chapter strip first
+   shipped into a window with the drawing squeezed into a band at the bottom.
+   Nothing throws, nothing fails, and the page looks destroyed. */
+test('every pane on the board page has a row in the body grid', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
+  const rows = html.match(/grid-template-rows:\s*([^;}]+)/);
+  assert.ok(rows, 'body should lay its panes out in a grid');
+  const tracks = rows[1].trim().split(/\s+/).length;
+
+  // top-level elements between <body> and the page's script, by depth
+  const markup = html.slice(html.indexOf('<body>') + 6, html.indexOf('<script type="module">'));
+  const panes = [];
+  let depth = 0;
+  for (const m of markup.matchAll(/<(\/?)([a-z0-9]+)\b[^>]*?(\/?)>/g)) {
+    const [, close, tag, self] = m;
+    if (self || tag === 'br' || tag === 'img') continue;
+    if (close) { depth--; continue; }
+    if (depth === 0) panes.push(tag);
+    depth++;
+  }
+  assert.equal(tracks, panes.length,
+    `the body grid has ${tracks} rows for ${panes.length} panes (${panes.join(', ')})`);
+});
+
 test('the browser-side modules parse', () => {
   for (const f of ['src/board/draw-on.js', 'src/board/narrate.js', 'src/render/render.js', 'src/render/ink.js',
                    'src/render/glyphs.js', 'src/render/edges.js', 'src/render/layout.js']) {
@@ -4041,6 +4068,13 @@ await atest('a board that is not being saved says so', async () => {
   const { stdout } = await promisify(execFile)(
     process.execPath, [path.join(ROOT, 'test/saving.mjs')],
     { env: { ...process.env }, maxBuffer: 4 << 20 });
+  process.stdout.write(stdout);
+});
+
+await atest('one explanation keeps the chapters it has already taught', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { stdout } = await promisify(execFile)(process.execPath, [path.join(ROOT, 'test/chapters.mjs')]);
   process.stdout.write(stdout);
 });
 
