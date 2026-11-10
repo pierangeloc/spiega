@@ -45,16 +45,12 @@ export function indexFlow(spec) {
   return { stepOf, steps };
 }
 
-/* What is lit, what is dimmed, at a given step. null = everything plain. */
+/* What one step lights: its own hop, both ends of it, and anything it names. */
 /**
- * @param {Board} spec
- * @param {FlowStep[]} steps
- * @param {number|null} active
- * @returns {{nodes: Set<string>, edges: Set<string>}|null}
+ * @param {FlowStep} s
+ * @returns {{nodes: Set<string>, edges: Set<string>}}
  */
-function focusAt(spec, steps, active) {
-  if (active == null || !steps[active]) return null;
-  const s = steps[active];
+function lightsOf(s) {
   /** @type {Set<string>} */
   const nodes = new Set(s.lights || []);
   /** @type {Set<string>} */
@@ -65,6 +61,51 @@ function focusAt(spec, steps, active) {
     nodes.add(a); nodes.add(b);
   }
   return { nodes, edges };
+}
+
+/* What is lit, what is context, and what is dimmed, at a given step.
+   null = everything plain.
+
+   Three tiers, but not three opacities — that was the worry in #54 and it is
+   the wrong way to read it. There are two independent things to say, and they
+   use different means:
+
+     opacity   says whether a thing is part of the phase being explained
+     orange    says which single hop is happening now
+
+   So a node or an edge that belongs to the active step's phase, but is not the
+   step itself, is drawn exactly as it is drawn on a board with no step lit at
+   all: full strength, no halo, no accent. It is not a middle state; it is the
+   board's ordinary state, and what moves is everything around it. A reader
+   sees the phase standing clear of the rest of the drawing, and within it one
+   arrow coloured in.
+
+   `context` is empty when the active step names no phase, which makes a
+   grouped board behave exactly as an ungrouped one until somebody groups
+   something. */
+/**
+ * @param {Board} spec
+ * @param {FlowStep[]} steps
+ * @param {number|null} active
+ * @returns {{nodes: Set<string>, edges: Set<string>, context: {nodes: Set<string>, edges: Set<string>}}|null}
+ */
+function focusAt(spec, steps, active) {
+  if (active == null || !steps[active]) return null;
+  const s = steps[active];
+  const { nodes, edges } = lightsOf(s);
+  /** @type {Set<string>} */
+  const cn = new Set();
+  /** @type {Set<string>} */
+  const ce = new Set();
+  if (s.group) {
+    for (const peer of steps) {
+      if (peer === s || peer.group !== s.group) continue;
+      const also = lightsOf(peer);
+      for (const id of also.nodes) if (!nodes.has(id)) cn.add(id);
+      for (const key of also.edges) if (!edges.has(key)) ce.add(key);
+    }
+  }
+  return { nodes, edges, context: { nodes: cn, edges: ce } };
 }
 
 /* Which way a field's notch points.
@@ -184,7 +225,12 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
       `</g>`;
 
   for (const r of planned) {
-    const state = !focus ? 'idle' : focus.edges.has(r.key) ? 'lit' : 'dim';
+    /* In the phase but not the step: drawn as it is on a board with nothing
+       lit, which is what makes the phase read as a region rather than as a
+       third shade of grey. */
+    const state = !focus ? 'idle'
+      : focus.edges.has(r.key) ? 'lit'
+      : focus.context.edges.has(r.key) ? 'idle' : 'dim';
     body += drawEdge(r, { step: stepFor(r), state, place: tags.get(r.key)?.at || null });
   }
 
@@ -195,7 +241,8 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
     // one sentence explaining why a step matters fades out exactly when that
     // step is being explained.
     const state = !focus || n.kind === 'note' ? 'idle'
-      : focus.nodes.has(n.id) ? 'lit' : 'dim';
+      : focus.nodes.has(n.id) ? 'lit'
+      : focus.context.nodes.has(n.id) ? 'idle' : 'dim';
     const halo = state === 'lit'
       ? stroke(roughRect(box.x - 8, box.y - 8, box.w + 16, box.h + 16, 16,
           { seed: hashSeed(n.id) % 9999, amp: 1.3, step: 30 }),
@@ -211,7 +258,8 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   for (const p of calls) {
     const key = String(p.c.at || '');
     const state = !focus ? 'idle'
-      : (focus.edges.has(key) || focus.nodes.has(key)) ? 'lit' : 'dim';
+      : (focus.edges.has(key) || focus.nodes.has(key)) ? 'lit'
+      : (focus.context.edges.has(key) || focus.context.nodes.has(key)) ? 'idle' : 'dim';
     body += drawCallout(p, { state });
   }
 

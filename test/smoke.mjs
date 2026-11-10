@@ -4194,6 +4194,13 @@ await atest('a board that is saved but not open is still a board', async () => {
   process.stdout.write(stdout);
 });
 
+await atest('a step can say which phase of the explanation it belongs to', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { stdout } = await promisify(execFile)(process.execPath, [path.join(ROOT, 'test/groups.mjs')]);
+  process.stdout.write(stdout);
+});
+
 await atest('one explanation keeps the chapters it has already taught', async () => {
   const { execFile } = await import('node:child_process');
   const { promisify } = await import('node:util');

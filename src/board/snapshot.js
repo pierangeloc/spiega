@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 
 import { renderSVG } from '../render/render.js';
-import { lineStates } from './script.js';
+import { lineStates, groupRuns } from './script.js';
 import { PAPER, PANEL, INK, MUTED, RULE, SOFT, ACCENT, MONO, paperTexture } from '../render/theme.js';
 
 const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -52,10 +52,14 @@ export function snapshotHTML(board, { active = null, title = null } = {}) {
   // The drawing dims what this step is not about, so the script does too —
   // the two halves are one picture, and lineStates is what decides for both.
   const states = lineStates({ ...board, active: Number.isFinite(step) ? step : null });
+  // And the phases the lines fall into, headed where each run starts — a still
+  // that lost the grouping would disagree with the board it was taken from.
+  const phases = new Map(groupRuns(board).map(r => [r.from, r.label]));
   const said = (board.transcript || []).map((t, i) => {
     const { step: sn, state } = states[i];
     const cls = state === 'idle' || state === 'free' ? '' : ` class="${state}"`;
-    return `<li${cls}>${sn == null ? '' : `<span class="tag">step ${sn + 1}</span>`}${mdish(t.text)}</li>`;
+    const head = phases.has(i) ? `<li class="phase">${mdish(phases.get(i))}</li>` : '';
+    return head + `<li${cls}>${sn == null ? '' : `<span class="tag">step ${sn + 1}</span>`}${mdish(t.text)}</li>`;
   }).join('');
   const flow = (steps || []).map((s, i) =>
     `<li${i === step ? ' class="on"' : ''}><span class="n">${s._n ?? '·'}</span>${esc(s.step || s.edge || '')}</li>`).join('');
@@ -91,6 +95,10 @@ ${favicon()}
   li .tag{display:block;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:${MUTED};font-weight:700;margin-bottom:2px}
   li.on .tag{color:${ACCENT}}
   li.off{opacity:.45}
+  /* a phase heading, not a card: no border, no background, a rule beside it */
+  li.phase{background:none;border:0;border-radius:0;padding:4px 2px 0;font-size:10px;font-weight:700;
+    letter-spacing:.13em;text-transform:uppercase;color:${MUTED};display:flex;align-items:center;gap:8px}
+  li.phase::after{content:"";flex:1;height:1.5px;background:${RULE}}
   code{background:${SOFT};padding:1px 4px;border-radius:4px}
   footer{margin-top:30px;color:${MUTED};font-size:11px;letter-spacing:.06em;
     display:flex;align-items:center;gap:7px}

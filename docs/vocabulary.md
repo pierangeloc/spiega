@@ -15,7 +15,8 @@ MCP tool. Ops are applied in order and the board is their accumulation.
 | `edge` | a labelled line between two boxes | `from` `to` `label` `async` |
 | `boundary` | a dashed enclosure around several boxes | `label` `members[]` |
 | `callout` | a label joined to a point by a leader line | `at` `label` `side` |
-| `step` | one numbered hop of the flow | `edge` `step` `lights[]` |
+| `step` | one numbered hop of the flow | `edge` `step` `lights[]` `group` |
+| `group` | name a phase several steps belong to | `id` `label` |
 | `flow` | replace the whole flow at once | `steps[]` |
 | `say` | a line of the script, beside the drawing | `text` `step` \| `edge` |
 | `tag` | tie a line already said to a step | `line` \| `match`, `step` \| `edge` |
@@ -246,6 +247,35 @@ a `step` and walking that step lights those words with that hop; leave it
 untagged and it never dims, which is right for an opening or closing remark.
 
 An edge is named `from>to`, which is how `step` and `tag` refer to one.
+
+### Phases of a longer explanation
+
+Four steps that are all one thing — a reaction, a handshake, a retry — can say
+so. A step names the phase it belongs to, and a `group` op carries the name to
+show for it:
+
+```json
+{"op":"group","id":"combustion","label":"Verbranding"}
+{"op":"step","edge":"glucose>cell","step":"Glucose enters","group":"combustion"}
+```
+
+The rail puts a header over the run of lines whose steps belong to one phase.
+A step names its group and a group never lists its steps, so steps can be
+added to a phase later without anything being restated. `label` is optional
+and defaults to the `id`; the `group` op may arrive before or after the steps
+that name it, and a step naming a group nobody declared is not an error — it
+groups under that id and is headed with it.
+
+On the drawing, walking a step that belongs to a phase leaves the rest of that
+phase at full strength and dims everything else. That is two things said by two
+means rather than three shades of one: opacity says what is part of the phase,
+and the accent and halo say which single hop is happening now. The rest of the
+phase is drawn exactly as it is on a board with no step lit at all, so what
+moves is the board around it.
+
+Lines are shown in the order they were said, which grouping does not reorder,
+so a phase whose lines are interrupted by something else gets one header per
+stretch rather than one header spanning lines it is not about.
 
 ## Chapters
 
