@@ -334,15 +334,25 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
          and the flush happens on its own timer. This route is on the critical
          path of somebody talking. */
       if (applied.length) entry.log?.push(applied);
-      broadcast(entry, 'patch', { board, fresh });
+      /* Which chapters moved, for the windows whose reader is somewhere else:
+         a tab that changed quietly behind someone is the thing chapters are
+         meant to prevent. */
+      const amended = applied.filter(o => o.op === 'amend').map(o => o.chapter);
+      broadcast(entry, 'patch', { board, fresh, amended });
       /* A warning is not a refusal: the op landed, and the status says so.
          It rides back on the same response because the agent that drew the
          box is listening to exactly one thing, and only until its next turn. */
+      /* An amendment was aimed at a chapter, so that is the chapter the reply
+         is about: counting the one being drawn on would answer a question
+         nobody asked, in the same breath as the answer to the one they did. */
+      const aimed = amended.length ? surfaceOf(board, amended[amended.length - 1]) : null;
       return json(res, errors.length ? 207 : 200, {
         ok: !errors.length, errors, warnings, rev: board.rev,
         nodes: board.nodes.length, edges: board.edges.length, steps: board.flow.length,
         viewers: entry.clients.size,
-        ...(ops && ops.audit ? { audit: await auditBoard(board) } : {}),
+        ...(aimed ? { amended: { chapter: amended[amended.length - 1], title: aimed.title ?? board.chapter,
+          nodes: aimed.nodes.length, edges: aimed.edges.length, steps: aimed.flow.length } } : {}),
+        ...(ops && ops.audit ? { audit: await auditBoard(aimed || board) } : {}),
       });
     }
 
@@ -439,6 +449,10 @@ function index(res, boards) {
    A board that cannot be rendered says nothing here. The ops landed, the
    status says so, and an explanation does not stop because the measurement
    of it failed. */
+/* The chapter a number names, counting from one as the strip does. The last
+   number is the chapter being drawn on, which lives on the board itself. */
+const surfaceOf = (board, n) => board.chapters[Number(n) - 1] || null;
+
 async function auditBoard(board) {
   try {
     const { renderSVG } = await import('../render/render.js');

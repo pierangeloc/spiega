@@ -23,6 +23,7 @@ MCP tool. Ops are applied in order and the board is their accumulation.
 | `focus` | light one step; `null` clears | `step` (0-based) |
 | `remove` | delete a node and everything touching it | `id` |
 | `chapter` | set this surface aside and start the next one, under the same title | `title` |
+| `amend` | aim ops at a chapter already taught | `chapter` (number or title), `ops` |
 | `clear` | wipe the board | `keepTitle` |
 | `settle` | tidy the finished board once, then freeze positions and edge lanes | `positions`, `routes` (recorded result; omit when asking to settle) |
 
@@ -264,9 +265,23 @@ Called before anything is drawn, it names the chapter you are on rather than
 setting an empty one aside.
 
 Each chapter is its own namespace: `gw` in chapter 3 is a different box from
-`gw` in chapter 1, and drawing it again does not reach back. Ops always land
-in the chapter being drawn on now — a chapter you have left is for the reader
-to walk, not for you to edit.
+`gw` in chapter 1, and drawing it again does not reach back. Ops land in the
+chapter being drawn on now unless they are aimed somewhere else:
+
+```json
+{"op":"amend","chapter":1,"ops":[{"op":"node","id":"protein","label":"Protein"}]}
+{"op":"amend","chapter":"Enzymes","ops":{"op":"node","id":"fat","label":"Fat (38 kJ/g)"}}
+```
+
+`chapter` is the number on the strip, counting from one, or the exact title.
+The ops are the ordinary ones and behave as they always do — drawing the same
+id again corrects it — except that they land in that chapter and change
+nothing about the one being drawn on now. Its tab marks itself, so a reader
+somewhere else can see that something was added back there.
+
+An amendment is aimed, never entered: there is no "go back to chapter one"
+mode to forget to leave. `amend`, `chapter`, `clear` and `title` are about the
+whole explanation and are refused inside one.
 
 Use it when the subject moves on within one explanation, and when a board has
 got too full to read. Use `clear` only to start a different explanation: it

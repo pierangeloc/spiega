@@ -132,6 +132,82 @@ await test('the audit measures the live chapter, so a break clears it', async ()
   assert.equal(b.chapters[0].nodes.length, 14, 'while the crowded chapter is still there to read');
 });
 
+/* ---------- going back to a chapter already taught ---------- */
+
+/* Aimed, never entered. An agent that could *move* to chapter one would have
+   to remember to come back, and the turn it forgot would put the rest of the
+   explanation in the wrong chapter with nothing on screen to say so. */
+await test('an amendment lands in the chapter it names and nowhere else', async () => {
+  const b = drawn(taught);
+  const r = applyOps(b, [{ op: 'amend', chapter: 1, ops: [
+    { op: 'node', id: 'protein', label: 'Protein' },
+    { op: 'edge', from: 'protein', to: 'energy', label: '17 kJ/g' },
+    { op: 'say', text: 'Protein too, in a pinch.' },
+  ] }]);
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.fresh.nodes, ['protein'], 'what is new is reported as new, so the page can draw it on');
+  assert.deepEqual(b.chapters[0].nodes.map(x => x.id), ['fat', 'energy', 'protein']);
+  assert.equal(b.chapters[0].transcript.length, 2);
+  assert.deepEqual(b.nodes.map(x => x.id), ['fat', 'lipase'], 'the chapter being drawn on is untouched');
+  assert.equal(b.chapter, 'Enzymes', 'and still the one being drawn on');
+});
+
+await test('a chapter can be named by its title, and corrected by drawing it again', async () => {
+  const b = drawn(taught);
+  applyOps(b, [{ op: 'amend', chapter: 'Nutrients', ops: { op: 'node', id: 'fat', label: 'Fat (38 kJ/g)' } }]);
+  assert.equal(b.chapters[0].nodes.find(x => x.id === 'fat').label, 'Fat (38 kJ/g)');
+  assert.equal(b.chapters[0].nodes.length, 2, 'corrected, not added a second time');
+  assert.equal(b.nodes.find(x => x.id === 'fat').label, 'Fat',
+    'the box of the same name in the live chapter is a different box, and keeps its own label');
+});
+
+/* An agent cannot look at the board to find the number it got wrong. */
+await test('a chapter that is not there is answered with the ones that are', async () => {
+  const b = drawn(taught);
+  const { errors } = applyOps(b, [{ op: 'amend', chapter: 9, ops: [] }]);
+  assert.match(errors[0], /there is no chapter 9/);
+  assert.match(errors[0], /1 Nutrients, 2 Enzymes \(being drawn\)/);
+  assert.match(applyOps(b, [{ op: 'amend', chapter: 'Spoilage', ops: [] }]).errors[0],
+    /no chapter is called "Spoilage"/);
+});
+
+await test('what is about the whole explanation is refused inside an amendment', async () => {
+  const b = drawn(taught);
+  for (const op of ['clear', 'chapter', 'title', 'amend']) {
+    const { errors } = applyOps(b, [{ op: 'amend', chapter: 1, ops: [{ op }] }]);
+    assert.match(errors[0] || '', new RegExp(`"${op}" is about the whole explanation`), `${op} should be refused`);
+  }
+  assert.equal(b.chapters.length, 1, 'and none of them did anything');
+  assert.deepEqual(b.chapters[0].nodes.map(x => x.id), ['fat', 'energy']);
+});
+
+/* One entry in the log, carrying what landed — not a handful of loose ops that
+   would replay into whichever chapter happened to be live at the time. */
+await test('an amendment replays and compacts back into the same chapter', async () => {
+  const b = drawn([...taught,
+    { op: 'amend', chapter: 1, ops: { op: 'node', id: 'protein', label: 'Protein' } }]);
+  const entry = b.log[b.log.length - 1];
+  assert.equal(entry.op, 'amend');
+  assert.equal(entry.chapter, 1);
+  assert.equal(entry.ops.length, 1);
+
+  const restored = drawn(b.log.map(({ at, ...op }) => op));
+  assert.deepEqual(restored.chapters[0].nodes.map(x => x.id), ['fat', 'energy', 'protein']);
+  assert.deepEqual(restored.nodes.map(x => x.id), ['fat', 'lipase'], 'and not into the live chapter');
+
+  const compact = drawn(boardOps(b));
+  assert.deepEqual(compact.chapters[0].nodes.map(x => x.id), ['fat', 'energy', 'protein']);
+});
+
+/* Aiming at the chapter being drawn on is not an amendment at all: the ops are
+   simply drawn, and they log and replay as the drawing they are. */
+await test('aiming at the live chapter just draws', async () => {
+  const b = drawn(taught);
+  applyOps(b, [{ op: 'amend', chapter: 2, ops: { op: 'node', id: 'bile', label: 'Bile' } }]);
+  assert.deepEqual(b.nodes.map(x => x.id), ['fat', 'lipase', 'bile']);
+  assert.equal(b.log[b.log.length - 1].op, 'node', 'logged as the draw it is');
+});
+
 /* ---------- over HTTP ---------- */
 
 await test('a chapter op lands over POST /op and the state carries every chapter', async () => {
@@ -149,6 +225,16 @@ await test('a chapter op lands over POST /op and the state carries every chapter
     const state = await (await fetch(U + '/state')).json();
     assert.deepEqual(state.chapters.map(c => c.title), ['Nutrients']);
     assert.equal(state.chapter, 'Enzymes');
+
+    /* An amendment was aimed at a chapter, so the reply is about that chapter.
+       Counting the one being drawn on would answer a question nobody asked in
+       the same breath as the answer to the one they did. */
+    const back = await post([{ op: 'amend', chapter: 1, ops: { op: 'node', id: 'protein' } }]);
+    assert.deepEqual(back.amended, { chapter: 1, title: 'Nutrients', nodes: 3, edges: 1, steps: 1 });
+    assert.equal(back.nodes, 2, 'the live counts are still there for anything that wants them');
+
+    const plain = await post([{ op: 'node', id: 'bile' }]);
+    assert.equal(plain.amended, undefined, 'and an ordinary draw says nothing about chapters');
   } finally {
     await new Promise(r => { app.server.close(r); app.server.closeAllConnections?.(); });
   }
