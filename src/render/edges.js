@@ -172,8 +172,60 @@ export function planEdges(edges, boxes, lanes = {}) {
     }
   }
 
+  spreadKnees(rec);
+
   for (const r of rec) r.pts = route(r);
   return rec;
+}
+
+/* Lines that converge on one box turn in the same place, which draws them as
+   one line.
+
+   An edge through a gutter goes out, turns, changes row, and goes in. Where it
+   turns is a fraction of the way across, so three edges leaving one column for
+   one target turn at the same x and their vertical runs lie on top of each
+   other — three quarters of a pixel apart, for hundreds of pixels. The reader
+   cannot trace any of them, and a label on that stretch belongs to all three
+   (#102). Fan-out got its lanes in #52 by spreading along the side it leaves;
+   this is the other half, and the side cannot fix it, because what collides is
+   the turn and not the exit.
+
+   Who turns first: the one with least row to change. An edge's vertical run
+   covers the rows between its ends, so the longest one would be crossed by
+   everything that turns to the left of it — and is therefore the one that
+   turns last, nearest its target, where the others' rows are already behind
+   them. Centred on where the turn would have been, so a board with nothing to
+   separate is drawn exactly as it was. */
+const KNEE_LANE = 14;      // between two knees sharing one gutter
+const SAME_KNEE = 6;       // turns within this of each other are the same turn
+
+function spreadKnees(rec) {
+  /** @type {Map<string, any[]>} */
+  const arriving = new Map();
+  for (const r of rec) {
+    if (r.back || r.via?.length || r.e.bend === 'straight') continue;
+    if (r.sa !== 'left' && r.sa !== 'right') continue;
+    const A = sidePoint(r.a, r.sa, r.ta), B = sidePoint(r.b, r.sb, r.tb);
+    if (Math.abs(A[1] - B[1]) < 2) continue;            // level: a straight shot, no turn
+    r.span = [Math.min(A[1], B[1]), Math.max(A[1], B[1])];
+    r.knee = A[0] + (B[0] - A[0]) * KNEE;
+    if (!arriving.has(r.e.to)) arriving.set(r.e.to, []);
+    arriving.get(r.e.to).push(r);
+  }
+  /* Only what actually collides. Two edges into one box turn in the same place
+     only if they turn at the same x *and* their runs cover some of the same
+     rows; separating anything else moves a line that was already clear, and a
+     line moved for no reason is one more thing to cross. */
+  for (const list of arriving.values()) {
+    const stack = list.filter(r => list.some(o => o !== r
+      && Math.abs(o.knee - r.knee) < SAME_KNEE
+      && o.span[0] < r.span[1] && o.span[1] > r.span[0]));
+    if (stack.length < 2) continue;
+    /* The one with least row to change turns first. Its vertical run is the
+       shortest, so it is the one the others can afford to pass in front of. */
+    stack.sort((p, q) => (p.span[1] - p.span[0]) - (q.span[1] - q.span[0]) || (p.key < q.key ? -1 : 1));
+    stack.forEach((r, i) => { r.lane = (i - (stack.length - 1) / 2) * KNEE_LANE; });
+  }
 }
 
 /* Is there another box below this one, in its column, overlapping it across?
@@ -197,7 +249,7 @@ function colEdge(box, boxes, side) {
     : Math.min(...col.map(o => o.x)) - BACK_GUTTER;
 }
 
-function route({ a, b, sa, sb, ta = 0, tb = 0, e, back, floor, gutterA, gutterB, via }) {
+function route({ a, b, sa, sb, ta = 0, tb = 0, e, back, floor, gutterA, gutterB, via, lane = 0 }) {
   const A = sidePoint(a, sa, ta);
   const B = sidePoint(b, sb, tb);
 
@@ -236,8 +288,9 @@ function route({ a, b, sa, sb, ta = 0, tb = 0, e, back, floor, gutterA, gutterB,
   }
   if (horiz) {
     // Through the gutter: out, down (or up), in. The knee sits closer to the
-    // source so a long fan stays readable near its origin.
-    const gx = A[0] + (B[0] - A[0]) * KNEE;
+    // source so a long fan stays readable near its origin, and `lane` holds it
+    // off whatever else turns in the same gutter (#102).
+    const gx = A[0] + (B[0] - A[0]) * KNEE + lane;
     return [A, [gx, A[1]], [gx, B[1]], B];
   }
   const gy = A[1] + (B[1] - A[1]) * 0.5;

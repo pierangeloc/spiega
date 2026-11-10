@@ -1,0 +1,19 @@
+{
+  "title": "three into one",
+  "nodes": [
+    { "id": "fat", "kind": "source", "label": "Fat", "sub": "38 kJ per gram" },
+    { "id": "carb", "kind": "source", "label": "Carbohydrate", "sub": "17 kJ per gram" },
+    { "id": "energy", "kind": "compute", "label": "Energy" },
+    { "id": "protein", "kind": "source", "label": "Protein" },
+    { "id": "vit", "kind": "source", "label": "Vitamins" }
+  ],
+  "edges": [
+    { "from": "fat", "to": "energy", "label": "burns slowly" },
+    { "from": "carb", "to": "energy", "label": "burns fast" },
+    { "from": "protein", "to": "energy", "label": "last resort" }
+  ],
+  "flow": [
+    { "edge": "fat>energy", "step": "Fat is the dense store" },
+    { "edge": "carb>energy", "step": "Sugar is the quick one" }
+  ]
+}
