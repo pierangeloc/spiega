@@ -169,6 +169,28 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     return entry;
   };
 
+  /* Somebody typing the url of a board they drew yesterday.
+
+     The log on disk is the board, so asking for one by its address is asking
+     for it to be held: answering "no board named that" about a file that is
+     right there is the whole of #101, and the person has no way to tell it
+     from the drawing having been destroyed.
+
+     Only the page does this. /state, /op and the rest keep answering 404 for
+     a board nobody is holding, because their callers read that as "gone, go
+     and start one" — and a client that polls a name must not quietly stand a
+     board back up on every poll. Listing never holds anything either: it is
+     asking for one board, by name, that means this. */
+  const reopen = (nm, url) => {
+    if (!persist || !fs.existsSync(boardFile(nm))) return null;
+    const entry = hold(nm);
+    /* Now open, so it belongs in the registry — owned by nobody, since a url
+       in a browser says which board was wanted and nothing about whose
+       session it is. */
+    try { registerBoard(nm, url, null, null); } catch { /* unwritable state dir */ }
+    return entry;
+  };
+
   /* Whether what is drawn here is reaching the file, and if not, why.
 
      A board that is not being saved still draws perfectly, which is the whole
@@ -261,16 +283,31 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
         }
         return json(res, 200, { ok: true, name: nm, url: boardUrl, created });
       }
+      /* Open boards first, in the shape they have always had, and then the
+         ones that only exist on disk. `open` says which is which, on every
+         entry rather than only on the new ones, so a client that wants the
+         live boards can filter rather than having to know that a missing
+         field used to mean live. Counting them costs a readdir and a stat
+         each: no board is restored by being listed. */
+      const open = [...boards.values()].map(e => ({
+        name: e.name, url: `${baseOf(req)}/b/${e.name}`, open: true,
+        rev: e.board.rev, nodes: e.board.nodes.length, viewers: e.clients.size,
+      }));
+      const saved = persist
+        ? savedBoards().filter(s => !boards.has(s.name)).map(s => ({
+          name: s.name, url: `${baseOf(req)}/b/${s.name}`, open: false,
+          written: s.written,
+        }))
+        : [];
       return json(res, 200, {
         ok: true, pid: process.pid, url: baseOf(req),
-        boards: [...boards.values()].map(e => ({
-          name: e.name, url: `${baseOf(req)}/b/${e.name}`,
-          rev: e.board.rev, nodes: e.board.nodes.length, viewers: e.clients.size,
-        })),
+        boards: [...open, ...saved],
       });
     }
 
-    if (p === '/' || p === '/index.html') return index(res, boards);
+    if (p === '/' || p === '/index.html') {
+      return index(res, boards, persist ? savedBoards().filter(s => !boards.has(s.name)) : []);
+    }
 
     const m = /^\/b\/([^/]+)(\/.*)?$/.exec(p);
     if (!m) { res.writeHead(404); return res.end('not found'); }
@@ -284,7 +321,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     }
     const rest = m[2];
 
-    const entry = boards.get(nm);
+    const entry = boards.get(nm) || (rest === '/' ? reopen(nm, `${baseOf(req)}/b/${nm}`) : null);
     if (!entry) {
       // A client holding a registry entry we no longer honour needs to hear
       // "gone", not "broken": that is what sends it off to start a board.
@@ -424,18 +461,30 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
 }
 
 /* The bare port, for someone who typed it without a board name. One board is
-   almost certainly the one they wanted. */
-function index(res, boards) {
+   almost certainly the one they wanted.
+
+   The saved ones are here because a restart leaves the server holding one
+   board and twelve logs, and a list of what survived the restart is not a
+   list of the boards somebody has. They are marked as closed and otherwise
+   plain: a link opens one, which is what opening its url does now. Making
+   this a switchboard is #61, and this is not that. */
+function index(res, boards, saved = []) {
   const names = [...boards.keys()];
-  if (names.length === 1) {
+  /* Still a redirect when there is exactly one board on the machine. With a
+     drawing of somebody else's beside it, a redirect would hide the list it
+     was meant to save them reading. */
+  if (names.length === 1 && !saved.length) {
     res.writeHead(302, { location: `/b/${encodeURIComponent(names[0])}/` });
     return res.end();
   }
-  const rows = names.map(n => `<li><a href="/b/${encodeURIComponent(n)}/">${esc(n)}</a></li>`).join('');
+  const row = (n, note = '') =>
+    `<li><a href="/b/${encodeURIComponent(n)}/">${esc(n)}</a>${note}</li>`;
+  const rows = names.map(n => row(n)).join('');
+  const closed = saved.map(s => row(s.name, ` <span style="color:#777">closed</span>`)).join('');
   res.writeHead(200, { 'content-type': 'text/html' });
   res.end(`<!doctype html><meta charset=utf-8><title>spiega boards</title>` +
     `<body style="font:14px system-ui;padding:3rem"><h1 style="font-weight:600">spiega</h1>` +
-    (rows ? `<ul>${rows}</ul>` : `<p>No boards yet.`));
+    (rows || closed ? `<ul>${rows}${closed}</ul>` : `<p>No boards yet.`));
 }
 
 /* What the drawing came out like, for the agent that cannot see it (#56).
@@ -513,6 +562,35 @@ export function listBoards({ prune = true } = {}) {
   }
   if (changed) writeBoards(live);
   return live;
+}
+
+/* Every board there is, which is a different question.
+
+   The registry is a liveness map: `listBoards` prunes anything whose process
+   has gone, and a restart takes every entry with it, so after one the registry
+   knows about whatever the new server happens to hold and nothing else. The
+   directory does know — one log per board, sitting there with the drawing in
+   it — and that makes it the answer to "which boards exist", with the registry
+   answering only "which are open".
+
+   Reading it is a readdir and a stat each. Deliberately not a restore: `hold`
+   does that on first touch, which is the moment somebody has asked for one
+   board, rather than spending a startup rebuilding fifty nobody wanted.
+
+   Newest log first: with dozens of them, when it was last drawn on is the only
+   ordering anybody can use. */
+export function savedBoards() {
+  let files;
+  try { files = fs.readdirSync(BOARDS_DIR); } catch { return []; }
+  const saved = [];
+  for (const f of files) {
+    if (!f.endsWith('.jsonl')) continue;         // .lock and half-written .tmp files are not boards
+    const file = path.join(BOARDS_DIR, f);
+    let written = 0;
+    try { written = fs.statSync(file).mtimeMs; } catch { continue; }
+    saved.push({ name: f.slice(0, -'.jsonl'.length), file, written });
+  }
+  return saved.sort((a, b) => b.written - a.written);
 }
 
 /* Who a board belongs to — or nobody.
