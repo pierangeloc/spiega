@@ -26,6 +26,8 @@ export function specToOps(spec) {
   for (const e of spec.edges || []) ops.push({ op: 'edge', ...e });
   for (const b of spec.boundaries || []) ops.push({ op: 'boundary', ...b });
   for (const c of spec.callouts || []) ops.push({ op: 'callout', ...c });
+  // before the flow, so a step naming a phase finds it already named
+  for (const g of spec.groups || []) ops.push({ op: 'group', ...g });
   if (spec.flow?.length) ops.push({ op: 'flow', steps: spec.flow });
   /* Spread, like every other mapping above, rather than picking out `text`.
      Picking lost `step` and `edge`, the two fields that tie a line to the hop
@@ -34,6 +36,12 @@ export function specToOps(spec) {
      over time; this one does not have to be edited again when it does. */
   for (const t of spec.transcript || [])
     ops.push({ op: 'say', ...(typeof t === 'string' ? { text: t } : t) });
+  /* Which step the board is showing, for a spec that is a picture of a board
+     mid-walk rather than of a finished one. Numbered as the board numbers it —
+     `"focus": 3` is the step badged 3 — because every other place a person
+     says a step number means that one: `spiega step 3`, the rail's tag, the
+     issue that reports it. The op underneath counts from zero. */
+  if (spec.focus != null) ops.push({ op: 'focus', step: Number(spec.focus) - 1 });
   if (spec.settle) ops.push(settleOp({
     nodes: spec.nodes || [], edges: spec.edges || [],
   }));

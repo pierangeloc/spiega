@@ -23,6 +23,8 @@ process.env.USERPROFILE = HOME;
 
 const { emptyBoard, applyOps, boardOps } = await import('../src/board/state.js');
 const { groupRuns, lineStates, scriptSteps } = await import('../src/board/script.js');
+const { renderSVG } = await import('../src/render/render.js');
+const { ACCENT } = await import('../src/render/theme.js');
 const { snapshotHTML } = await import('../src/board/snapshot.js');
 
 let n = 0;
@@ -347,6 +349,66 @@ await test('a compacted board keeps the attribution the log walk gave it', async
   applyOps(compact, boardOps(b));
   assert.deepEqual(scriptSteps(compact), [0], 'and still attributed after compaction');
   assert.deepEqual(groupRuns(compact).map(r => r.label), ['Verbranding']);
+});
+
+/* ---------- the drawing ---------- */
+
+/* #54's second half, and the thing it worried about: a group needs a state
+   between lit and dimmed, and three shades of grey would read as a board
+   that is slightly broken rather than as a phase.
+
+   It is not three shades. There are two things being said and they use
+   different means — opacity says whether a thing is in the phase, orange says
+   which hop is happening now — so the rest of the phase is drawn exactly as
+   it is on a board with nothing lit at all. What moves is everything around
+   it. These assert that: inside the phase, full strength; outside it, dimmed;
+   and the accent only ever on the step itself. */
+const opacities = board => {
+  const svg = renderSVG(board, { margin: 16 }).svg;
+  return Object.fromEntries((board.nodes || []).map(n => [n.id,
+    Number((svg.match(new RegExp(`data-node="${n.id}" opacity="([^"]+)"`)) || [, '1'])[1])]));
+};
+
+const chain = (grouped, at) => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'group', id: 'burn', label: 'Verbranding' },
+    ...['food', 'gut', 'blood', 'cell', 'co2', 'lung'].map(id => ({ op: 'node', id, label: id })),
+    { op: 'edge', from: 'food', to: 'gut' }, { op: 'edge', from: 'gut', to: 'blood' },
+    { op: 'edge', from: 'blood', to: 'cell' }, { op: 'edge', from: 'cell', to: 'co2' },
+    { op: 'edge', from: 'co2', to: 'lung' },
+    { op: 'step', edge: 'food>gut', step: 'a' },
+    { op: 'step', edge: 'gut>blood', step: 'b' },
+    { op: 'step', edge: 'blood>cell', step: 'c', ...(grouped ? { group: 'burn' } : {}) },
+    { op: 'step', edge: 'cell>co2', step: 'd', ...(grouped ? { group: 'burn' } : {}) },
+    { op: 'step', edge: 'co2>lung', step: 'e' },
+    { op: 'focus', step: at },
+  ]);
+  return b;
+};
+
+await test('the rest of the phase stays at full strength while the rest of the board recedes', async () => {
+  const o = opacities(chain(true, 2));      // step 3 of 5, in the phase with step 4
+  assert.deepEqual(o, { food: 0.5, gut: 0.5, blood: 1, cell: 1, co2: 1, lung: 0.5 },
+    'blood and cell are the step; co2 is the far end of its phase; the rest dims');
+});
+
+await test('an ungrouped step lights exactly what it always did', async () => {
+  const o = opacities(chain(false, 2));
+  assert.deepEqual(o, { food: 0.5, gut: 0.5, blood: 1, cell: 1, co2: 0.5, lung: 0.5 },
+    'without a group there is no context, and the board behaves as it always has');
+});
+
+/* The accent is the other axis, and it must not spread. A phase at full
+   strength with two orange arrows in it would have two "happening now"s. */
+await test('only the step itself is accented, never the rest of its phase', async () => {
+  const svg = renderSVG(chain(true, 2), { margin: 16 }).svg;
+  const lit = [...svg.matchAll(/data-edge="([^"]+)"/g)].map(m => m[1])
+    .filter(key => {
+      const g = svg.slice(svg.indexOf(`data-edge="${key}"`));
+      return g.slice(0, g.indexOf('</g>')).includes(ACCENT);
+    });
+  assert.deepEqual(lit, ['blood>cell'], 'one hop is happening now, and it is the lit one');
 });
 
 console.log(`\n  ${n} checks on step groups`);

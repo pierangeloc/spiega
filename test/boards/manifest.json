@@ -86,5 +86,11 @@
     "issue": 102,
     "broke": "Reported as a label nobody could attribute: `2 BURNS FAST` sat above two lines, and which edge it named had to be worked out from the words. The label was the symptom. Three edges leaving one column for one box turned at the same x — 275.575, 275.842, 275.575 — so their vertical runs lay on top of each other for hundreds of pixels and read as a single line. No placement could fix it: carb's run covered rows 211-285 and fat's covered 87-264.7, so anywhere carb's pill went on its own line it was also on fat's. `test/readable.mjs` saw it as `tag \"2 BURNS FAST\" sits on fat>energy`, and nothing was told to the agent that drew it.",
     "fixed": "Edges arriving at one box whose turns coincide and whose runs cover some of the same rows now each get a lane of their own in the gutter, 14px apart and centred on where the turn would have been. The one with least row to change turns first, nearest the column, since its run is the one the others can afford to pass in front of. Fan-out got this in #52 by spreading along the side it leaves; the side could not fix this, because what collided was the turn and not the exit. Here the three turn at 269, 276 and 283, and the label is on its own line."
+  },
+  "issue-54-phase-tiers": {
+    "issue": 54,
+    "noBefore": true,
+    "broke": "Not a bug and there is no frozen `-before` picture, because this shape could not be drawn before. The board had exactly two states for anything — lit, or dimmed to half — so a phase of several steps had no way to say which part of the picture it was about. #54 worried that a third tier would read as a board that was slightly broken rather than as a phase.",
+    "fixed": "It is not a third tier of grey. There are two things being said and they use different means: opacity says whether a thing is in the phase being explained, and the accent says which single hop is happening now. So the rest of the phase is drawn exactly as it is on a board with nothing lit at all, and what moves is everything around it. The picture is step 3 of 5, in a phase with step 4: BLOED and CEL carry the step with its halo and its orange arrow, CO2 and the arrow into it are the rest of the phase at full strength, and VOEDSEL, DARM and LONG recede."
   }
 }

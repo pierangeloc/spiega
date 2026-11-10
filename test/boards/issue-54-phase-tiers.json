@@ -1,0 +1,93 @@
+{
+  "title": "verbranding in de cel",
+  "nodes": [
+    {
+      "id": "food",
+      "kind": "source",
+      "label": "Voedsel"
+    },
+    {
+      "id": "gut",
+      "kind": "service",
+      "label": "Darm"
+    },
+    {
+      "id": "blood",
+      "kind": "queue",
+      "label": "Bloed"
+    },
+    {
+      "id": "cell",
+      "kind": "compute",
+      "label": "Cel"
+    },
+    {
+      "id": "co2",
+      "kind": "blob",
+      "label": "CO2"
+    },
+    {
+      "id": "lung",
+      "kind": "external",
+      "label": "Long"
+    }
+  ],
+  "edges": [
+    {
+      "from": "food",
+      "to": "gut",
+      "label": "kauwen"
+    },
+    {
+      "from": "gut",
+      "to": "blood",
+      "label": "opgenomen"
+    },
+    {
+      "from": "blood",
+      "to": "cell",
+      "label": "glucose"
+    },
+    {
+      "from": "cell",
+      "to": "co2",
+      "label": "verbrand"
+    },
+    {
+      "from": "co2",
+      "to": "lung",
+      "label": "uitgeademd"
+    }
+  ],
+  "groups": [
+    {
+      "id": "burn",
+      "label": "Verbranding"
+    }
+  ],
+  "flow": [
+    {
+      "edge": "food>gut",
+      "step": "Voedsel wordt afgebroken"
+    },
+    {
+      "edge": "gut>blood",
+      "step": "De darm geeft het door"
+    },
+    {
+      "edge": "blood>cell",
+      "step": "Bloed brengt glucose",
+      "group": "burn"
+    },
+    {
+      "edge": "cell>co2",
+      "step": "De cel verbrandt het",
+      "group": "burn"
+    },
+    {
+      "edge": "co2>lung",
+      "step": "CO2 gaat naar de long"
+    }
+  ],
+  "focus": 3
+}

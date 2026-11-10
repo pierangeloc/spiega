@@ -266,6 +266,13 @@ and defaults to the `id`; the `group` op may arrive before or after the steps
 that name it, and a step naming a group nobody declared is not an error — it
 groups under that id and is headed with it.
 
+On the drawing, walking a step that belongs to a phase leaves the rest of that
+phase at full strength and dims everything else. That is two things said by two
+means rather than three shades of one: opacity says what is part of the phase,
+and the accent and halo say which single hop is happening now. The rest of the
+phase is drawn exactly as it is on a board with no step lit at all, so what
+moves is the board around it.
+
 Lines are shown in the order they were said, which grouping does not reorder,
 so a phase whose lines are interrupted by something else gets one header per
 stretch rather than one header spanning lines it is not about.
