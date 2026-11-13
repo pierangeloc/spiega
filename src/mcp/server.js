@@ -8,7 +8,13 @@
    ============================================================ */
 
 import path from 'node:path';
-import { resolveBoard } from '../board/server.js';
+import { resolveBoard, claimSession } from '../board/server.js';
+
+/* This process is the conversation, and it has to say so before anything
+   resolves a board. The environment says otherwise: opencode starts every MCP
+   server from one long-lived daemon, so four sessions read the same pane id
+   and were handed the same board — see claimSession in board/server.js. */
+claimSession();
 
 const KINDS = 'client, gateway, service, compute, datastore, cache, queue, external, note, formula, blob, vessel, particle, source';
 

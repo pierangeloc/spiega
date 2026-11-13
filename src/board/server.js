@@ -22,6 +22,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps, boardOps } from './state.js';
 import { settleOp, applySettlingOps } from './settle.js';
@@ -277,8 +278,12 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
            session owns the board. Only when there is no entry: re-registering
            an existing board would overwrite the owner that the session which
            first asked for it recorded, and the owner match is how that session
-           keeps finding the same board. */
-        if (created || !(nm in listBoards({ prune: false }))) {
+           keeps finding the same board. Unless that session has gone: a board
+           nobody is holding any more belongs to whoever has just asked for it
+           by name, and the claim has to move or the next session finds it
+           abandoned all over again. */
+        const known = listBoards({ prune: false })[nm];
+        if (created || !known || (want.owner && ownerGone(known.owner))) {
           registerBoard(nm, boardUrl, want.owner ?? null, want.cwd || null);
         }
         return json(res, 200, { ok: true, name: nm, url: boardUrl, created });
@@ -697,6 +702,45 @@ export function sessionKey() {
     || process.cwd();
 }
 
+/* Claim this process as the session, for a client that is one conversation by
+   construction.
+
+   The environment a client inherits is not always its own. An opencode MCP
+   server is a child of one long-lived `opencode serve --service` daemon and
+   inherits the environment that daemon started with: four conversations, four
+   MCP servers, one HERDR_PANE_ID between all of them. sessionKey() then gave
+   every one of them the board the first had claimed, and a session explaining
+   something else entirely added its chapters to a board somebody was reading.
+
+   A stdio MCP server is started one per session and ends when its pipe closes,
+   so the process is the identity, and saying so here beats reading it off an
+   environment that cannot be trusted. Not the pid alone: boards.json outlives
+   a reboot, and a recycled pid would adopt a stranger's board. The pid stays
+   in front, where ownerGone can read it.
+
+   SPIEGA_SESSION, SPIEGA_BOARD and SPIEGA_URL are somebody saying which board
+   they want, and CLAUDE_CODE_SESSION_ID is a harness naming its own
+   conversation — all four are left exactly as they are. */
+export function claimSession(env = process.env, pid = process.pid) {
+  const given = n => env[`SPIEGA_${n}`] ?? env[`HANDWAVE_${n}`];
+  if (given('SESSION') || given('BOARD') || given('URL') || env.CLAUDE_CODE_SESSION_ID) return null;
+  env.SPIEGA_SESSION = `mcp:${pid}:${randomUUID().slice(0, 8)}`;
+  return env.SPIEGA_SESSION;
+}
+
+/* An owner that is not there any more.
+
+   A key of the `mcp:<pid>:<run>` shape carries the process that claimed it, so
+   a board whose claimant has exited can be handed to the next session in that
+   directory — otherwise a day of sessions in one repo climbs to `-7` while six
+   finished boards sit there owned by nobody. Any other key — a conversation
+   id, a pane, a directory — says nothing about whether its session is still
+   going, and an owner we cannot check is an owner we keep. */
+export function ownerGone(owner) {
+  const m = /^mcp:(\d+):/.exec(owner || '');
+  return !!m && !running(Number(m[1]));
+}
+
 const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
 
 /* A board name a person can recognise in a list of eight.
@@ -721,7 +765,8 @@ export function boardName() {
   // nothing claimed: fall through to naming one after the task
 
   const base = slug(path.basename(process.cwd())) || DEFAULT_BOARD;
-  if (!all[base] || all[base].owner === key) return base;
+  const held = all[base];
+  if (!held || held.owner === key || ownerGone(held.owner)) return base;
   // Taken by another session in the same directory. Count: "croissant-calc-2"
   // is a name someone can say out loud, which a hash of a session id is not,
   // and the board is found by owner afterwards so the number never moves.
