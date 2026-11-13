@@ -1998,9 +1998,20 @@ await atest('the MCP server exits when its client closes the pipe', async () => 
 
   // talk to it first, so we know we are killing a live server and not a corpse
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
+  /* Read to the first newline rather than parsing one chunk: the tools/list
+     reply is some 12 KB of descriptions and a pipe hands it over in whatever
+     pieces it likes, which on one runner was a first chunk of 8 KB and an
+     "Unterminated string in JSON" that had nothing to do with the server. */
   const reply = await new Promise((res, rej) => {
     const t = setTimeout(() => rej(new Error('no reply to tools/list')), 8000);
-    child.stdout.once('data', d => { clearTimeout(t); res(JSON.parse(String(d).split('\n')[0])); });
+    let out = '';
+    child.stdout.on('data', d => {
+      out += d;
+      const i = out.indexOf('\n');
+      if (i < 0) return;
+      clearTimeout(t);
+      res(JSON.parse(out.slice(0, i)));
+    });
   });
   const names = reply.result.tools.map(t => t.name);
   for (const want of ['board_say', 'board_tag', 'board_script', 'board_replay', 'board_settle']) {
