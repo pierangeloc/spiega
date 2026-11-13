@@ -1998,9 +1998,20 @@ await atest('the MCP server exits when its client closes the pipe', async () => 
 
   // talk to it first, so we know we are killing a live server and not a corpse
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
+  /* Read to the first newline rather than parsing one chunk: the tools/list
+     reply is some 12 KB of descriptions and a pipe hands it over in whatever
+     pieces it likes, which on one runner was a first chunk of 8 KB and an
+     "Unterminated string in JSON" that had nothing to do with the server. */
   const reply = await new Promise((res, rej) => {
     const t = setTimeout(() => rej(new Error('no reply to tools/list')), 8000);
-    child.stdout.once('data', d => { clearTimeout(t); res(JSON.parse(String(d).split('\n')[0])); });
+    let out = '';
+    child.stdout.on('data', d => {
+      out += d;
+      const i = out.indexOf('\n');
+      if (i < 0) return;
+      clearTimeout(t);
+      res(JSON.parse(out.slice(0, i)));
+    });
   });
   const names = reply.result.tools.map(t => t.name);
   for (const want of ['board_say', 'board_tag', 'board_script', 'board_replay', 'board_settle']) {
@@ -2219,6 +2230,87 @@ await atest('a board is named after the task, and a session keeps the one it has
   assert.equal(await sk({ HERDR_PANE_ID: 'wJ:p1', HERDR_TAB_ID: 'wJ:t1' }), 'wJ:p1');
   assert.equal(await sk({ HERDR_TAB_ID: 'wJ:t1' }), 'wJ:t1');
   assert.equal(await sk({}), fs.realpathSync(task), 'the directory, resolved as the OS reports it');
+
+  fs.rmSync(home, { recursive: true, force: true });
+  fs.rmSync(work, { recursive: true, force: true });
+});
+
+/* An MCP server does not inherit its session with the rest of its environment.
+
+   Reported: a board with several chapters open, a question asked in an
+   unrelated session, and chapters about something else appearing on it. Every
+   opencode MCP server is a child of one long-lived daemon, so four of them on
+   this machine read the same HERDR_PANE_ID, every sessionKey() came out
+   identical, and boardName()'s owner match handed all four the first one's
+   board. The `-2` suffix never fired: it only runs when the owner differs. */
+await atest('two MCP servers with one inherited pane id do not share a board', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-mcp-home-'));
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-mcp-work-'));
+  const task = path.join(work, 'service-points-api');
+  fs.mkdirSync(task);
+
+  // the daemon's environment, handed to every session it starts
+  const stale = { ...process.env, HOME: home, USERPROFILE: home, HERDR_PANE_ID: 'wK:p8', HERDR_TAB_ID: 'wK:t1' };
+  for (const k of ['SPIEGA_URL', 'SPIEGA_BOARD', 'SPIEGA_SESSION', 'HANDWAVE_URL',
+                   'HANDWAVE_BOARD', 'HANDWAVE_SESSION', 'CLAUDE_CODE_SESSION_ID']) delete stale[k];
+
+  const run = (extra, env = {}) => promisify(execFile)(
+    process.execPath,
+    ['--input-type=module', '-e',
+     `const m = await import(${JSON.stringify(path.join(ROOT, 'src/board/server.js'))});${extra}`],
+    { env: { ...stale, ...env }, cwd: task }).then(r => r.stdout.trim());
+
+  const claim = `m.claimSession();`;
+
+  // the first session in the repo is still named after the task, and keeps it
+  const own = `m.registerBoard(m.boardName(), 'http://127.0.0.1:4777/b/service-points-api', m.sessionKey());`;
+  assert.equal(await run(claim + `console.log(m.boardName())`), 'service-points-api');
+  assert.equal(await run(claim + own + `console.log(m.boardName())`), 'service-points-api',
+    'and it keeps the board it claimed');
+
+  // the second, with the same inherited pane id and the first still drawing,
+  // must not be handed the board that explanation is on
+  const owner = `mcp:${process.pid}:abcd1234`;                       // a claimant that is alive
+  const taken = `m.registerBoard('service-points-api', 'http://127.0.0.1:4777/b/service-points-api', ${JSON.stringify(owner)});`;
+  assert.equal(await run(claim + taken + `console.log(m.boardName())`), 'service-points-api-2',
+    'the next conversation gets a board of its own, not the one in use');
+
+  // its own key every time, so a second process never matches the first's board
+  const keys = await Promise.all([run(claim + `console.log(m.sessionKey())`),
+                                  run(claim + `console.log(m.sessionKey())`)]);
+  assert.ok(keys.every(k => /^mcp:\d+:/.test(k)), `expected mcp keys, got ${JSON.stringify(keys)}`);
+  assert.notEqual(keys[0], keys[1], 'two MCP servers are two sessions');
+
+  /* The claim is dropped when its process goes, or a repo worked in all day
+     climbs to `service-points-api-7` past six boards owned by nobody. */
+  const dead = (await import('node:child_process')).spawnSync(process.execPath, ['-e', '0']).pid;
+  const abandoned = `m.registerBoard('service-points-api', 'http://127.0.0.1:4777/b/service-points-api', 'mcp:${dead}:abcd1234');`;
+  assert.equal(await run(claim + abandoned + `console.log(m.boardName())`), 'service-points-api',
+    'a board whose session has ended is taken up again by name');
+  assert.equal(await run(claim + taken + `console.log(m.ownerGone(${JSON.stringify(owner)}))`), 'false');
+
+  /* Somebody who has said which board they want, and a harness that names its
+     own conversation. Neither is overruled by this. */
+  assert.equal(await run(`console.log(String(m.claimSession({ SPIEGA_BOARD: 'notes' })))`), 'null');
+  assert.equal(await run(`console.log(String(m.claimSession({ SPIEGA_SESSION: 's1' })))`), 'null');
+  assert.equal(await run(`console.log(String(m.claimSession({ SPIEGA_URL: 'http://x' })))`), 'null');
+  assert.equal(await run(`console.log(String(m.claimSession({ HANDWAVE_BOARD: 'notes' })))`), 'null');
+  assert.equal(await run(`console.log(String(m.claimSession({ CLAUDE_CODE_SESSION_ID: 'cc' })))`), 'null');
+
+  /* And the MCP server itself does it — before anything resolves a board,
+     which is the only moment it can still change the answer. */
+  const { spawnSync } = await import('node:child_process');
+  const mcp = entry => spawnSync(process.execPath,
+    ['--input-type=module', '-e',
+     `await import(${JSON.stringify(path.join(ROOT, 'src/mcp/server.js'))});` +
+     `console.log('KEY=' + process.env.SPIEGA_SESSION);`],
+    // its stdin closed, since a stdio MCP server with an open pipe waits
+    { env: { ...stale, ...entry }, cwd: task, input: '', encoding: 'utf8', timeout: 10000 }).stdout.trim();
+  assert.match(mcp({}), /^KEY=mcp:\d+:/, 'the MCP server claims this process as the session');
+  assert.equal(mcp({ CLAUDE_CODE_SESSION_ID: 'cc' }), 'KEY=undefined',
+    'and leaves a harness that names its own conversation alone');
 
   fs.rmSync(home, { recursive: true, force: true });
   fs.rmSync(work, { recursive: true, force: true });
