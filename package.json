@@ -1,6 +1,6 @@
 {
   "name": "spiega",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A hand-drawn board an AI agent draws on while it explains software architecture.",
   "type": "module",
   "bin": {
