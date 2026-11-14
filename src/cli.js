@@ -105,7 +105,7 @@ const die = (msg, code = 1) => { console.error(msg); process.exit(code); };
 const GLOBAL_FLAGS = ['board', 'name'];
 const FLAGS = {
   serve: ['port', 'open', 'solo', 'quiet', 'tab', 'size', 'browser'],
-  open: ['tab', 'size', 'pos', 'browser'],
+  open: ['tab', 'size', 'pos', 'browser', 'new'],
   focus: ['tab', 'size', 'browser'],
   install: ['detect', 'list', 'path', 'no-path', 'bin-dir'],
   'mcp-config': ['shape'],
@@ -254,7 +254,8 @@ async function readOps(arg) {
 const HELP = `spiega — a hand-drawn board an agent draws on while it explains
 
   serve [--port N] [--open]     start the board and keep it running (--solo: own process)
-  open [--tab] [--size WxH]     open the board in its own browser window
+  open [--tab] [--size WxH]     show the board: raise its window, or open one
+       [--new]                  a second window of the same board
   version                       which copy this is, and where it came from
   doctor                        check that agents are reading the current version
   migrate                       move everything over from the old handwave name
@@ -491,11 +492,16 @@ const main = async () => {
 
     case 'open': {
       const u = await boardURL({ autostart: true });
-      const { openBoard } = await import('./board/open.js');
-      const r = openBoard(u, {
-        app: !flag('tab'), size: flag('size'), pos: flag('pos'), browser: flag('browser'),
-      });
-      console.log(`${u}  (${r.how})`);
+      const { showBoard, openBoard } = await import('./board/open.js');
+      /* Raise the window this board is already in, rather than adding another.
+         "Open the board" from anyone — a person at a prompt, an agent shelling
+         out — means put it where I can see it, and three windows of one board
+         all draw in lockstep, which reads as three boards. Reported that way
+         twice. `--new` is there for the rare second view, side by side. */
+      const name = u.split('/b/')[1]?.replace(/\/$/, '') || '';
+      const opts = { app: !flag('tab'), size: flag('size'), pos: flag('pos'), browser: flag('browser') };
+      const r = flag('new') ? { ...openBoard(u, opts), raised: false } : showBoard(u, name, opts);
+      console.log(`${u}  (${r.raised ? `already open, ${r.how}` : r.how})`);
       return;
     }
 

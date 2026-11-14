@@ -360,9 +360,11 @@ async function call(name, args = {}) {
 
     case 'board_open': {
       const u = await url();
-      const { openBoard } = await import('../board/open.js');
-      const r = openBoard(u, { app: !args.tab, size: args.size });
-      return `${u} — opened in ${r.how}`;
+      const { showBoard } = await import('../board/open.js');
+      // the board's own name, which is the tag in its window title
+      const name = u.split('/b/')[1]?.replace(/\/$/, '') || '';
+      const r = showBoard(u, name, { app: !args.tab, size: args.size });
+      return `${u} — ${r.raised ? `already open, ${r.how}` : `opened in ${r.how}`}`;
     }
 
     case 'board_url':

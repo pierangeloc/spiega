@@ -11,7 +11,9 @@
    ============================================================ */
 
 import fs from 'node:fs';
+import path from 'node:path';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
+import { SESSION_DIR } from './server.js';
 
 const MAC = {
   chrome:   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -98,6 +100,63 @@ export function runningBrowsers(psOutput) {
   const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return BROWSER_APPS.filter(app =>
     new RegExp(`/${esc(app)}\\.app/Contents/MacOS/[^/]+$`, 'm').test(psOutput || ''));
+}
+
+/* Put this board in front of the person: raise the window it is already in,
+   or make one.
+
+   A second window of the same board is not a second board, but it looks
+   exactly like one — both stream the same ops and draw in lockstep. Reported
+   as "one agent, two boards being drawn": three windows, every one of them
+   titled [skills-2]. The tool description says to call this once, early, and
+   prose does not hold; a model that calls it again at the next chapter, or
+   retries it, used to get another window every time.
+
+   Raising is also what a repeat call means. "Open the board" from an agent
+   that has one open is "put it where I can see it", and that is what this now
+   does — the window the person already has, with their scroll and zoom, not a
+   fresh one on top of it.
+
+   The two halves are injected so the decision can be tested without a browser
+   or a window server; see test/smoke.mjs. */
+export function showBoard(url, name, { app = true, size = null, pos = null, browser = null,
+                                       focus = focusBoard, open = openBoard,
+                                       opened = openedAt, note = noteOpened } = {}) {
+  if (name) {
+    const r = focus(name, url);
+    if (r.ok) return { ...r, raised: true };
+    /* A window that was opened a moment ago has no title to match yet: the
+       tag goes in when the page renders. Two calls in the same second then
+       both find nothing and both open one, which is how three windows of one
+       board turned up. Within the grace period, believe the record instead of
+       the window server. */
+    const since = Date.now() - opened(name);
+    if (since < OPENING_MS) return { ok: true, how: 'opening', raised: true };
+  }
+  const r = open(url, { app, size, pos, browser });
+  if (name) note(name);
+  return { ...r, raised: false };
+}
+
+/* How long a window may take to show its own title. Generous: the cost of
+   waiting is one call reporting "opening", and the cost of not waiting is a
+   duplicate window that looks like a second board. */
+const OPENING_MS = 10_000;
+const windowsFile = () => path.join(SESSION_DIR, 'windows.json');
+const readOpened = () => { try { return JSON.parse(fs.readFileSync(windowsFile(), 'utf8')); } catch { return {}; } };
+
+export const openedAt = name => Number(readOpened()[name]) || 0;
+
+/* Across processes, because the repeat caller is often a second `spiega open`
+   rather than a second call in one agent. */
+export function noteOpened(name, when = Date.now()) {
+  try {
+    const all = readOpened();
+    all[name] = when;
+    for (const [k, t] of Object.entries(all)) if (when - Number(t) > 60 * 60_000) delete all[k];
+    fs.mkdirSync(SESSION_DIR, { recursive: true });
+    fs.writeFileSync(windowsFile(), JSON.stringify(all));
+  } catch { /* unwritable state dir: the grace period is a nicety */ }
 }
 
 export function focusBoard(name, url) {

@@ -920,6 +920,62 @@ test('a browser is detected by its own binary, not its name in any path', async 
   assert.deepEqual(runningBrowsers(undefined), []);
 });
 
+/* Opening a board twice is asking to see it, not asking for a second copy.
+
+   Reported: one agent drawing, and what looked like two boards being drawn in
+   lockstep. They were three windows on one board — every title read
+   [skills-2] — because board_open spawned a window every time it was called
+   and the only thing saying "call this once" was the tool description. */
+test('opening a board that is already in a window raises it instead of making another', async () => {
+  const { showBoard } = await import('../src/board/open.js');
+  const calls = { focus: [], open: [] };
+  const focus = (name, url) => (calls.focus.push([name, url]), { ok: true, how: 'raised in Google Chrome' });
+  const missing = (name, url) => (calls.focus.push([name, url]), { ok: false, how: 'no window showing it' });
+  const open = (url, opts) => (calls.open.push([url, opts]), { how: 'chrome app window', app: true });
+
+  const U = 'http://127.0.0.1:4777/b/skills-2';
+  // what has been opened, injected: a test must not write the real record
+  let book = {};
+  const opened = n => book[n] || 0;
+  const note = (n, when = Date.now()) => { book[n] = when; };
+  const show = (name, opts) => showBoard(U, name, { opened, note, ...opts });
+
+  const r = show('skills-2', { focus, open });
+  assert.equal(r.raised, true, 'the window that exists is the one the person gets');
+  assert.deepEqual(calls.open, [], 'and no second window is made');
+  assert.deepEqual(calls.focus, [['skills-2', U]], 'asked for by name, which is the tag in the title');
+
+  // nothing showing it — the window is opened, with the options asked for
+  calls.focus = [];
+  const made = show('skills-2', { focus: missing, open, app: false, size: '1200x900' });
+  assert.equal(made.raised, false);
+  assert.equal(made.how, 'chrome app window');
+  assert.deepEqual(calls.open.map(c => c[0]), [U]);
+  assert.equal(calls.open[0][1].app, false, 'a tab stays a tab');
+  assert.equal(calls.open[0][1].size, '1200x900');
+
+  /* And asked for again immediately. The window from the line above is still
+     loading, so its title carries no [skills-2] yet and the window server
+     honestly reports nothing — which is how one board ended up with three
+     windows, all opened within a second of each other. */
+  calls.open = []; calls.focus = [];
+  const racing = show('skills-2', { focus: missing, open });
+  assert.equal(racing.raised, true, 'a window that is still opening is a window');
+  assert.deepEqual(calls.open, [], 'so nothing is opened on top of it');
+
+  // once that grace period is past, a board nothing is showing is opened again
+  book['skills-2'] = Date.now() - 60_000;
+  assert.equal(show('skills-2', { focus: missing, open }).raised, false,
+    'and a window the person has since closed can still be reopened');
+  assert.equal(calls.open.length, 1);
+
+  // a board with no name cannot be found by title, so it is simply opened
+  calls.open = []; calls.focus = [];
+  assert.equal(show('', { focus, open }).raised, false);
+  assert.deepEqual(calls.focus, [], 'and nothing is asked of the window server');
+  assert.equal(calls.open.length, 1);
+});
+
 test('doctor reports what is stale, and every problem comes with a way out', async () => {
   const { doctor, format } = await import('../src/doctor.js');
   const rows = doctor();
@@ -1684,6 +1740,76 @@ await atest('one server holds several boards and keeps them apart', async () => 
   }
 });
 
+/* A board nobody is holding goes to one session, not to all of them.
+
+   Reported twice, and the second time it survived the fix: two agents in one
+   directory, one board, each clearing the other's drawing. The board's owner
+   was a process that had exited, so both read it as free — and the claim was
+   only ever written on the create path, which neither took, because the board
+   already existed and resolveBoard returned it straight from the registry. So
+   nothing ever made it look taken, and the `-2` branch only fires against an
+   owner that is live.
+
+   Hence: the server assigns the name. It is one process and the clients are
+   many, so the second asker is told the board is taken while the first is
+   still being written. */
+await atest('a board whose session has gone is claimed by one of the next two, not both', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-claim-home-'));
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'hw-claim-work-'));
+  const task = path.join(work, 'skills');
+  fs.mkdirSync(task);
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  for (const k of ['SPIEGA_URL', 'SPIEGA_BOARD', 'SPIEGA_SESSION', 'HANDWAVE_URL', 'HANDWAVE_BOARD',
+                   'HANDWAVE_SESSION', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_PID',
+                   'HERDR_PANE_ID', 'HERDR_TAB_ID']) delete env[k];
+
+  // a pid that has certainly exited: the owner we are inheriting
+  const dead = (await import('node:child_process')).spawnSync(process.execPath, ['-e', '0']).pid;
+
+  const script = `
+    const m = await import(${JSON.stringify(path.join(ROOT, 'src/board/server.js'))});
+    const fs = await import('node:fs');
+    const out = {};
+    const app = m.createServer({ name: 'skills' });
+    const srv = await m.listen(app, { port: 47731, tries: 8 });
+
+    // the board the last run left behind, owned by a process that is gone
+    fs.mkdirSync((await import('node:path')).dirname(m.BOARDS_FILE), { recursive: true });
+    fs.writeFileSync(m.BOARDS_FILE, JSON.stringify({ skills: {
+      url: srv.url + '/b/skills', pid: process.pid, started: Date.now(),
+      owner: 'mcp:${dead}:old', cwd: process.cwd(),
+    } }));
+
+    // two sessions, both live, both in this directory, one after the other
+    const asA = f => { process.env.SPIEGA_SESSION = 'mcp:' + process.pid + ':aaa'; return f(); };
+    const asB = f => { process.env.SPIEGA_SESSION = 'mcp:' + process.pid + ':bbb'; return f(); };
+    out.a = await asA(() => m.resolveBoard());
+    out.b = await asB(() => m.resolveBoard());
+    // and each keeps the board it was given
+    out.aAgain = await asA(() => m.resolveBoard());
+    out.bAgain = await asB(() => m.resolveBoard());
+    out.owners = JSON.parse(fs.readFileSync(m.BOARDS_FILE, 'utf8'));
+
+    // a board asked for by name is still that board, for anyone who asks
+    out.pinned = await m.createBoardOn(srv.url, 'notes', { owner: null, cwd: process.cwd() });
+    console.log(JSON.stringify(out));
+    process.exit(0);
+  `;
+  const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script],
+    { env, cwd: task });
+  const r = JSON.parse(stdout.trim().split('\n').pop());
+
+  assert.ok(r.a.endsWith('/b/skills'), 'the first to ask inherits the abandoned board');
+  assert.ok(r.b.endsWith('/b/skills-2'), `the second gets one of its own, not ${r.b}`);
+  assert.equal(r.aAgain, r.a, 'and a session keeps the board it was given');
+  assert.equal(r.bAgain, r.b);
+  assert.match(r.owners['skills'].owner, /:aaa$/, 'the claim is written, which is what makes it look taken');
+  assert.match(r.owners['skills-2'].owner, /:bbb$/);
+  assert.ok(r.pinned.endsWith('/b/notes'), 'a board asked for by name is never suffixed');
+});
+
 /* Boards come and go while the server stays up. A client asks for one by name
    and gets a map entry; `spiega stop` drops that entry and leaves the rest
    drawing. Run in a child with its own HOME: creating a board writes the
@@ -1712,8 +1838,10 @@ await atest('a board can be asked for and dropped while the server keeps serving
     out.registered = reg['review-notes'];
     out.samePid = reg['review-notes'].pid === process.pid;
 
-    // asking twice is the same board, not a second one
-    out.again = await m.createBoardOn(root, 'review-notes');
+    // the same session asking twice is the same board, not a second one
+    out.again = await m.createBoardOn(root, 'review-notes', { owner: 's9', cwd: '/tmp/work' });
+    // another session asking for a name s9 is still holding gets its own
+    out.other = await m.createBoardOn(root, 'review-notes', { owner: 's10', cwd: '/tmp/work' });
 
     out.closed = (await (await fetch(root + '/b/review-notes/close', { method: 'POST' })).json());
     out.leftHeld = [...app.boards.keys()];
@@ -1734,11 +1862,13 @@ await atest('a board can be asked for and dropped while the server keeps serving
   assert.equal(r.registered.cwd, '/tmp/work');
   assert.equal(r.samePid, true, 'every board on one process means one pid in the registry');
   assert.equal(r.again, r.asked, 'asking again is the same board');
+  assert.match(r.other, /\/b\/review-notes-2$/, 'and a board that is held is not handed out twice');
 
   assert.equal(r.closed.ok, true);
-  assert.deepEqual(r.leftHeld, ['first'], 'dropping one board leaves the others');
+  // s10's board is still here: dropping one board drops exactly that one
+  assert.deepEqual(r.leftHeld, ['first', 'review-notes-2'], 'dropping one board leaves the others');
   // 'first' was seeded straight onto the http server, so it was never registered
-  assert.deepEqual(r.leftRegistered, [], 'and the dropped one is out of the registry');
+  assert.deepEqual(r.leftRegistered, ['review-notes-2'], 'and the dropped one is out of the registry');
   assert.equal(r.firstStillServes, true, 'and the server is still serving them');
 
   fs.rmSync(home, { recursive: true, force: true });
@@ -2254,7 +2384,10 @@ await atest('two MCP servers with one inherited pane id do not share a board', a
   // the daemon's environment, handed to every session it starts
   const stale = { ...process.env, HOME: home, USERPROFILE: home, HERDR_PANE_ID: 'wK:p8', HERDR_TAB_ID: 'wK:t1' };
   for (const k of ['SPIEGA_URL', 'SPIEGA_BOARD', 'SPIEGA_SESSION', 'HANDWAVE_URL',
-                   'HANDWAVE_BOARD', 'HANDWAVE_SESSION', 'CLAUDE_CODE_SESSION_ID']) delete stale[k];
+                   'HANDWAVE_BOARD', 'HANDWAVE_SESSION', 'CLAUDE_CODE_SESSION_ID',
+                   // ours if the suite itself is run from Claude Code, and then
+                   // every case below would be testing that machine's session
+                   'CLAUDE_PID']) delete stale[k];
 
   const run = (extra, env = {}) => promisify(execFile)(
     process.execPath,
@@ -2299,6 +2432,41 @@ await atest('two MCP servers with one inherited pane id do not share a board', a
   assert.equal(await run(`console.log(String(m.claimSession({ HANDWAVE_BOARD: 'notes' })))`), 'null');
   assert.equal(await run(`console.log(String(m.claimSession({ CLAUDE_CODE_SESSION_ID: 'cc' })))`), 'null');
 
+  /* A conversation id is only a conversation we are in.
+
+     Reported: two models benchmarked side by side in one repo, both drawing on
+     one board. opencode's `serve --service` daemon is reparented to launchd and
+     outlives the Claude Code session that started it, so every MCP server it
+     starts inherits that session's CLAUDE_CODE_SESSION_ID — the same stale-env
+     trap as the pane id above, through the one variable claimSession trusted
+     outright. CLAUDE_PID tells them apart: the conversation's own process. */
+  const key = extra => run(claim + `console.log(m.sessionKey())`, extra);
+  const cc = { CLAUDE_CODE_SESSION_ID: 'cc-uuid' };
+
+  // Claude Code CLI: the id is ours, and a `spiega` run from its shell has to
+  // land on the same board as its MCP server, so this case must not change
+  assert.equal(await key({ ...cc, CLAUDE_PID: String(process.pid) }), 'cc-uuid',
+    'an id whose process we are running under is this conversation');
+  assert.equal(await key(cc), 'cc-uuid', 'and with no CLAUDE_PID, somebody pinning it is taken at their word');
+
+  // a live process that did not start us is somebody else's conversation
+  const elsewhere = (await import('node:child_process'))
+    .spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' });
+  assert.match(await key({ ...cc, CLAUDE_PID: String(elsewhere.pid) }), /^mcp:\d+:/,
+    'an id from a session we are not under is not ours to share');
+  elsewhere.kill();
+  await new Promise(r => elsewhere.once('exit', r));
+
+  // and the reported case: the conversation that set it has long since ended
+  assert.match(await key({ ...cc, CLAUDE_PID: String(dead) }), /^mcp:\d+:/,
+    'an id whose conversation has exited is an heirloom, not an identity');
+  const twins = await Promise.all([key({ ...cc, CLAUDE_PID: String(dead) }),
+                                   key({ ...cc, CLAUDE_PID: String(dead) })]);
+  assert.notEqual(twins[0], twins[1], 'so two sessions under one dead conversation are two sessions');
+  const inherited = { ...cc, CLAUDE_PID: String(dead) };
+  assert.equal(await run(claim + taken + `console.log(m.boardName())`, inherited), 'service-points-api-2',
+    'and the second gets a board of its own instead of drawing on the first');
+
   /* And the MCP server itself does it — before anything resolves a board,
      which is the only moment it can still change the answer. */
   const { spawnSync } = await import('node:child_process');
@@ -2311,6 +2479,8 @@ await atest('two MCP servers with one inherited pane id do not share a board', a
   assert.match(mcp({}), /^KEY=mcp:\d+:/, 'the MCP server claims this process as the session');
   assert.equal(mcp({ CLAUDE_CODE_SESSION_ID: 'cc' }), 'KEY=undefined',
     'and leaves a harness that names its own conversation alone');
+  assert.match(mcp({ CLAUDE_CODE_SESSION_ID: 'cc', CLAUDE_PID: String(dead) }), /^KEY=mcp:\d+:/,
+    'while an id inherited from a conversation that has ended claims the process');
 
   fs.rmSync(home, { recursive: true, force: true });
   fs.rmSync(work, { recursive: true, force: true });
