@@ -21,7 +21,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps, boardOps } from './state.js';
@@ -31,7 +31,7 @@ import { home } from '../home.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
-const SESSION_DIR = path.join(home(), '.spiega');
+export const SESSION_DIR = path.join(home(), '.spiega');
 
 /* The old name's variables still work.
 
@@ -270,20 +270,32 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
         let want;
         try { want = JSON.parse(await readBody(req)); }
         catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + e.message }); }
-        const nm = slug(want.name || DEFAULT_BOARD);
+        /* The name is decided here, not by the client that asked.
+
+           Each client used to work its own name out of the registry and then
+           simply use it, and the claim was only ever written on the create
+           path — so a board whose owner had exited was handed, unclaimed, to
+           every session that asked next. Reported twice: two agents in one
+           directory, one board, each clearing the other's drawing. Both read
+           an owner that was gone, both read it as free, and nothing ever made
+           it look taken. One process holds every board, so the arithmetic
+           belongs here, where it happens once and in order.
+
+           A client that names a board itself (`--board notes`) sends no owner:
+           it is asking for that board, not for one of its own, and gets
+           exactly the name it asked for. */
+        const asked = slug(want.name || DEFAULT_BOARD);
+        const nm = want.owner ? freeName(asked, want.owner) : asked;
         const created = !boards.has(nm);
         hold(nm);
         const boardUrl = `${baseOf(req)}/b/${nm}`;
-        /* Register on the asking client's behalf, since it is the one whose
-           session owns the board. Only when there is no entry: re-registering
-           an existing board would overwrite the owner that the session which
-           first asked for it recorded, and the owner match is how that session
-           keeps finding the same board. Unless that session has gone: a board
-           nobody is holding any more belongs to whoever has just asked for it
-           by name, and the claim has to move or the next session finds it
-           abandoned all over again. */
+        /* Record the claim. assignName has already guaranteed this board is
+           ours or free, so writing the owner cannot take one from a session
+           that is still going — and it must be written, or the next session
+           finds the board abandoned all over again. */
         const known = listBoards({ prune: false })[nm];
-        if (created || !known || (want.owner && ownerGone(known.owner))) {
+        if (want.owner ? known?.owner !== want.owner
+                       : (created || !known)) {
           registerBoard(nm, boardUrl, want.owner ?? null, want.cwd || null);
         }
         return json(res, 200, { ok: true, name: nm, url: boardUrl, created });
@@ -694,9 +706,69 @@ export async function createBoardOn(serverUrl, name, { owner = ownerOfThisProces
    the same repo — and then the names collide and the second is suffixed. If
    that reads badly, `--board NAME` settles it, and `spiega boards` prints the
    directory of each so they can be told apart. */
+/* Is `target` us, or something that started us?
+
+   The only honest way to tell a conversation id that belongs to this process
+   from one it merely inherited. `ps` is enough: the chain from here up is a
+   handful of hops, read once per process.
+
+   Windows has no `ps`, and a walk that cannot be done must not come out as
+   "not ours" — that would split one Claude Code session across two boards on
+   the platform we cannot check. Unknown means trust. */
+export function hasAncestor(target, from = process.pid, hops = 24) {
+  if (process.platform === 'win32') return true;
+  let pid = from;
+  for (let i = 0; i < hops && pid > 1; i++) {
+    if (pid === target) return true;
+    try {
+      const out = execFileSync('ps', ['-o', 'ppid=', '-p', String(pid)],
+        { encoding: 'utf8', timeout: 1000, stdio: ['ignore', 'pipe', 'ignore'] });
+      pid = Number(out.trim());
+    } catch { return true; }              // cannot read the chain: unknown, so trust
+    if (!Number.isInteger(pid)) return true;
+  }
+  return pid === target;
+}
+
+/* The conversation id Claude Code sets — when it is really this conversation's.
+
+   CLAUDE_CODE_SESSION_ID was trusted outright, on the grounds that a harness
+   naming its own conversation knows best. It does; the trouble is that the
+   process reading it is often not in that conversation. opencode's
+   `serve --service` daemon is reparented to launchd and outlives the Claude
+   Code session that started it, then hands that session's id to the MCP server
+   of every opencode session it ever starts. Reported: two models benchmarked
+   side by side, both handed the board named after the repo, drawing over each
+   other — boardName()'s owner match fires on the shared id before the
+   directory is ever consulted, so even separate worktrees would have collided.
+
+   CLAUDE_PID is the conversation's own process, and it settles it. Gone means
+   the id is an heirloom. Alive but no relation to us means the same. Only an
+   id whose process is still there, with us underneath it, is ours — and that
+   case has to keep working, because a `spiega` run from Claude Code's own
+   shell must land on the same board as its MCP server.
+
+   No CLAUDE_PID at all is not Claude Code CLI, which always sets it: that is
+   somebody pinning the variable by hand, and they are taken at their word. */
+let claudeOwn;                 // one process, one answer; the walk is a few ps calls
+export function claudeSession(env = process.env, self = process.pid) {
+  const here = env === process.env && self === process.pid;
+  if (here && claudeOwn !== undefined) return claudeOwn;
+
+  const id = env.CLAUDE_CODE_SESSION_ID;
+  const claude = Number(env.CLAUDE_PID);
+  const answer = !id ? null
+    : !claude ? id
+    : running(claude) && hasAncestor(claude, self) ? id
+    : null;
+
+  if (here) claudeOwn = answer;
+  return answer;
+}
+
 export function sessionKey() {
   return envVar('SESSION')
-    || process.env.CLAUDE_CODE_SESSION_ID   // the conversation itself, where a harness says so
+    || claudeSession()                      // the conversation itself, where a harness says so
     || process.env.HERDR_PANE_ID            // one pane is one task
     || process.env.HERDR_TAB_ID
     || process.cwd();
@@ -719,11 +791,12 @@ export function sessionKey() {
    in front, where ownerGone can read it.
 
    SPIEGA_SESSION, SPIEGA_BOARD and SPIEGA_URL are somebody saying which board
-   they want, and CLAUDE_CODE_SESSION_ID is a harness naming its own
-   conversation — all four are left exactly as they are. */
+   they want, and a CLAUDE_CODE_SESSION_ID that really is this process's is a
+   harness naming its own conversation — all four are left exactly as they are.
+   An inherited one is not a conversation we are in; see claudeSession. */
 export function claimSession(env = process.env, pid = process.pid) {
   const given = n => env[`SPIEGA_${n}`] ?? env[`HANDWAVE_${n}`];
-  if (given('SESSION') || given('BOARD') || given('URL') || env.CLAUDE_CODE_SESSION_ID) return null;
+  if (given('SESSION') || given('BOARD') || given('URL') || claudeSession(env, pid)) return null;
   env.SPIEGA_SESSION = `mcp:${pid}:${randomUUID().slice(0, 8)}`;
   return env.SPIEGA_SESSION;
 }
@@ -752,19 +825,14 @@ const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^
    A session that already has a board keeps it, matched on the session key, so
    the name is stable for as long as the work is. Only a genuine collision —
    two sessions, same directory name, different sessions — gets a suffix. */
-export function boardName() {
-  const named = envVar('BOARD');
-  if (named) return slug(named);
+/* This name, or the next one along if somebody else is holding it.
 
-  const key = sessionKey();
+   Collision only: "the board I already own" is a question about the asking
+   session and is answered by boardName, below. The server runs this and
+   nothing else, so a client asking for a board by name gets the board it
+   named — while two clients asking for the same one get two boards. */
+export function freeName(base, key) {
   const all = listBoards();
-
-  for (const [name, b] of Object.entries(all)) {
-    if (b.owner && b.owner === key) return name;       // this session's own board
-  }
-  // nothing claimed: fall through to naming one after the task
-
-  const base = slug(path.basename(process.cwd())) || DEFAULT_BOARD;
   const held = all[base];
   if (!held || held.owner === key || ownerGone(held.owner)) return base;
   // Taken by another session in the same directory. Count: "croissant-calc-2"
@@ -772,6 +840,18 @@ export function boardName() {
   // and the board is found by owner afterwards so the number never moves.
   for (let i = 2; i < 100; i++) if (!all[`${base}-${i}`]) return `${base}-${i}`;
   return `${base}-${Date.now().toString(36).slice(-4)}`;
+}
+
+export function boardName() {
+  const named = envVar('BOARD');
+  if (named) return slug(named);
+
+  const key = sessionKey();
+  for (const [name, b] of Object.entries(listBoards())) {
+    if (b.owner && b.owner === key) return name;       // this session's own board
+  }
+  // nothing claimed: fall through to naming one after the task
+  return freeName(slug(path.basename(process.cwd())) || DEFAULT_BOARD, key);
 }
 
 /* ---------- starting and finding ----------
@@ -879,8 +959,15 @@ export async function resolveBoard(name = boardName(), { start = true } = {}) {
   const direct = envVar('URL');
   if (direct) return direct;
 
+  /* The registry is a cache of a decision the server makes, so it is only
+     worth reading when it says this board is already ours. Anything else —
+     a board whose owner has exited, above all — has to be asked for, because
+     asking is what records the claim. Returning it from here is how two
+     sessions ended up drawing on one board: both found it alive under the
+     name they had worked out, both used it, neither ever claimed it. */
+  const owner = ownerOfThisProcess();
   const known = findBoard(name);
-  if (known && await alive(known)) return known;
+  if (known && (!owner || listBoards()[name]?.owner === owner) && await alive(known)) return known;
 
   if (!start) return null;
 
