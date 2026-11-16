@@ -542,6 +542,9 @@ const main = async () => {
         const size = c.dim(`${ch.nodes.length} boxes ${g.dot} ${ch.transcript.length} lines`);
         console.log(`  ${c.dim(String(i + 1).padStart(3))} ${ch.live ? c.accent(g.dot) : ' '} ${name}  ${size}`);
       });
+      // Where a reader sees all of this at once, with the chapters that share
+      // a box joined up. It is the first tab, but nothing in a terminal says so.
+      console.log(`\n  ${c.dim('all of them at once:')} ${url}#map`);
       return;
     }
 

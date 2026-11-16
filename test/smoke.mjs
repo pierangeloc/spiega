@@ -13,6 +13,7 @@ import { snapshotHTML } from '../src/board/snapshot.js';
 import { KINDS } from '../src/render/glyphs.js';
 import { scriptSteps, linesFor, lineStates, clickStep, tagReport } from '../src/board/script.js';
 import { frame, unionBox, litKeys } from '../src/board/camera.js';
+import { boardMap, linkLabel } from '../src/board/map.js';
 import { registeredAs } from '../src/doctor.js';
 import { lettering, wrapText, NOTE_LINES } from '../src/render/ink.js';
 import { specToOps } from '../src/spec.js';
@@ -422,7 +423,8 @@ test('every pane on the board page has a row in the body grid', () => {
    looking at, and a board that changes quietly behind someone is the failure
    chapters exist to prevent. Nothing throws when the mark is missing; the tab
    simply looks like every other tab. */
-function strip({ chapters, chapter, viewing = null, changed = [], replaying = false, replayAt = null, shown = null }) {
+function strip({ chapters, chapter, viewing = null, changed = [], replaying = false, replayAt = null,
+  shown = null, mapOpen = false }) {
   const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
   const src = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
   const m = src.match(/const surfaces = [\s\S]*?\n}\n/);
@@ -441,11 +443,16 @@ function strip({ chapters, chapter, viewing = null, changed = [], replaying = fa
     replaying,
     replayAt,
     shown,
+    mapOpen,
     showChapter: () => {},
+    showMap: () => {},
   };
   vm.createContext(context);
   new vm.Script(`${m[0]}\nrenderChapters();`).runInContext(context, { displayErrors: true });
-  return { hidden: strip.hidden, tabs: strip.kids, html: strip.innerHTML };
+  /* The map rides at the head of the strip and is not a chapter, so it is
+     handed back separately: everything below counts chapters from the left. */
+  const [map, ...tabs] = strip.kids;
+  return { hidden: strip.hidden, map, tabs, html: strip.innerHTML };
 }
 
 test('the chapter strip marks the chapter that changed while you were elsewhere', () => {
@@ -484,6 +491,67 @@ test('the chapter strip marks the chapter that changed while you were elsewhere'
     shown: { chapters: [{ title: 'Nutrients' }] } });
   assert.equal(back.tabs[0].className.includes('here'), true, 'and the one it has stepped back into');
   assert.doesNotMatch(back.html, /growing/, 'with no change-marks: a replay is not news about the live board');
+
+  /* The map is the first tab and the one tab that is about the whole
+     explanation. A reader standing on it is in no chapter, so no chapter tab
+     may claim to be where they are — two tabs marked `here` is a strip that
+     says the reader is in two places. */
+  assert.match(marked.map.className, /maptab/, 'the map leads the strip');
+  assert.equal(marked.map.className.includes('here'), false);
+  const above = strip({ ...live, mapOpen: true });
+  assert.equal(above.map.className.includes('here'), true, 'the map is where the reader is');
+  assert.equal(above.tabs.some(t => t.className.includes('here')), false,
+    'and no chapter claims them at the same time');
+});
+
+/* The map is the answer to a strip of tabs being a list: it says there are
+   four parts and nothing about how they hang together. What makes it worth
+   drawing is the links, and those are read off what was drawn rather than
+   declared — nobody is going to annotate their own explanation. */
+test('the map links the chapters that are about the same box', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'title', text: 'Releasing' },
+    { op: 'chapter', title: 'the pipeline' },
+    { op: 'node', id: 'rel', label: 'release.yml' },
+    { op: 'node', id: 'npm', label: 'npm registry' },
+    { op: 'edge', from: 'rel', to: 'npm' },
+    { op: 'say', text: 'One thing changed here.' },
+    { op: 'chapter', title: 'what had to change' },
+    { op: 'node', id: 'r2', label: 'Release.yml ' },   // the same box, written again
+    { op: 'node', id: 'ws', label: 'workspaces' },
+    { op: 'chapter', title: 'the risk' },
+    { op: 'note', id: 'n', label: 'npm registry' },    // a note is prose, not a box
+  ]);
+
+  const { cards, links } = boardMap(b);
+  assert.deepEqual(cards.map(c => c.title), ['the pipeline', 'what had to change', 'the risk']);
+  assert.equal(cards[0].line, 'One thing changed here.', 'a card carries the chapter’s first line');
+  assert.equal(cards[2].live, true, 'the chapter being drawn is a card like any other');
+  assert.equal(cards[2].i, null);
+  assert.equal(cards[0].nodes, 2);
+
+  const shared = links.filter(l => l.shared.length);
+  assert.deepEqual(shared, [{ from: 1, to: 2, shared: ['release.yml'] }],
+    'matched loosely across chapters, and a note never counts as a box');
+  assert.deepEqual(links.find(l => l.to === 3), { from: 2, to: 3, shared: [] },
+    'chapters that share nothing still follow one another');
+  assert.equal(linkLabel(shared[0]), 'release.yml');
+  assert.equal(linkLabel({ from: 1, to: 2, shared: [] }), 'then');
+  assert.equal(linkLabel({ from: 1, to: 2, shared: ['a', 'b', 'c', 'd'] }), 'a +3',
+    'a list nobody finishes is counted instead');
+  /* The pill floats over the drawing, so a box named like a table does not get
+     to be as wide as the card it points at. */
+  assert.equal(linkLabel({ from: 1, to: 2, shared: ['css_fulfilled_orders_by_day'] }),
+    'css_fulfilled_orders_by_day', 'a table-shaped name survives whole; the pill wraps it');
+  assert.equal(linkLabel({ from: 1, to: 2, shared: ['the invoice the customer eventually receives'] }),
+    'the invoice the customer ev…', 'a sentence in a box does not get to be a paragraph on the map');
+  assert.equal(linkLabel({ from: 1, to: 2, shared: ['orders\nthe ones we billed'] }), 'orders',
+    'a box label is two lines in its box and one on the map');
+
+  // one surface is a board, not an explanation with parts
+  assert.equal(boardMap(emptyBoard()).cards.length, 1);
+  assert.deepEqual(boardMap(null), { cards: [], links: [] });
 });
 
 /* A run of amendments to one chapter is one visit, not one per op. Played

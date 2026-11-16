@@ -291,6 +291,12 @@ board grows a strip of tabs, one per chapter, and `/b/<name>#2` opens at one
 of them. `replay` plays straight through the breaks, so a long explanation is
 still one thing to watch.
 
+The strip leads with a map — every chapter as its own drawing shrunk down,
+joined to the chapters that draw the same box, and a click on one opens it.
+It is derived, not declared: there is no op for it. `/b/<name>#map` opens
+there, as does `m` on the board, and a window opening on an explanation that
+already has several chapters starts there.
+
 Called before anything is drawn, it names the chapter you are on rather than
 setting an empty one aside.
 
