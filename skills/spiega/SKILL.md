@@ -140,6 +140,9 @@ function names like `\log`. Spacing is derived as in LaTeX, so `a+b` and
 `a + b` are the same. Enough for vector calculus — Maxwell's equations render
 in either form.
 
+Write it bare. There are no delimiters, so `$...$` or `\(...\)` around a
+formula is drawn as the dollars and brackets you typed.
+
 Anything outside the subset — matrices, aligned environments, limits above and
 below a sum — appears on the board **as you typed it**, dimmed. That is
 deliberate, and it means you should not reach for them: rewrite the idea as

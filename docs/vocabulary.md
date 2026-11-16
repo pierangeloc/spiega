@@ -148,9 +148,15 @@ formula sits on the board rather than on top of it.
 | accents | `\hat{n}`, `\bar{x}`, `\overline{}` |
 | upright words | `\text{const}`, `\mathrm{}` |
 | function names | `\log` `\ln` `\sin` `\exp` `\min` `\max` … |
+| spacing | `\,` `\:` `\;` `\!` — thin, medium, thick, negative; `\quad` `\qquad` |
+
+The label is written bare. There are no delimiters: `$...$`, `$$...$$` or
+`\(...\)` around it set as the dollars and brackets themselves.
 
 Spacing is derived, not copied: as in LaTeX, a space in the source is ignored
 and spacing comes from the operators, so `a+b` and `a + b` set identically.
+The spacing macros are the exception, since they ask for a gap of a stated
+size rather than repeating one that is already there.
 
 Enough for vector calculus — all four of Maxwell's equations render, in
 differential or integral form:

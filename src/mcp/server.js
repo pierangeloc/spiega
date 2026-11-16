@@ -84,11 +84,15 @@ const TOOLS = [
       `  {"op":"node","id":"gw","kind":"gateway","label":"API Gateway","sub":"authn"}   kinds: ${KINDS}\n` +
       '  {"op":"edge","from":"gw","to":"orders","label":"gRPC","async":false}\n' +
       '  {"op":"note","label":"retries are capped at 3"}\n' +
+      '  {"op":"node","kind":"formula","id":"ke","label":"K = \\\\int_0^v v\\\\,d(\\\\gamma m v)"}\n' +
       '  {"op":"boundary","label":"our VPC","members":["gw","orders"]}\n' +
       '  {"op":"step","edge":"gw>orders","step":"The gateway forwards the call"}\n' +
       '  {"op":"say","text":"The gateway checks the token first.","step":2}   step: the line explains that step\n' +
       '  {"op":"tag","match":"Flyway V25","step":6}   ties a line said earlier; step:null unties it\n' +
       '  {"op":"title","text":"Placing an order"}\n' +
+      'A formula label is a LaTeX subset — superscripts, \\frac, \\sqrt, \\vec, Greek, the usual operators — written bare: ' +
+      'there are no delimiters, so $...$ or \\(...\\) around it is drawn as the dollars and brackets you typed. ' +
+      'Spacing is derived as in LaTeX, so a+b and a + b set the same way.\n' +
       'Columns are derived from the edges, so draw a node and then the edge into it and it lands in the right place. ' +
       'Draw a few things at a time as you explain them — not the whole diagram in one call.\n' +
       'The reply says what the drawing came out like, since you cannot see it: a line such as ' +
