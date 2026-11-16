@@ -92,5 +92,10 @@
     "noBefore": true,
     "broke": "Not a bug and there is no frozen `-before` picture, because this shape could not be drawn before. The board had exactly two states for anything — lit, or dimmed to half — so a phase of several steps had no way to say which part of the picture it was about. #54 worried that a third tier would read as a board that was slightly broken rather than as a phase.",
     "fixed": "It is not a third tier of grey. There are two things being said and they use different means: opacity says whether a thing is in the phase being explained, and the accent says which single hop is happening now. So the rest of the phase is drawn exactly as it is on a board with nothing lit at all, and what moves is everything around it. The picture is step 3 of 5, in a phase with step 4: BLOED and CEL carry the step with its halo and its orange arrow, CO2 and the arrow into it are the rest of the phase at full strength, and VOEDSEL, DARM and LONG recede."
+  },
+  "issue-110-step-number-in-label": {
+    "issue": 110,
+    "broke": "Every numbered hop on the reported board read twice: `3 3 CREATE / 5 listApproved / 7 LINK`, `6 6 createAndStoreInvoices`. The board letters the step badge onto the first line of the tag, and an agent numbering a flow by hand had written the same number into the label it passed. Nothing told the reader which of the two threes was the board’s own.",
+    "fixed": "A leading number in the label is dropped when it is the number the badge is already drawing — bare, or written `2.`, `3)` or `step 4:`. A different number stays, because it is not about which step this is: the back edge here is step 5 and still reads `5 2 RETRIES, 4-EYES APPROVAL`."
   }
 }

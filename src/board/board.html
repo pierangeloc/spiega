@@ -99,9 +99,13 @@
   /* `backwards`, not `forwards`: a fill-forwards animation keeps owning opacity
      after it ends and would outrank .off below, so a dimmed line would stay
      bright. The keyframe holds the pre-start state instead. */
+  /* overflow-wrap:anywhere, because what gets said about software is full of
+     things longer than the rail is wide — a type name, a URL, a column. Left
+     to itself such a word runs out of its card and under the drawing, and the
+     end of it is simply gone. Broken mid-word it is at least all there. */
   .said{background:var(--panel);border:1.5px solid var(--ink);border-radius:12px;padding:9px 12px;
     font-size:12.5px;line-height:1.5;box-shadow:3px 3px 0 var(--soft);
-    animation:in .32s ease backwards}
+    overflow-wrap:anywhere;animation:in .32s ease backwards}
   .said.latest{box-shadow:3px 3px 0 var(--accent)}
   /* Stepping the flow lights the drawing; the script has to follow, or the
      reader is left matching sentence to picture by hand. A line that belongs
@@ -170,6 +174,7 @@
      pane and scrolled away in a wide one, so during a replay the words have to
      come to the picture. */
   .caption{position:absolute;left:50%;transform:translateX(-50%);bottom:26px;z-index:4;max-width:min(680px,88%);
+    overflow-wrap:anywhere;
     background:var(--ink);color:var(--paper);border-radius:13px;padding:10px 16px;font-size:14px;line-height:1.5;
     box-shadow:4px 4px 0 rgba(35,30,22,.18);text-align:center;opacity:0;transition:opacity .3s}
   .caption[hidden]{display:none}
@@ -484,6 +489,8 @@ function renderSteps() {
   const i = board.active;
   $('stepn').textContent = i == null ? `${f.length} steps` : `${i + 1}/${f.length}`;
   $('steptxt').textContent = i == null ? 'press → to walk the flow' : (f[i].step || f[i].edge || '');
+  // The strip is one line and ellipsises: the whole of a long step is here.
+  $('steptxt').title = $('steptxt').textContent;
   $('prev').disabled = i == null || i <= 0;
   $('next').disabled = i != null && i >= f.length - 1;
 }

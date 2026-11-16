@@ -286,6 +286,21 @@ export const TAG_CHARS = 16;
 export const TAG_LINES = 3;
 export const TAG_H = 19;
 
+/* Someone numbering a flow by hand tends to write the number into the label as
+   well — "3 create order" on the edge that is already step 3 — and the board
+   then draws "3 3 create order". The badge is the board's, so the one in the
+   words goes, but only when it is the same number: "2 retries" on step 5 is
+   about retries, not about which step this is.
+
+   @param {string} [label]
+   @param {number|null} [step] */
+function stripStep(label, step) {
+  const text = label ? String(label) : '';
+  if (step == null || !text) return text;
+  const m = text.match(/^\s*(?:step\s*)?(\d+)\s*[.):\-–—]?(?:\s+(.+))?$/i);
+  return m && Number(m[1]) === step ? (m[2] || '') : text;
+}
+
 /* The lines a tag is lettered in. The step number rides on the first line so
    it can never be separated from the words it numbers. */
 /**
@@ -294,7 +309,7 @@ export const TAG_H = 19;
  * @returns {string[]}
  */
 export function tagLines(label, step = null) {
-  const words = [step != null ? String(step) : '', label ? String(label) : ''].filter(Boolean).join(' ');
+  const words = [step != null ? String(step) : '', stripStep(label, step)].filter(Boolean).join(' ');
   if (!words) return [];
   return wrapText(lettering(words), TAG_CHARS, TAG_LINES);
 }
