@@ -72,6 +72,9 @@
   .chapters button:hover{color:var(--ink)}
   .chapters button.here{color:var(--ink);border-bottom-color:var(--accent)}
   .chapters .num{font-size:10px;color:var(--muted);font-weight:400}
+  /* The map is a tab about the whole explanation, sitting among tabs about
+     its parts; the rule keeps it from reading as chapter zero. */
+  .chapters button.maptab{border-right:1px solid var(--rule);padding-right:14px;margin-right:14px}
   .chapters button.here .num{color:var(--accent)}
   /* A chapter moved while you were reading a different one — the live one
      being drawn on, or an earlier one the agent went back and added to. Not a
@@ -202,6 +205,71 @@
      which nothing here fixes. Two different alarms deserve two colours. */
   .unsaved{background:#9a6a15}
   .zoom{position:absolute;right:14px;top:12px;display:flex;gap:6px}
+
+  /* ---- the map: the explanation from above ----
+     A tab strip says a board has four chapters and nothing about how they
+     hang together. The map is the other half of that: a card per chapter, in
+     the order they were taught, with a line between the ones that turn out to
+     be about the same box. It lies over both panes, because it is not a view
+     of a chapter — it is the way back out of one. */
+  /* `max-width:100vw` because the top bar does not shrink: in a narrow pane
+     it makes `main` wider than the window, and cards that wrapped to that
+     width would run off the side of a split pane with no way back. */
+  .map{position:absolute;inset:0;z-index:7;background:var(--paper);overflow:auto;
+    max-width:100vw;padding:20px 24px 44px;transition:opacity .22s ease}
+  .map[hidden]{display:none}
+  .map.leaving{opacity:0;overflow:hidden;pointer-events:none}
+  .map .lede{font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+    font-weight:700;margin:0 0 18px}
+  .mapwrap{position:relative}
+  /* The links are drawn under the cards and must not swallow a click meant
+     for one; overflow stays visible so a bow above the top row is not cut. */
+  .maplinks{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}
+  /* The gutter is sized for what hangs in it: the pill naming the box two
+     chapters share. Narrower than this and the name lies across the cards it
+     is pointing between. */
+  .cards{position:relative;display:flex;flex-wrap:wrap;gap:92px;align-items:flex-start;padding-top:8px}
+  /* Room for the bows: a chapter linked to one two along arcs over the cards
+     in between, and with the row flush to the top of the pane that arc is
+     drawn off the page. Only when there is such a link — in one column there
+     never is, and the gap would be a hole at the top of a narrow pane. */
+  .cards.bowed{padding-top:108px}
+  .mapcard{font:inherit;text-align:left;color:var(--ink);background:var(--panel);
+    border:1.5px solid var(--ink);border-radius:14px;box-shadow:3px 3px 0 var(--soft);
+    padding:0;width:278px;cursor:pointer;overflow:hidden;display:flex;flex-direction:column;
+    transition:transform .2s ease, box-shadow .2s ease, border-color .2s ease, opacity .22s ease}
+  .mapcard:hover{transform:translateY(-2px);border-color:var(--accent);box-shadow:5px 5px 0 var(--accent)}
+  .mapcard .head{display:flex;align-items:baseline;gap:8px;padding:10px 12px 8px}
+  .mapcard .n{font-size:10px;color:var(--muted);font-weight:400;flex:none}
+  .mapcard .t{font-size:11.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* The chapter's own drawing, shrunk. The point of the map is that you
+     recognise the picture you are about to open, so this is the real render
+     rather than an icon standing in for one. */
+  .mapcard .thumb{height:142px;background:var(--paper);border-top:1px solid var(--rule);
+    border-bottom:1px solid var(--rule);display:grid;place-items:center;padding:8px}
+  .mapcard .thumb svg{width:100%;height:100%;max-height:126px}
+  .mapcard .thumb .nothing{font-size:11px;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+  .mapcard .line{font-size:12px;line-height:1.45;padding:9px 12px 0;overflow-wrap:anywhere;
+    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .mapcard .meta{font-size:10.5px;color:var(--muted);letter-spacing:.06em;padding:8px 12px 10px;margin-top:auto}
+  .mapcard.here{box-shadow:3px 3px 0 var(--accent);border-color:var(--accent)}
+  .mapcard.islive .n::after{content:" \25CF";color:var(--accent)}
+  /* Opening a chapter: the card you clicked grows into the board behind it
+     while the rest get out of the way, so the tab that comes up is visibly
+     the thing you pointed at. */
+  .map.leaving .mapcard{opacity:0}
+  .map.leaving .mapcard.going{opacity:1;transform:scale(1.35);border-color:var(--accent)}
+  /* The pill lives in the gutter and stays there: a box named like a table is
+     wider than the gap between two cards, so it wraps rather than lying across
+     the pictures it is pointing between. Hence the soft rectangle — a pill
+     shape only reads as one on a single line. */
+  .maplabel{position:absolute;transform:translate(-50%,-50%);background:var(--panel);
+    border:1.25px solid var(--ink);border-radius:9px;padding:2px 6px;font-size:9px;
+    letter-spacing:.02em;line-height:1.3;text-align:center;max-width:84px;
+    overflow-wrap:anywhere;pointer-events:none}
+  .maplabel.free{max-width:200px}
+  .maplabel.then{border-style:dashed;color:var(--muted);border-color:var(--rule);background:var(--paper)}
 </style>
 </head>
 <body>
@@ -248,6 +316,13 @@
         <button class="btn" id="next">&rarr;</button>
       </div>
     </div>
+    <div class="map" id="map" hidden>
+      <p class="lede" id="maplede"></p>
+      <div class="mapwrap" id="mapwrap">
+        <svg class="maplinks" id="maplinks"></svg>
+        <div class="cards" id="mapcards"></div>
+      </div>
+    </div>
   </main>
 
 <script type="module">
@@ -257,6 +332,8 @@ import { emptyBoard, applyOps } from '/src/board/state.js';
 import { lineStates, groupRuns, clickStep } from '/src/board/script.js';
 import { createNarrator, wrapWords, wordAt } from '/src/board/narrate.js';
 import { frame, unionBox, litKeys } from '/src/board/camera.js';
+import { boardMap, linkLabel } from '/src/board/map.js';
+import { roughLine, stroke, arrowHead, hashSeed } from '/src/render/ink.js';
 
 const $ = id => document.getElementById(id);
 
@@ -393,6 +470,8 @@ const applyView = () => { pan.style.transform = `translate(${view.x}px,${view.y}
 
 /* ---------- transcript ---------- */
 
+const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+
 const mdish = s => s
   .replace(/&/g, '&amp;').replace(/</g, '&lt;')
   .replace(/`([^`]+)`/g, '<code>$1</code>')
@@ -517,13 +596,24 @@ function renderChapters() {
   strip.hidden = all.length < 2;
   if (strip.hidden) { strip.innerHTML = ''; return; }
   strip.innerHTML = '';
+  /* The map rides at the head of the strip, where a contents page goes. It
+     is the one tab that is about the explanation rather than about a part of
+     it, so it keeps its place while the chapters pile up to the right of it. */
+  const m = document.createElement('button');
+  m.className = (mapOpen ? 'here ' : '') + 'tab maptab';
+  m.innerHTML = '<span class="num">⊞</span><span>map</span>';
+  m.title = 'all the chapters at once, and what they have in common';
+  m.onclick = () => { if (!replaying) showMap(); };
+  strip.appendChild(m);
+
   /* Which tab is the one being looked at, counting the live chapter last. A
      replay says so too: it walks the chapters itself, and a strip that went
      blank for the length of the movie would hide the structure exactly while
      the movie was explaining it. */
   const here = replaying
     ? (replayAt != null ? replayAt : (shown?.chapters?.length ?? 0))
-    : (viewing == null ? all.length - 1 : viewing);
+    : mapOpen ? -1                     // the reader is above the chapters, in none of them
+      : (viewing == null ? all.length - 1 : viewing);
   for (const { c, i } of all) {
     const b = document.createElement('button');
     const live = i == null;
@@ -546,10 +636,208 @@ function renderChapters() {
   }
 }
 
+/* ---------- the map ----------
+
+   Chapters arrived as tabs, and tabs are a list: they say there are four
+   parts and nothing about how the parts hang together, which leaves anyone
+   who did not watch the board being drawn reading four unrelated pictures in
+   a row. The map is the missing sentence. It is the first tab, it shows each
+   chapter as its own drawing shrunk down, and it joins the chapters that are
+   about the same box — read off what was drawn, since nobody declares it.
+
+   It is a layer over both panes rather than a surface the renderer is handed:
+   a map is not a chapter, it is the way back out of one, and giving it to
+   `view_of` would have the camera, the rail, the flow strip and the narrator
+   all trying to make sense of a board that is not a board. */
+let mapOpen = false;
+
+/* A finished chapter's picture does not change unless it is amended, and
+   re-rendering five of them on every op that lands on the live one is work
+   nobody asked for. Keyed on what would make the picture different. */
+const thumbs = new Map();
+function thumbOf(key, surface) {
+  const sig = `${surface.nodes.length}:${surface.edges.length}:${surface.boundaries?.length || 0}:${surface.settled}`;
+  const had = thumbs.get(key);
+  if (had?.sig === sig) return had.svg;
+  const svg = surface.nodes.length
+    ? renderSVG({ ...surface, active: null }, { margin: 10, active: null, hand: false }).svg
+    : '<div class="nothing">nothing drawn yet</div>';
+  thumbs.set(key, { sig, svg });
+  return svg;
+}
+
+function renderMap() {
+  if (!mapOpen) return;
+  const { cards, links } = boardMap(board);
+  const wrap = $('mapcards');
+  $('maplede').textContent = board?.title
+    ? `${board.title} — ${cards.length} chapters`
+    : `${cards.length} chapters`;
+  wrap.innerHTML = '';
+  for (const c of cards) {
+    const surface = c.live ? board : board.chapters[c.i];
+    const el = document.createElement('button');
+    el.className = 'mapcard' + (c.live ? ' islive' : '') + (c.i === viewing ? ' here' : '');
+    el.dataset.n = String(c.n);
+    el.title = c.live ? 'the chapter being drawn now — click to open it'
+      : `chapter ${c.n} — click to open it`;
+    const bits = [`${c.nodes} boxes`, `${c.edges} lines`];
+    if (c.steps) bits.push(`${c.steps} steps`);
+    el.innerHTML =
+      `<span class="head"><span class="n">${c.n}</span><span class="t">${esc(c.title)}</span></span>` +
+      `<span class="thumb">${thumbOf(c.live ? 'live' : `ch${c.i}`, surface)}</span>` +
+      (c.line ? `<span class="line">${mdish(c.line)}</span>` : '') +
+      `<span class="meta">${bits.join(' · ')}</span>`;
+    el.onclick = () => enterChapter(c.i, el);
+    wrap.appendChild(el);
+  }
+  // the links need the cards laid out before they can know where to go
+  requestAnimationFrame(() => drawLinks(links));
+}
+
+/* The lines between the cards, in the board's own ink — this is a drawing of
+   an explanation, and a map drawn in a different hand would read as chrome. */
+function drawLinks(links) {
+  const wrap = $('mapwrap'), cards = $('mapcards'), svg = $('maplinks');
+  [...wrap.querySelectorAll('.maplabel')].forEach(n => n.remove());
+  const box = n => {
+    const el = cards.querySelector(`.mapcard[data-n="${n}"]`);
+    return el && { x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight };
+  };
+  /* Whether anything bows over the top, which decides how much room there is
+     up there. Changing it moves every card, so the lines are drawn on the
+     next frame against where the cards ended up rather than where they were
+     when this was decided. */
+  const bowed = links.some(l => {
+    const a = box(l.from), b = box(l.to);
+    return a && b && Math.abs(a.y - b.y) < 8 && l.to !== l.from + 1;
+  });
+  if (bowed !== cards.classList.contains('bowed')) {
+    cards.classList.toggle('bowed', bowed);
+    return void requestAnimationFrame(() => drawLinks(links));
+  }
+  svg.setAttribute('width', String(cards.offsetWidth));
+  svg.setAttribute('height', String(cards.offsetHeight));
+  let d = '';
+  for (const link of links) {
+    const a = box(link.from), b = box(link.to);
+    if (!a || !b) continue;
+    const seed = hashSeed(`${link.from}>${link.to}`);
+    const shared = link.shared.length > 0;
+    const style = { w: shared ? 1.7 : 1.3, dash: shared ? null : '7 6', opacity: shared ? 1 : 0.5 };
+    const row = Math.abs(a.y - b.y) < 8;
+    const next = link.to === link.from + 1;
+    let mid;
+    if (row && next) {
+      // side by side: the short hop, straight across the gap
+      const p = [a.x + a.w, a.y + a.h / 2], q = [b.x, b.y + b.h / 2];
+      d += stroke(roughLine(p, q, { seed }), style);
+      d += arrowHead(q, 0, { seed, w: style.w, size: 10 });
+      mid = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+    } else if (!row && next) {
+      // the card below: straight down into the top of it
+      const p = [a.x + a.w / 2, a.y + a.h], q = [b.x + b.w / 2, b.y];
+      d += stroke(roughLine(p, q, { seed }), style);
+      d += arrowHead(q, Math.PI / 2, { seed, w: style.w, size: 10 });
+      mid = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+    } else {
+      /* A chapter reaching past its neighbours. Along a row it bows over the
+         top of the cards in between; down a column it goes out and around
+         their side. Either way it must not be drawn through them — a line
+         crossing a card reads as a line about that card. */
+      const p = row ? [a.x + a.w / 2, a.y] : [a.x + a.w, a.y + a.h / 2];
+      const q = row ? [b.x + b.w / 2, b.y] : [b.x + b.w, b.y + b.h / 2];
+      // capped, or a link across a wide row arcs up through the heading
+      const lift = row
+        ? Math.min(84, Math.max(38, Math.abs(q[0] - p[0]) * 0.16))
+        : Math.min(96, 44 + (link.to - link.from) * 14);
+      const c1 = row ? [p[0], p[1] - lift] : [p[0] + lift, p[1]];
+      const c2 = row ? [q[0], q[1] - lift] : [q[0] + lift, q[1]];
+      d += stroke(`M${p[0]} ${p[1]}C${c1[0]} ${c1[1]} ${c2[0]} ${c2[1]} ${q[0]} ${q[1]}`, style);
+      d += arrowHead(q, Math.atan2(q[1] - c2[1], q[0] - c2[0]), { seed, w: style.w, size: 10 });
+      mid = [
+        (p[0] + 3 * c1[0] + 3 * c2[0] + q[0]) / 8,
+        (p[1] + 3 * c1[1] + 3 * c2[1] + q[1]) / 8,
+      ];
+    }
+    const tag = document.createElement('span');
+    /* A bow hangs in open paper above the row and can have its name on one
+       line; the hop to the next card has only the gutter, and is kept down to
+       it by `.maplabel`. */
+    tag.className = 'maplabel' + (shared ? '' : ' then') + (next ? '' : ' free');
+    /* The pill wraps inside the gutter, and a box named `css_fulfilled_orders`
+       is one word to the browser — left alone it breaks wherever the edge
+       falls. A zero-width space after each separator offers it somewhere to
+       break that a reader would have broken too. */
+    tag.textContent = linkLabel(link).replace(/([_./\-])/g, '$1\u200b');
+    tag.title = shared
+      ? `chapters ${link.from} and ${link.to} both draw ${link.shared.join(', ')}`
+      : `chapter ${link.to} follows chapter ${link.from}`;
+    tag.style.left = `${mid[0]}px`;
+    tag.style.top = `${mid[1]}px`;
+    wrap.appendChild(tag);
+  }
+  svg.innerHTML = d;
+  declutter(wrap);
+}
+
+/* Two links can cross near their middles — a bow coming back over the row ends
+   up where the hop below it starts — and then one name sits on the other and
+   neither can be read. Each pill in turn is nudged along the link it belongs
+   to until it is clear of the ones already placed; a label a few pixels off
+   its midpoint still reads as that link's, an unreadable one reads as
+   nothing. */
+function declutter(wrap) {
+  const tags = [...wrap.querySelectorAll('.maplabel')];
+  const box = el => {
+    const t = parseFloat(el.style.top), l = parseFloat(el.style.left);
+    return { t: t - el.offsetHeight / 2, b: t + el.offsetHeight / 2, l: l - el.offsetWidth / 2, r: l + el.offsetWidth / 2 };
+  };
+  const hits = (p, q) => p.l < q.r + 4 && p.r + 4 > q.l && p.t < q.b + 3 && p.b + 3 > q.t;
+  const placed = [];
+  for (const tag of tags) {
+    const home = parseFloat(tag.style.top);
+    for (let tries = 0; tries < 14; tries++) {
+      const r = box(tag);
+      if (!placed.some(p => hits(r, p))) break;
+      // out from the midpoint, alternating sides, so a pair ends up straddling it
+      const step = Math.ceil((tries + 1) / 2) * (tag.offsetHeight + 7);
+      tag.style.top = `${home + (tries % 2 ? -step : step)}px`;
+    }
+    placed.push(box(tag));
+  }
+}
+
+function showMap() {
+  if (replaying) return;
+  mapOpen = true;
+  $('map').hidden = false;
+  $('map').classList.remove('leaving');
+  if (location.hash !== '#map') history.replaceState(null, '', location.pathname + location.search + '#map');
+  renderChapters();
+  renderMap();
+}
+
+function closeMap() {
+  mapOpen = false;
+  $('map').hidden = true;
+  $('map').classList.remove('leaving');
+}
+
+/* Opening a chapter from the map. The card is held on screen a beat while it
+   grows, so the chapter that comes up is visibly the one that was pointed at
+   rather than a tab that changed somewhere. */
+function enterChapter(i, card) {
+  card.classList.add('going');
+  $('map').classList.add('leaving');
+  setTimeout(() => { closeMap(); showChapter(i); }, 230);
+}
+
 /* `null` is the live chapter. Switching is a local move: nothing is posted,
    so two people reading the same board can be in different chapters. */
 function showChapter(i) {
   if (i != null && !board?.chapters?.[i]) i = null;
+  if (mapOpen) closeMap();
   viewing = i;
   chapterStep = i == null ? null : (board.chapters[i].active ?? null);
   changed.delete(i);              // you are looking at it now
@@ -566,7 +854,9 @@ const chapterFromHash = () => {
   const n = Number((location.hash || '').slice(1));
   return Number.isInteger(n) && n >= 1 && n <= (board?.chapters?.length || 0) ? n - 1 : null;
 };
-addEventListener('hashchange', () => showChapter(chapterFromHash()));
+addEventListener('hashchange', () => {
+  if (location.hash === '#map') showMap(); else showChapter(chapterFromHash());
+});
 
 /* ---------- following the step ----------
 
@@ -869,7 +1159,7 @@ async function replay() {
   replaying = true;
   userMoved = false;
   // a replay owns the screen, and it walks the chapters itself
-  viewing = null; changed.clear(); renderChapters();
+  viewing = null; closeMap(); changed.clear(); renderChapters();
   $('replay').classList.add('on');
   $('replay').textContent = 'stop';
 
@@ -1013,6 +1303,15 @@ function onState(b, fresh, amended = []) {
   clearTimeout(onState._t);
   onState._t = setTimeout(() => setLink(es && es.readyState === EventSource.OPEN ? 'idle' : 'down'), 2500);
   if (first && chapterFromHash() != null) return void showChapter(chapterFromHash());
+  /* Where a reader lands. A link into a chapter wins; otherwise an
+     explanation that already has several chapters by the time this window
+     opens is one nobody here watched being drawn, and the map is the honest
+     first page for it. The explainer's own window opens on an empty board and
+     never hits this, which is the point: a map must never take the drawing
+     away from the person drawing it. */
+  if (first && location.hash === '#map') { showMap(); return; }
+  if (first && (b.chapters?.length || 0) >= 2 && !location.hash) { showMap(); return; }
+  if (mapOpen) renderMap();
   renderChapters();
   renderRail();
   render(fresh);
@@ -1169,11 +1468,22 @@ addEventListener('keydown', e => {
 
   else if (e.key === 'f') $('fit').click();
   else if (e.key === 'r') $('replay').click();
-  else if (e.key === 'Escape') { if (replaying) stopReplay(); else focus(null); }
+  // out to the map and back in: the gesture a reader reaches for before they
+  // have noticed there is a tab for it
+  else if (e.key === 'm') { if (mapOpen) showChapter(viewing); else if (board?.chapters?.length) showMap(); }
+  else if (e.key === 'Escape') {
+    if (replaying) stopReplay();
+    else if (mapOpen) showChapter(viewing);
+    else focus(null);
+  }
 });
-addEventListener('resize', () => { if (!userMoved) fit(); });
+/* A map that is a narrow pane wide rewraps its cards, and the lines between
+   them were drawn where the cards used to be. */
+const relink = () => { if (mapOpen) requestAnimationFrame(() => drawLinks(boardMap(board).links)); };
+addEventListener('resize', () => { if (!userMoved) fit(); relink(); });
 // A board usually lives in a pane someone is dragging wider or narrower.
 new ResizeObserver(() => { if (!userMoved) fit(); }).observe(stage);
+new ResizeObserver(relink).observe($('mapcards'));
 </script>
 </body>
 </html>

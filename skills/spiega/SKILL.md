@@ -253,6 +253,13 @@ the same title. The board grows a strip of tabs, so the person can see that
 the earlier parts exist and walk back to them, and `replay` plays straight
 through the breaks as one thing.
 
+The strip leads with a **map** tab: every chapter as its own drawing shrunk
+down, joined to the chapters that turn out to be about the same box, and a
+click on one opens it. Nothing to declare — the links are read off what was
+drawn — but it is worth a sentence when you hand over a chaptered board,
+because a reader who did not watch it being drawn will take the tabs for four
+unrelated pictures. `/b/<name>#map` links straight to it.
+
 Name the first chapter before you draw it, so the strip reads as an
 explanation rather than as "untitled, Enzymes".
 
