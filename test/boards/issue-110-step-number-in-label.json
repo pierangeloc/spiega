@@ -1,0 +1,24 @@
+{
+  "title": "step numbers written into the labels",
+  "nodes": [
+    { "id": "user", "kind": "client",    "label": "Frontend" },
+    { "id": "api",  "kind": "service",   "label": "city-hubs-api" },
+    { "id": "db",   "kind": "datastore", "label": "city-hubs DB" },
+    { "id": "corr", "kind": "service",   "label": "corrections-api" },
+    { "id": "inv",  "kind": "service",   "label": "invoices-api" }
+  ],
+  "edges": [
+    { "from": "user", "to": "api",  "label": "1 upload CSV" },
+    { "from": "api",  "to": "db",   "label": "2. validate supplierId" },
+    { "from": "api",  "to": "corr", "label": "3 create / 5 listApproved / 7 link" },
+    { "from": "api",  "to": "inv",  "label": "step 4: createAndStoreInvoices" },
+    { "from": "inv",  "to": "user", "label": "2 retries, 4-eyes approval" }
+  ],
+  "flow": [
+    { "edge": "user>api",  "step": "Upload" },
+    { "edge": "api>db",    "step": "Validate" },
+    { "edge": "api>corr",  "step": "Create, list, link" },
+    { "edge": "api>inv",   "step": "Invoice" },
+    { "edge": "inv>user",  "step": "Give up after a few goes" }
+  ]
+}
