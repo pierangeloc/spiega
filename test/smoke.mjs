@@ -4686,4 +4686,11 @@ await atest('finished boards settle once, with replayable coordinates', async ()
   process.stdout.write(stdout);
 });
 
+await atest('narration is one transport over a tape that can be the whole board', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const { stdout } = await promisify(execFile)(process.execPath, [path.join(ROOT, 'test/tape.mjs')]);
+  process.stdout.write(stdout);
+});
+
 console.log(`\n${n} passed`);
