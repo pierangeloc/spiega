@@ -67,6 +67,18 @@ const SYMBOLS = {
 const FUNCTIONS = ['log', 'ln', 'exp', 'sin', 'cos', 'tan', 'min', 'max',
   'det', 'dim', 'deg', 'arg', 'gcd', 'lim', 'mod'];
 
+/* LaTeX's spacing macros, in eighteenths of an em as LaTeX counts them. They
+   are widths, not characters: a thin space is a sixth of an em and a monospace
+   cell is three and a half times that, so there is no glyph that can stand in
+   for one.
+
+   They are named here because of what happens when they are not. A backslash
+   before a non-letter yields that character, which is right for `\$` and `\{`
+   and silently wrong for these: `v\,dp` set as `v,dp`, putting a comma in the
+   middle of a formula. A thin space that does not appear is a blemish; a comma
+   nobody wrote changes what the formula says. */
+const SPACERS = { ',': 3 / 18, ':': 4 / 18, ';': 5 / 18, '!': -3 / 18 };
+
 /* Spacing is derived, not copied. A space typed in the source is not what a
    reader sees in a formula — LaTeX ignores it and spaces around operators
    instead, which is why `a+b` and `a + b` set identically. Monospace makes
@@ -110,7 +122,11 @@ function parse(src) {
     i++;                                     // the backslash
     let name = '';
     while (i < s.length && /[a-zA-Z]/.test(s[i])) name += s[i++];
-    if (!name) { const c = s[i++]; return { t: 'ch', s: c ?? '\\' }; }
+    if (!name) {
+      const c = s[i++];
+      if (c != null && c in SPACERS) return { t: 'spacer', em: SPACERS[c] };
+      return { t: 'ch', s: c ?? '\\' };
+    }
 
     if (name === 'frac' || name === 'tfrac' || name === 'dfrac') {
       return { t: 'frac', num: group(), den: group() };
@@ -181,6 +197,10 @@ function measure(node, size) {
     case 'unknown':
       return { w: String(node.s).length * ADV * em, a: ASCENT * em, d: DESCENT * em };
 
+    // a gap carries no ink, so it must not stretch the line it sits on
+    case 'spacer':
+      return { w: node.em * em, a: 0, d: 0 };
+
     case 'text': {
       const m = measure(node.body, em);
       return { w: m.w, a: m.a, d: m.d };
@@ -250,6 +270,9 @@ function draw(node, x, y, size, color, seed) {
     case 'op':
     case 'fn':
       return t(node.s, x, y, em);
+
+    case 'spacer':
+      return '';
 
     case 'unknown':
       // shown as written, dimmed, so it is obvious nothing was understood

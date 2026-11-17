@@ -1,0 +1,10 @@
+{
+  "title": "spacing macros",
+  "nodes": [
+    { "id": "ke", "kind": "formula", "label": "K = \\int_0^v v\\,d(\\gamma m v)" },
+    { "id": "bare", "kind": "formula", "label": "K = \\int_0^v v d(\\gamma m v)" },
+    { "id": "all", "kind": "formula", "label": "a \\, b \\: c \\; d \\! e" },
+    { "id": "esc", "kind": "formula", "label": "\\{x\\} = \\$5 + 100\\%" },
+    { "id": "gauss", "kind": "formula", "label": "\\oint \\vec{E} \\cdot d\\vec{A} = \\frac{Q}{\\varepsilon_0}" }
+  ]
+}
