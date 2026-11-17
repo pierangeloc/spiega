@@ -7,7 +7,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps } from '../src/board/state.js';
 import { renderSVG } from '../src/render/render.js';
-import { boundaryShapes, intruders, EDGE_GAP } from '../src/render/layout.js';
+import { assign, boundaryShapes, intruders, EDGE_GAP } from '../src/render/layout.js';
+import { audit } from '../src/render/audit.js';
 import { tagBox } from '../src/render/edges.js';
 import { snapshotHTML } from '../src/board/snapshot.js';
 import { KINDS } from '../src/render/glyphs.js';
@@ -32,6 +33,63 @@ const isolatedEnv = home => {
 };
 let n = 0;
 const test = (name, fn) => { fn(); n++; console.log('  ok  ' + name); };
+
+test('a late input sits beside its earliest consumer, not under the pipeline (#119)', () => {
+  const spec = JSON.parse(fs.readFileSync(path.join(ROOT, 'test/boards/issue-119-source-columns.json'), 'utf8'));
+  const b = emptyBoard();
+  assert.deepEqual(applyOps(b, specToOps(spec)).errors, []);
+  const placed = assign(b);
+  assert.deepEqual(['all', 'bk', 'dates', 'sb', 'comb', 'chwo'].map(id => placed[id].col),
+    [0, 1, 2, 3, 4, 5], 'the pipeline itself stays put');
+  assert.equal(placed.ebs2.col, placed.sb.col - 1, 'easy_bill_suppliers belongs beside its reader');
+  assert.equal(placed.ch.col, placed.comb.col - 1, 'city_hubs belongs beside its reader');
+  const r = renderSVG(b);
+  assert.deepEqual(audit(b, r).buried, [], 'neither lookup runs beneath an unrelated box');
+  assert.deepEqual(assign({ ...b, nodes: [...b.nodes].reverse() }).ebs2.col, placed.ebs2.col,
+    'consumer columns are resolved before sources move, regardless of declaration order');
+});
+
+test('source pulling respects the earliest consumer, manual placement, and row reservations', () => {
+  const spec = {
+    nodes: [
+      { id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }, { id: 'e' },
+      { id: 'near' }, { id: 'many' }, { id: 'other' }, { id: 'alone' },
+      { id: 'manual', col: 0, row: 8 }, { id: 'relative', place: 'below:a' },
+      { id: 'pinned' }, { id: 'note', kind: 'note' },
+      { id: 'anchor' }, { id: 'beside', place: 'right-of:anchor' },
+    ],
+    edges: [
+      { from: 'a', to: 'b' }, { from: 'b', to: 'c' }, { from: 'c', to: 'd' }, { from: 'd', to: 'e' },
+      { from: 'near', to: 'b' }, { from: 'many', to: 'd' }, { from: 'many', to: 'e' },
+      { from: 'other', to: 'd', via: [{ col: 2, row: 1 }] },
+      ...['manual', 'relative', 'pinned', 'note', 'anchor'].map(from => ({ from, to: 'd' })),
+    ],
+  };
+  const pinned = { pinned: { col: 0, row: 7 } };
+  const p = assign(spec, pinned);
+  assert.equal(p, pinned, 'the caller still owns the placement map');
+  assert.equal(p.many.col, 2, 'the earliest of several consumers bounds the move');
+  assert.equal(p.other.col, 2);
+  assert.equal(p.near.col, 0, 'an input already next to its reader keeps the left margin');
+  assert.equal(p.alone.col, 0, 'an isolated box is not a late input');
+  assert.deepEqual(p.manual, { col: 0, row: 8 });
+  assert.equal(p.relative.col, p.a.col);
+  assert.deepEqual(p.pinned, { col: 0, row: 7 });
+  assert.equal(p.note.col, -1);
+  assert.equal(p.anchor.col, 0, 'a manual relative placement keeps its anchor');
+  assert.equal(p.beside.col, p.anchor.col + 1);
+  const rows = [p.c.row, p.many.row, p.other.row, 1];
+  assert.equal(new Set(rows).size, rows.length, 'moved sources claim free rows, including edge lanes');
+});
+
+test('removing the header tally leaves no replay-time reference to it', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
+  assert.ok(!/id="count"|\.count\s*\{|\$\('count'\)/.test(html));
+  assert.ok(html.includes('`${c.nodes} boxes`') && html.includes('`${c.edges} lines`'),
+    'chapter-map counts still distinguish thumbnails');
+  assert.ok(!fs.readFileSync(path.join(ROOT, 'docs/gallery/title.svg'), 'utf8').includes('2 boxes'),
+    'the gallery title bar matches the real header');
+});
 
 test('an op list builds a board, and ids come from labels', () => {
   const b = emptyBoard();

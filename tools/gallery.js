@@ -267,11 +267,6 @@ function titleSheet() {
   body += text(40, bar / 2 + 5, t.board.title, {
     size: 14, color: INK, weight: 700, anchor: 'start', spacing: 0.04, upper: true, family: FONT,
   });
-  body += text(W - 20, bar / 2 + 4,
-    `${t.board.nodes.length} box${t.board.nodes.length === 1 ? '' : 'es'} · ` +
-    `${t.board.edges.length} line${t.board.edges.length === 1 ? '' : 's'}`, {
-      size: 11, color: MUTED, weight: 400, anchor: 'end', spacing: 0.06, family: FONT,
-    });
   body += place(t, (W - t.v.w) / 2, bar + 18);
   return doc(W, H, body);
 }

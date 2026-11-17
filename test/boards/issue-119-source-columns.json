@@ -1,0 +1,107 @@
+{
+  "title": "The funnel: loadCityHubsWithOperators",
+  "nodes": [
+    {
+      "id": "all",
+      "kind": "field",
+      "label": "all CityHubOperators",
+      "sub": "from chapter 1"
+    },
+    {
+      "id": "bk",
+      "kind": "service",
+      "label": "validateBookkeepingSystemId"
+    },
+    {
+      "id": "dates",
+      "kind": "service",
+      "label": "validateNoOverlapOrGaps…",
+      "sub": "CityHubService"
+    },
+    {
+      "id": "sb",
+      "kind": "service",
+      "label": "listSupplierBasePerCityHubOperator",
+      "sub": "InvoiceNumberingService"
+    },
+    {
+      "id": "ebs2",
+      "kind": "datastore",
+      "label": "easy_bill_suppliers"
+    },
+    {
+      "id": "comb",
+      "kind": "service",
+      "label": "combineCityHubsWithOperators"
+    },
+    {
+      "id": "ch",
+      "kind": "datastore",
+      "label": "city_hubs",
+      "sub": "cityHubRepository.list"
+    },
+    {
+      "id": "chwo",
+      "kind": "field",
+      "label": "cityHubsWithOperators",
+      "sub": "Seq[CityHubWithOperator]"
+    }
+  ],
+  "edges": [
+    {
+      "from": "all",
+      "to": "bk",
+      "label": "Seq"
+    },
+    {
+      "from": "bk",
+      "to": "dates",
+      "label": "Seq"
+    },
+    {
+      "from": "dates",
+      "to": "sb",
+      "label": "Seq"
+    },
+    {
+      "from": "ebs2",
+      "to": "sb",
+      "label": "by legisway_id"
+    },
+    {
+      "from": "sb",
+      "to": "comb",
+      "label": "Seq[(op, SupplierBase)]"
+    },
+    {
+      "from": "ch",
+      "to": "comb",
+      "label": "by city_hub_code"
+    },
+    {
+      "from": "comb",
+      "to": "chwo",
+      "label": "inner join"
+    }
+  ],
+  "boundaries": [],
+  "callouts": [],
+  "flow": [
+    {
+      "edge": "all>bk",
+      "step": "Oracle: drop if no supplierNumber. SAP: drop if no mdgId. Logged."
+    },
+    {
+      "edge": "bk>dates",
+      "step": "Drop if endDate < run.startDate. SILENT. Gap/overlap only logged, not dropped."
+    },
+    {
+      "edge": "ebs2>sb",
+      "step": "Drop if no easy_bill_suppliers row (EASY-BILL-SUPPLIER-ONTBREEKT)."
+    },
+    {
+      "edge": "ch>comb",
+      "step": "Drop if cityHubCode not in city_hubs (logged unless already ended)."
+    }
+  ]
+}

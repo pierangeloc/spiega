@@ -221,6 +221,7 @@ export function backEdges(nodes, edges) {
  * @returns {Placed}
  */
 export function assign(spec, placed = {}) {
+  const pinned = new Set(Object.keys(placed));
   const byId = Object.fromEntries(spec.nodes.map(n => [n.id, n]));
   const back = backEdges(spec.nodes, spec.edges);
   /** @type {Record<string, string[]>} */
@@ -282,6 +283,21 @@ export function assign(spec, placed = {}) {
   const claim = p => (used[p.col] ||= new Set()).add(p.row);
 
   for (const n of spec.nodes) claim(resolve(n));
+
+  /* Resolve the pipeline first: asking a source for its consumer's column
+     during resolve() would recurse straight back into that source. An input
+     more than one column from its first reader then joins the column just to
+     its left, rather than drawing a lookup underneath the intervening boxes.
+     Manual placements (including the anchors of relative ones) stay put. */
+  const fed = new Set((spec.edges || []).filter(e => byId[e.from]).map(e => e.to));
+  const anchors = new Set(spec.nodes.map(n => n.place?.split(':')[1]).filter(Boolean));
+  for (const n of spec.nodes) {
+    if (pinned.has(n.id) || n.col != null || n.place || n.kind === 'note' || fed.has(n.id) || anchors.has(n.id)) continue;
+    const sinks = (spec.edges || []).filter(e => e.from === n.id && placed[e.to]).map(e => placed[e.to]);
+    if (!sinks.length) continue;
+    const col = Math.max(0, Math.min(...sinks.map(p => p.col)) - 1);
+    if (col > placed[n.id].col) placed[n.id] = { col, row: nextRow(col) };
+  }
   return placed;
 }
 
