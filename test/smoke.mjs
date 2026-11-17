@@ -1078,8 +1078,16 @@ test('doctor reports what is stale, and every problem comes with a way out', asy
 test('a stale shared server is not fixed one board at a time', async () => {
   const { staleBoardFix } = await import('../src/doctor.js');
   assert.match(staleBoardFix(true), /stop --server/);
-  assert.match(staleBoardFix(true), /every board on it is lost/);
   assert.match(staleBoardFix(false), /stop --board/);
+
+  /* And it must not go on charging the old price. Boards are restored from
+     their op logs, so the cost of a restart is the unsaved ones only — a
+     warning that says the drawings are lost talks people out of a chore. */
+  for (const shared of [true, false]) {
+    assert.doesNotMatch(staleBoardFix(shared), /no persistence/);
+    assert.match(staleBoardFix(shared), /comes? back from (?:their|its) logs?/);
+    assert.match(staleBoardFix(shared), /unsaved/);
+  }
 });
 
 /* Terminal dressing is for terminals. Piped into a file, a pager, or an agent
@@ -2582,6 +2590,30 @@ test('a process from a previous location is found, not reported as absent', asyn
 
   assert.deepEqual(scanProcesses('', root), { boards: [], mcp: [] });
   assert.deepEqual(scanProcesses(undefined, root), { boards: [], mcp: [] });
+});
+
+/* `node src/cli.js serve` from the checkout is how README and AGENTS.md say to
+   run this, and it is what a person types. Requiring a leading slash on the
+   path missed every one of them: a server started by hand served every board
+   on the machine while doctor reported "none running". Found, then, but its
+   location is unknowable from a listing that carries no cwd, so it must not be
+   claimed as this checkout either. */
+test('a server started by a relative path is found, with its location unknown', async () => {
+  const { scanProcesses } = await import('../src/doctor.js');
+  const root = '/Users/x/projects/spiega';
+  const ps = [
+    '  201 500 node src/cli.js serve --quiet',
+    '  202 500 node src/mcp/server.js',
+    '  203 500 node src/cli.js draw {"op":"node"}',       // still not a server
+    '  204 500 node tools/src/cli.js serve',              // somebody else's, and placeable
+    '',
+  ].join('\n');
+
+  const { boards, mcp } = scanProcesses(ps, root);
+  assert.deepEqual(boards, [{ pid: 201, ppid: 500, here: null }],
+    'a relative server is ours, and we cannot say which checkout it came from');
+  assert.deepEqual(mcp, [{ pid: 202, ppid: 500, here: null }]);
+  assert.ok(!boards.some(b => b.pid === 203 || b.pid === 204));
 });
 
 /* The ppid is what the report acts on — an MCP server is ended by ending the

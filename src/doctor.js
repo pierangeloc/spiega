@@ -396,6 +396,15 @@ function startedAt(pid) {
    thing to say about a stale one is which session to end, and that is the
    ppid. The listing is asked for `pid=,ppid=,command=` for this reason.
 
+   The path may also be relative, because `node src/cli.js serve` from the
+   checkout is a documented way to run this thing and the one a person types.
+   Requiring a leading slash missed those entirely, which is the same blindness
+   as above wearing different clothes: a server started by hand reported as
+   "none running" while it served every board on the machine. A relative path
+   does say less, though — a `ps` listing carries no cwd, so there is no way to
+   tell which checkout it was typed in. That is `here: null`, judged on its
+   start time alone, rather than a guess in either direction.
+
    Exported, and taking the listing as an argument, so the cases that matter
    can be tested without starting anything. */
 export function scanProcesses(psOutput, root) {
@@ -404,12 +413,19 @@ export function scanProcesses(psOutput, root) {
     if (line.includes('ps -Ao')) continue;
     const [pid, ppid] = line.trim().split(/\s+/, 2).map(Number);
     if (!pid) continue;
-    const isMcp = /\/src\/mcp\/server\.js(?:\s|$)/.test(line);
+    /* One of our files, as an argument: `/somewhere/src/cli.js` or the bare
+       `src/cli.js` of a hand start. Anything in between — `tools/src/cli.js`
+       — belongs to whoever owns that tools directory, not to us. */
+    const arg = f => new RegExp(String.raw`\s(?:/\S*/)?src/${f}(?:\s|$)`).test(line);
+    const isMcp = arg(String.raw`mcp/server\.js`);
     // `cli.js serve`, and not some other subcommand that mentions the word
-    const isBoard = /\/src\/cli\.js\s/.test(line) && /\bserve\b/.test(line);
+    const isBoard = arg(String.raw`cli\.js`) && /\bserve\b/.test(line);
     if (!isMcp && !isBoard) continue;
+    const absolute = /\s\/\S*\/src\/(?:cli|mcp\/server)\.js(?:\s|$)/.test(line);
     (isMcp ? out.mcp : out.boards).push({
-      pid, ppid: Number.isFinite(ppid) ? ppid : null, here: line.includes(`${root}/`),
+      pid,
+      ppid: Number.isFinite(ppid) ? ppid : null,
+      here: absolute ? line.includes(`${root}/`) : null,
     });
   }
   return out;
@@ -436,11 +452,18 @@ function ownerName(ppid) {
    `--board x` is wrong for the shared server: it holds every board, so
    dropping one of them leaves the stale process serving the other seven. The
    warning has to name the thing that actually has to go, and say what that
-   costs — boards are in memory only, so restarting the server loses every
-   drawing on it, which makes this a decision rather than a chore. */
+   costs.
+
+   What it costs changed, and this line went on saying otherwise long after it
+   was false. Boards were memory only once, so a restart threw every drawing
+   away and the advice was a decision rather than a chore; they are rebuilt
+   from their op logs now (`restoreBoard`), so it is a chore. The exception is
+   a board the banner already calls unsaved — no persist, an unwritable file,
+   or one another server owns — which is the board that really does lose its
+   ink, and is why this promises no more than the banner does. */
 export const staleBoardFix = shared => shared
-  ? 'spiega stop --server, then draw again \u2014 every board on it is lost (no persistence yet)'
-  : 'spiega stop --board <name>, then draw again \u2014 note the drawing is lost (no persistence yet)';
+  ? 'spiega stop --server, then draw again \u2014 the boards come back from their logs, bar any the banner calls unsaved'
+  : 'spiega stop --board <name>, then draw again \u2014 it comes back from its log unless the banner calls it unsaved';
 
 function processes(rows, headTime) {
   const ps = sh('ps', ['-Ao', 'pid=,ppid=,command=']) || '';
@@ -448,23 +471,25 @@ function processes(rows, headTime) {
 
   /* Stale means either of two things, and both leave an agent talking to code
      that is not the code on disk: started before the current commit, or
-     started from somewhere that is no longer this checkout. */
+     started from somewhere that is no longer this checkout. A process whose
+     location cannot be read at all (`here: null`, a relative path) is held to
+     the first test only — unplaceable is not the same as elsewhere. */
   const stale = list => list.filter(p => {
-    if (!p.here) return true;
+    if (p.here === false) return true;
     const t = startedAt(p.pid);
     return t != null && headTime && t < headTime;
   });
 
   const why = list => {
-    const moved = list.filter(p => !p.here).length;
+    const moved = list.filter(p => p.here === false).length;
     const old = list.length - moved;
     return [moved && `${moved} from a previous location`, old && `${old} older than the current commit`]
       .filter(Boolean).join(', ');
   };
 
-  /* Naming the stale boards matters, because restarting one loses its drawing
-     — boards are in memory only — so this is a decision, not a chore, and it
-     should not be made by a blanket `stop --all`.
+  /* Naming the stale boards matters even though a restart now rebuilds them
+     from their logs: an unsaved one does lose its ink, and the person reading
+     this is the only one who knows which boards are mid-explanation.
 
      Which boards a process holds is the registry's business, and since one
      server holds many, a single stale process can be several stale boards. */
