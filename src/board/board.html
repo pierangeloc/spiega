@@ -63,6 +63,9 @@
   .transport[hidden]{display:none}
   .btn.icon{padding:5px 10px;display:inline-flex;align-items:center;justify-content:center}
   .btn.icon svg{width:12px;height:12px;display:block;fill:currentColor}
+  .btn.rail-button{padding:5px 8px;display:inline-flex;align-items:center;justify-content:center}
+  .btn.rail-button svg{width:16px;height:16px;display:block;fill:none;stroke:currentColor;
+    stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   .transport .pos{font-size:11px;color:var(--muted);letter-spacing:.06em;white-space:nowrap;
     min-width:46px;text-align:center}
   .btn.rate{text-transform:none;letter-spacing:.02em;min-width:50px;padding:5px 9px}
@@ -309,7 +312,7 @@
     <span class="dot idle" id="live" title="waiting for the agent"></span>
     <h1 id="title">spiega</h1>
     <span class="spacer"></span>
-    <button class="btn" id="rail-toggle" title="hide the transcript">transcript</button>
+    <button class="btn rail-button" id="rail-toggle" title="show or hide transcript" aria-label="hide transcript" aria-controls="rail" aria-expanded="true"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="3" width="16" height="14" rx="2"/><path d="M6 7h8M6 10h8M6 13h5"/></svg></button>
     <div class="transport" id="transport" role="group" aria-label="narration">
       <button class="btn icon" id="tprev" title="previous line (↑)" aria-label="previous line" disabled><svg viewBox="0 0 12 12"><rect x="1" y="1.5" width="2" height="9"/><path d="M11 1.5v9L4.5 6z"/></svg></button>
       <button class="btn icon" id="narrate" title="read the script aloud — space plays and pauses" aria-label="play"></button>
@@ -1635,11 +1638,16 @@ $('fit').onclick = () => { userMoved = false; fit(true); };
 $('snap').onclick = () => window.open(API + 'snapshot', '_blank');
 $('rail-toggle').onclick = e => {
   $('main').classList.toggle('norail');
-  e.target.classList.toggle('on', !$('main').classList.contains('norail'));
+  const shown = !$('main').classList.contains('norail');
+  e.currentTarget.classList.toggle('on', shown);
+  e.currentTarget.setAttribute('aria-expanded', String(shown));
+  e.currentTarget.setAttribute('aria-label', shown ? 'hide transcript' : 'show transcript');
   setTimeout(() => { if (!userMoved) fit(true); }, 60);
 };
 if (matchMedia('(max-width:820px)').matches) $('main').classList.add('norail');
 $('rail-toggle').classList.toggle('on', !$('main').classList.contains('norail'));
+$('rail-toggle').setAttribute('aria-expanded', String(!$('main').classList.contains('norail')));
+$('rail-toggle').setAttribute('aria-label', $('main').classList.contains('norail') ? 'show transcript' : 'hide transcript');
 
 /* Zoom in steps, about the centre of the stage. Continuous wheel zoom repaints
    every frame, which is fine in a browser window and miserable in a terminal

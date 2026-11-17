@@ -1,4 +1,9 @@
 {
+  "cloud-text-feedback": {
+    "noBefore": true,
+    "broke": "Reported with a screenshot: the CORRECTIONS-API cloud was a shallow arch and its outline ran through its text. No SVG of the old board was captured before the change; the reported screenshot is the before image.",
+    "fixed": "The external box has more height and horizontal padding, leaving the title and subtitle inside the cloud instead of across its upper edge."
+  },
   "issue-40-tag-through-label": {
     "issue": 40,
     "broke": "Reported as the `name them` tag on `rel>ops` printing under `What it holds`. Every kind of floating text was placed against its own kind only: tags against tags, callouts against callouts, nothing against node text, note cards or the routed lines. As quoted in the issue this spec no longer prints through a label — #53's wider gutters and wrapped pills had already given both tags room — but both pills were sized into their gutters so that they ran up to their arrowheads, and the gap that caused the report was still there: the same pass put `examples/kalman.json`'s callout across `INNOVATION` when it was asked for `above`, which is why that example had been moved to `right` by hand.",

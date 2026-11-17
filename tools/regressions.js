@@ -79,7 +79,7 @@ for (const r of rows) {
   const title = r.spec.title || r.name;
   out.push(`## ${title}`);
   out.push('');
-  out.push(`[#${r.m.issue}](${REPO}/${r.m.issue}) · \`test/boards/${r.name}.json\``);
+  out.push(`${r.m.issue ? `[#${r.m.issue}](${REPO}/${r.m.issue}) · ` : ''}\`test/boards/${r.name}.json\``);
   out.push('');
   if (r.designed) {
     out.push(`**Why there is no before.** ${r.m.broke}`);

@@ -142,7 +142,7 @@ const distance = (a, b) => {
 
 /* Before the command runs, not inside it: a `clear` that has already cleared
    has nothing left to refuse. */
-if (cmd != null && Object.hasOwn(FLAGS, cmd)) {
+if (cmd != null && Object.hasOwn(FLAGS, cmd) && !argv.slice(1).some(a => a === '--help' || a === '-h')) {
   const allowed = [...FLAGS[cmd], ...GLOBAL_FLAGS].map(canon);
   const known = new Set(allowed);
   const bad = argv.slice(1).filter(a => isFlag(a) && !known.has(flagName(a)));
@@ -253,6 +253,9 @@ async function readOps(arg) {
 
 const HELP = `spiega — a hand-drawn board an agent draws on while it explains
 
+  spiega <command> --help       show that command's options (including --board)
+  spiega help <command>         same help, by command name
+
   serve [--port N] [--open]     start the board and keep it running (--solo: own process)
   open [--tab] [--size WxH]     show the board: raise its window, or open one
        [--new]                  a second window of the same board
@@ -267,6 +270,7 @@ const HELP = `spiega — a hand-drawn board an agent draws on while it explains
   bench <prompt> --models a,b   draw the same explanation with several models
   draw <json|file|->            add to the board (one op, or a list, or a whole spec)
        [--chapter N|title]      aim them at a chapter already taught instead
+  op <json|file|->              alias for draw
   say  <text> [--step N]        put a line in the transcript beside the drawing
   step [N|next|prev|off]        light up one step of the flow
   script                        list the lines, numbered, with the step each is tied to
@@ -330,7 +334,89 @@ through the TTY, so it is good for glancing and for stepping a flow, not for roa
   --size 1100x900 --pos 60,60
   --browser brave`;
 
+const FLAG_HELP = {
+  board: ['NAME', 'select a saved or running board (default: this session’s board)'],
+  name: ['NAME', 'alias for --board'],
+  port: ['N', 'server port (default: 4777)'],
+  open: ['', 'open the browser after serving'],
+  solo: ['', 'serve this board in its own process'],
+  quiet: ['', 'suppress status output'],
+  tab: ['', 'use an ordinary browser tab instead of an app window'],
+  size: ['WxH', 'window size, e.g. 1100x900'],
+  pos: ['X,Y', 'window position, e.g. 60,60'],
+  browser: ['NAME', 'browser to launch (e.g. brave)'],
+  new: ['', 'open a second window instead of raising the existing one'],
+  chapter: ['N|TITLE', 'target a chapter already taught'],
+  step: ['N|OFF', 'tie a line to a step, or select a render step'],
+  edge: ['FROM>TO', 'tie a line to an edge'],
+  match: ['TEXT', 'find a transcript line by text'],
+  'keep-title': ['', 'retain the current title'],
+  force: ['', 'skip the clear confirmation'],
+  o: ['FILE', 'output file'], out: ['FILE', 'output file (alias for -o on render and snapshot)'],
+  all: ['', 'stop all boards'], server: ['', 'stop the shared server'],
+  detect: ['', 'show detected install targets without writing files'],
+  list: ['', 'list available install targets or benchmark models'],
+  path: ['', 'update shell PATH'], 'no-path': ['', 'leave shell PATH unchanged'],
+  'bin-dir': ['DIR', 'directory for the command link'],
+  shape: ['FORMAT', 'MCP format: stdio, servers, opencode, zed, pi, toml'],
+  models: ['A,B', 'comma-separated model names'], timeout: ['SECONDS', 'benchmark timeout'],
+};
+
+const COMMAND_HELP = {
+  serve: ['[--port N] [--open]', 'Start the board and keep it running.'],
+  open: ['', 'Raise this board’s window or open one. A saved board is restored as it was.'],
+  focus: ['', 'Bring this session’s board to the front, opening it if needed.'],
+  install: ['[TARGETS...]', 'Wire spiega into the named agents, or detect installed agents.'],
+  'mcp-config': ['', 'Print an MCP entry for another harness.'],
+  bench: ['<PROMPT> --models A,B', 'Draw the same explanation with several models.'],
+  draw: ['<JSON|FILE|->', 'Add an op, list of ops, or spec to the board.'],
+  op: ['<JSON|FILE|->', 'Alias for draw.'],
+  say: ['<TEXT>', 'Put a line in the transcript beside the drawing.'],
+  tag: ['<N> --step M', 'Tie a transcript line to a step (or use --match TEXT and --step off).'],
+  step: ['[N|next|prev|off]', 'Light a step in the flow.'],
+  script: ['', 'List transcript lines with their step links.'],
+  replay: ['', 'Play the board back from its op log.'],
+  settle: ['', 'Tidy the board once and freeze its positions.'],
+  chapter: ['<TITLE>', 'Start the next chapter, keeping the current one.'],
+  chapters: ['', 'List chapters and the live chapter.'],
+  clear: ['', 'Wipe this board.'],
+  render: ['<SPEC.JSON>', 'Render a spec to a standalone HTML file, without a server.'],
+  snapshot: ['', 'Save the live board as standalone HTML.'],
+  boards: ['', 'List running and saved boards and this shell’s board.'],
+  url: ['', 'Print this board’s URL.'],
+  doctor: ['', 'Check that agents are reading this version.'],
+  migrate: ['', 'Move configuration from the old handwave name.'],
+  stop: ['', 'Stop this board, all boards, or the server.'],
+  version: ['', 'Show the version and installation location.'],
+  help: ['[COMMAND]', 'Show the full guide, or help for one command.'],
+};
+
+/* The accepted flags are the source of truth. If a new command or option is
+   added without help, fail loudly rather than serving a partial guide. */
+for (const [name, options] of Object.entries(FLAGS)) {
+  if (!Object.hasOwn(COMMAND_HELP, name) && !['--version', '-v', '--help', '-h'].includes(name))
+    throw new Error(`spiega ${name} has no command help`);
+  for (const option of [...options, ...GLOBAL_FLAGS])
+    if (!Object.hasOwn(FLAG_HELP, option)) throw new Error(`spiega ${name} has no help for ${option}`);
+}
+
+function commandHelp(name) {
+  const [args, description] = COMMAND_HELP[name === '--version' || name === '-v' ? 'version' :
+    name === '--help' || name === '-h' ? 'help' : name];
+  const options = [...FLAGS[name], ...GLOBAL_FLAGS];
+  return `Usage: spiega ${name}${args ? ` ${args}` : ''} [options]\n\n${description}\n\nOptions:\n${options.map(option => {
+    const [value, detail] = FLAG_HELP[option];
+    return `  ${((option.length === 1 ? '-' : '--') + option + (value ? ` ${value}` : '')).padEnd(23)} ${detail}`;
+  }).join('\n')}\n  ${'--help, -h'.padEnd(23)} show this help\n\n` +
+    (name === 'open' ? 'Example: spiega open --board city-hubs-api-2\n\n' : '') +
+    'Use spiega help for the full guide.';
+}
+
 const main = async () => {
+  if (cmd && Object.hasOwn(FLAGS, cmd) && argv.slice(1).some(a => a === '--help' || a === '-h')) {
+    console.log(commandHelp(cmd));
+    return;
+  }
   switch (cmd) {
     case 'serve': {
       const { startBoard, boardName, findBoard, alive: up, PORT } = await import('./board/server.js');
@@ -491,6 +577,7 @@ const main = async () => {
     }
 
     case 'open': {
+      if (positional().length) die('spiega open: board names require --board NAME (try spiega open --help); nothing was opened.');
       const u = await boardURL({ autostart: true });
       const { showBoard, openBoard } = await import('./board/open.js');
       /* Raise the window this board is already in, rather than adding another.
@@ -936,6 +1023,11 @@ const main = async () => {
     }
 
     case 'help': case '--help': case '-h': case undefined:
+      if (cmd === 'help' && positional().length) {
+        const name = positional()[0];
+        if (!Object.hasOwn(COMMAND_HELP, name)) die(`spiega help: no such command "${name}"`);
+        return void console.log(commandHelp(name));
+      }
       return void console.log(HELP);
 
     default:

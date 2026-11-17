@@ -2247,6 +2247,34 @@ await atest('an unknown flag stops the command before it runs, and names the one
   }
 });
 
+await atest('each command explains its options, and open refuses a bare board name', async () => {
+  const { execFile } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = promisify(execFile);
+  const cli = (...args) => run(process.execPath, [path.join(ROOT, 'src/cli.js'), ...args]);
+  for (const command of ['serve', 'open', 'focus', 'install', 'mcp-config', 'bench',
+    'draw', 'op', 'say', 'tag', 'step', 'script', 'replay', 'settle', 'chapter',
+    'chapters', 'clear', 'render', 'snapshot', 'boards', 'url', 'doctor', 'migrate',
+    'stop', 'version', 'help']) {
+    const { stdout } = await cli(command, '--help');
+    assert.match(stdout, new RegExp(`spiega ${command}`));
+    assert.match(stdout, /--board NAME\s+select a saved or running board/);
+    assert.match(stdout, /--help, -h/);
+    assert.doesNotMatch(stdout, /see the command synopsis|undefined/);
+  }
+  const { stdout } = await cli('open', '--help');
+  assert.match(stdout, /--new\s+open a second window/);
+  assert.match(stdout, /spiega open --board city-hubs-api-2/);
+  assert.match((await cli('help', 'open')).stdout, /Usage: spiega open/);
+  assert.match((await cli('--board', 'example', 'open', '--help')).stdout, /Usage: spiega open/);
+  assert.match((await cli('open', '-h')).stdout, /Usage: spiega open/);
+  await assert.rejects(() => cli('open', 'city-hubs-api-2'), e => {
+    assert.match(e.stderr, /board names require --board NAME/);
+    assert.match(e.stderr, /nothing was opened/);
+    return true;
+  });
+});
+
 /* The one that cost somebody twenty minutes of drawing: `--keepTitle` is not
    `--keep-title`, so it was ignored, the title was dropped, and the line the
    command printed on its way past named the title it had just discarded. */

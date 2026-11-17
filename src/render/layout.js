@@ -99,7 +99,7 @@ const SIZES = {
      of the sub's letters. */
   field:     (n, tw) => ({ w: Math.max(150, tw + 52), h: 64 }),
   client:    (n, tw) => ({ w: Math.max(146, tw + 48), h: 92 }),
-  external:  (n, tw) => ({ w: Math.max(182, tw + 96), h: 96 }),
+  external:  (n, tw) => ({ w: Math.max(220, tw + 120), h: 140 }),
   /* Measured, not estimated. Every other kind guesses its width from a
      character count, which is fine for a label and wrong for a formula: a
      fraction is one line in the source and two on the board. */

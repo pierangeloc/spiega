@@ -1,0 +1,6 @@
+{
+  "title": "An external cloud has room for its title and subtitle",
+  "nodes": [
+    { "id": "api", "kind": "external", "label": "CORRECTIONS-API", "sub": "approved, upcoming, CityHubs" }
+  ]
+}
