@@ -98,8 +98,23 @@ const GOOD = /siri|samantha|alex|daniel|serena|karen|moira|google (uk|us)/i;
    Both scale with rate, because a pause is a length of speech and not a
    length of time: at 1.5x the words come faster, and a fixed gap starts to
    sound like the tape has stopped. */
-const LINE_GAP = 420;     // ms between two lines of the same step
-const STEP_GAP = 1250;    // ms when the next line belongs to a different step
+const LINE_GAP = 420;      // ms between two lines of the same step
+const STEP_GAP = 1250;     // ms when the next line belongs to a different step
+const CHAPTER_GAP = 2400;  // ms when the board is about to open another chapter
+
+/* How long to wait before `next`, given what was said just before it.
+
+   Three silences, each for a bigger move. A chapter change is the biggest: the
+   whole drawing is replaced, and a reader needs the time to take in a new board
+   that a step change gives them to take in a lit one. A card on the outline is
+   a turn of its own kind — the next chapter being described — and gets the step
+   silence, since nothing on screen changes but the one thing lit. */
+export function gapBefore(prev, next) {
+  if (next.chapter !== prev.chapter) return CHAPTER_GAP;
+  if (next.card != null && next.card !== prev.card) return STEP_GAP;
+  if (next.step != null && next.step !== prev.step) return STEP_GAP;
+  return LINE_GAP;
+}
 
 export function createNarrator({ onState = () => {} } = {}) {
   const synth = typeof speechSynthesis !== 'undefined' ? speechSynthesis : null;
@@ -108,7 +123,8 @@ export function createNarrator({ onState = () => {} } = {}) {
   let rate = 1;
   let playing = false;          // the tape is running
   let index = -1;               // which section
-  let sections = [];            // [{ text, el, step }]
+  let sections = [];            // [{ text, step, chapter, onStart, onWord, onDone }]
+  let ended = false;            // the tape ran off its own end, as opposed to being paused
   let token = 0;                // invalidates callbacks from an abandoned run
 
   /* Every English voice the browser offers, likely-good ones first.
@@ -198,6 +214,7 @@ export function createNarrator({ onState = () => {} } = {}) {
   async function run(from) {
     const mine = ++token;
     playing = true;
+    ended = false;
     for (let k = from; k < sections.length; k++) {
       if (mine !== token) return;
       index = k;
@@ -205,16 +222,26 @@ export function createNarrator({ onState = () => {} } = {}) {
       /* onStart first, then the pause: the board moves, you get a beat to
          look at what moved, and the words arrive to a picture that has
          settled. The other order spends the silence on the old picture and
-         then cuts to the new one mid-sentence. */
-      sections[k].onStart?.();
+         then cuts to the new one mid-sentence.
+
+         It is waited for, because moving can take time: opening a chapter
+         from the map holds the card on screen while it grows, and a step
+         focused before the chapter is there would be a step of the one being
+         left. */
+      await sections[k].onStart?.();
+      if (mine !== token) return;
       if (k !== from) {
-        const turning = sections[k].step != null && sections[k].step !== sections[k - 1].step;
-        if (!await hush((turning ? STEP_GAP : LINE_GAP) / rate, mine)) return;
+        if (!await hush(gapBefore(sections[k - 1], sections[k]) / rate, mine)) return;
       }
       const finished = await speak(sections[k], mine);
       if (mine !== token) return;
       if (!finished) break;
-      sections[k].onDone?.();
+      /* `alive` lets a section that wants to do something after it is read —
+         the last one, taking the reader back to the map — notice that it was
+         paused in the meantime, and leave things where they are. */
+      await sections[k].onDone?.(() => mine === token);
+      if (mine !== token) return;
+      if (k === sections.length - 1) ended = true;
     }
     if (mine === token) { playing = false; announce(); }
   }
@@ -253,6 +280,7 @@ export function createNarrator({ onState = () => {} } = {}) {
     /* The tape's contents. Replacing it keeps the position if it still
        exists, so a line arriving mid-session does not rewind anything. */
     load(next) {
+      if (next.length > sections.length) ended = false;
       sections = next;
       if (index >= sections.length) index = sections.length - 1;
       announce();
@@ -263,7 +291,9 @@ export function createNarrator({ onState = () => {} } = {}) {
       if (playing) { const at = index; stop(); run(at); } else announce();
     },
 
-    play(from = index < 0 ? 0 : index) {
+    /* A tape that finished starts again from the top, as a player does; one
+       that was paused carries on from where it was. */
+    play(from = ended || index < 0 ? 0 : index) {
       if (!synth || !sections.length) return;
       stop();
       run(Math.max(0, Math.min(from, sections.length - 1)));
@@ -280,8 +310,21 @@ export function createNarrator({ onState = () => {} } = {}) {
     go(to) {
       const k = Math.max(0, Math.min(to, sections.length - 1));
       if (playing) this.play(k);
-      else { index = k; announce(); sections[k]?.onStart?.(); }
+      else { index = k; ended = false; announce(); sections[k]?.onStart?.(); }
     },
+
+    /* Put the playhead on a section without moving the board or speaking —
+       the click that marks where the next play will begin. */
+    park(to) {
+      if (playing || !sections.length) return;
+      index = Math.max(0, Math.min(to, sections.length - 1));
+      ended = false;
+      announce();
+    },
+
+    /* Back to before the beginning. For when the tape has been replaced by one
+       that is about something else, so the old position means nothing. */
+    rewind() { stop(); index = -1; ended = false; announce(); },
 
     next() { this.go(index + 1); },
     prev() { this.go(index - 1); },

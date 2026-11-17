@@ -315,7 +315,19 @@ answers the question lighting a step cannot: not *what does step 3 touch* but
 *where does this box take part*. A box that no step lights is not clickable and
 does not pretend to be.
 
-**Keys on the board:** `←` `→` walk the flow, `space` plays it, `r` replays the
+**Narration.** One transport in the top bar — previous, play/pause, next, the
+place on the tape, and a speed — reads the script aloud and walks the board to
+each line's step as it goes. The transcript is the scrub bar: a dot beside each
+line says what has been read and what is coming, and clicking a line starts
+there. Pressed from inside a chapter it reads that chapter. Pressed from the
+**map** it reads the whole board: the chapters in outline (each one's name and
+the first thing said in it, lit on its card), then each chapter opened in turn
+and read as above, ending back on the map. The outline is made by the board and
+is never written into the transcript. With no voice in the browser, or nothing
+said yet, the steps bar's own `play` is the silent way through the flow.
+
+**Keys on the board:** `←` `→` walk the flow, `space` plays and pauses the
+narration, `↑` `↓` move between lines, `[` `]` change its speed, `r` replays the
 session, `+` `-` zoom a step at a time, `0` or `f` fits, `esc` stops.
 
 **Where to put the board.** `spiega open` gives it a real window and is the

@@ -56,6 +56,16 @@
   .btn:hover{background:var(--soft)}
   .btn:disabled{opacity:.3;cursor:default}
   .btn.on{background:var(--ink);color:var(--paper);box-shadow:2px 2px 0 var(--accent)}
+  /* The transport: one place, the three buttons every audio player has, the
+     place on the tape, and the speed. It is the whole of the narrator's
+     interface — the steps bar below it only walks the flow. */
+  .transport{display:flex;align-items:center;gap:6px}
+  .transport[hidden]{display:none}
+  .btn.icon{padding:5px 10px;display:inline-flex;align-items:center;justify-content:center}
+  .btn.icon svg{width:12px;height:12px;display:block;fill:currentColor}
+  .transport .pos{font-size:11px;color:var(--muted);letter-spacing:.06em;white-space:nowrap;
+    min-width:46px;text-align:center}
+  .btn.rate{text-transform:none;letter-spacing:.02em;min-width:50px;padding:5px 9px}
   /* The chapters of one explanation. A tab per chapter, in the order they were
      taught, the one being read marked — the whole point of #51 is that the
      parts already explained stay visible, so this strip is the board saying
@@ -120,9 +130,21 @@
   /* The word being spoken. A background rather than a colour change, because
      a colour change on one word in a paragraph is hard to catch at a glance
      and the whole point is to be followable without looking for it. */
-  .said .w.lit{background:var(--accent);color:var(--paper);border-radius:3px;
-    box-shadow:0 0 0 2px var(--accent)}
+  .said .w.lit,.mapcard .w.lit,.map .lede .w.lit{background:var(--accent);color:var(--paper);
+    border-radius:3px;box-shadow:0 0 0 2px var(--accent)}
   .said.saying{border-color:var(--accent);box-shadow:3px 3px 0 var(--accent)}
+  /* The rail is the scrub bar. A dot beside each line, in the margin it
+     already has, says where the tape has been and where it is going: filled
+     for what has been read, ringed for what is coming, large for the line
+     being read. Clicking any of them starts the tape there — which it always
+     did; this is the part that says so. Only once the tape has started: a rail
+     of "all of this is ahead" on a board nobody has played is noise. */
+  .rail.scrub .said{position:relative}
+  .rail.scrub .said::before{content:"";position:absolute;left:-11px;top:50%;width:7px;height:7px;
+    margin-top:-3.5px;border-radius:50%;box-sizing:border-box;background:var(--paper);
+    border:1.5px solid var(--muted);transition:background .2s ease,border-color .2s ease,transform .2s ease}
+  .rail.scrub .said.heard::before{background:var(--ink);border-color:var(--ink)}
+  .rail.scrub .said.saying::before{background:var(--accent);border-color:var(--accent);transform:scale(1.5)}
   .said.go{cursor:pointer}
   .said{cursor:pointer}
   .said.go:hover{border-color:var(--accent);box-shadow:4px 4px 0 var(--accent);transform:translateY(-1px)}
@@ -260,6 +282,10 @@
     display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
   .mapcard .meta{font-size:10.5px;color:var(--muted);letter-spacing:.06em;padding:8px 12px 10px;margin-top:auto}
   .mapcard.here{box-shadow:3px 3px 0 var(--accent);border-color:var(--accent)}
+  /* The card being described while the outline is read. It opens up so the
+     whole of its line can be lit, not only the first three rows of it. */
+  .mapcard.speaking{box-shadow:5px 5px 0 var(--accent);border-color:var(--accent)}
+  .mapcard.speaking .line{-webkit-line-clamp:none}
   .mapcard.islive .n::after{content:" \25CF";color:var(--accent)}
   /* Opening a chapter: the card you clicked grows into the board behind it
      while the rest get out of the way, so the tab that comes up is visibly
@@ -284,7 +310,13 @@
     <h1 id="title">spiega</h1>
     <span class="spacer"></span>
     <button class="btn" id="rail-toggle" title="hide the transcript">transcript</button>
-    <button class="btn" id="narrate" title="read the script aloud — space plays and pauses">narrate</button>
+    <div class="transport" id="transport" role="group" aria-label="narration">
+      <button class="btn icon" id="tprev" title="previous line (↑)" aria-label="previous line" disabled><svg viewBox="0 0 12 12"><rect x="1" y="1.5" width="2" height="9"/><path d="M11 1.5v9L4.5 6z"/></svg></button>
+      <button class="btn icon" id="narrate" title="read the script aloud — space plays and pauses" aria-label="play"></button>
+      <button class="btn icon" id="tnext" title="next line (↓)" aria-label="next line" disabled><svg viewBox="0 0 12 12"><rect x="9" y="1.5" width="2" height="9"/><path d="M1 1.5v9L7.5 6z"/></svg></button>
+      <span class="pos" id="tpos" title="where the tape is up to"></span>
+      <button class="btn rate" id="rate" title="speed — each change restarts the sentence being read">1×</button>
+    </div>
     <select class="btn pick" id="voicepick" title="which voice reads it — choosing one speaks a sample"></select>
     <button class="btn" id="replay" title="play the session back as it happened">replay</button>
     <button class="btn" id="follow" title="keep the lit boxes in view while walking the flow">follow</button>
@@ -336,6 +368,7 @@ import { animateIn, seedOf } from '/src/board/draw-on.js';
 import { emptyBoard, applyOps } from '/src/board/state.js';
 import { lineStates, groupRuns, clickStep, clickNode } from '/src/board/script.js';
 import { createNarrator, wrapWords, wordAt } from '/src/board/narrate.js';
+import { tapeOf, worthAnOutline, ledeText, locate, railMarks, nextRate, rateLabel } from '/src/board/tape.js';
 import { frame, unionBox, litKeys } from '/src/board/camera.js';
 import { boardMap, linkLabel } from '/src/board/map.js';
 import { roughLine, stroke, arrowHead, hashSeed } from '/src/render/ink.js';
@@ -498,6 +531,7 @@ function renderRail() {
   const t = board?.transcript || [];
   if (!t.length) {
     if (!rail.querySelector('.empty')) rail.innerHTML = '<div class="empty">Nothing said yet.</div>';
+    loadTape();                 // a chapter with nothing said has an empty tape, not the last one's
     return;
   }
 
@@ -685,9 +719,7 @@ function renderMap() {
   if (!mapOpen) return;
   const { cards, links } = boardMap(board);
   const wrap = $('mapcards');
-  $('maplede').textContent = board?.title
-    ? `${board.title} — ${cards.length} chapters`
-    : `${cards.length} chapters`;
+  $('maplede').textContent = ledeText(board?.title, cards.length);
   wrap.innerHTML = '';
   for (const c of cards) {
     const surface = c.live ? board : board.chapters[c.i];
@@ -708,6 +740,9 @@ function renderMap() {
   }
   // the links need the cards laid out before they can know where to go
   requestAnimationFrame(() => drawLinks(links));
+  /* The cards were just rebuilt, and the one being described was among them:
+     the tape is handed over again so the lit card is lit again. */
+  loadTape();
 }
 
 /* The lines between the cards, in the board's own ink — this is a drawing of
@@ -823,11 +858,15 @@ function declutter(wrap) {
   }
 }
 
-function showMap() {
+/* `keep` is for the tape moving the board itself. Anything else that opens the
+   map or a chapter is a reader going somewhere, and the tape stops and picks
+   up what is now in front of them (see rescope). */
+function showMap(keep = false) {
   if (replaying) return;
   mapOpen = true;
   $('map').hidden = false;
   $('map').classList.remove('leaving');
+  if (!keep) rescope();
   if (location.hash !== '#map') history.replaceState(null, '', location.pathname + location.search + '#map');
   renderChapters();
   renderMap();
@@ -842,17 +881,20 @@ function closeMap() {
 /* Opening a chapter from the map. The card is held on screen a beat while it
    grows, so the chapter that comes up is visibly the one that was pointed at
    rather than a tab that changed somewhere. */
-function enterChapter(i, card) {
+function enterChapter(i, card, keep = false) {
+  if (!card) { closeMap(); showChapter(i, keep); return Promise.resolve(); }
   card.classList.add('going');
   $('map').classList.add('leaving');
-  setTimeout(() => { closeMap(); showChapter(i); }, 230);
+  // resolves once the chapter is up, for a tape that has to wait for it
+  return new Promise(done => setTimeout(() => { closeMap(); showChapter(i, keep); done(); }, 230));
 }
 
 /* `null` is the live chapter. Switching is a local move: nothing is posted,
    so two people reading the same board can be in different chapters. */
-function showChapter(i) {
+function showChapter(i, keep = false) {
   if (i != null && !board?.chapters?.[i]) i = null;
   if (mapOpen) closeMap();
+  if (!keep) rescope();
   viewing = i;
   chapterStep = i == null ? null : (board.chapters[i].active ?? null);
   changed.delete(i);              // you are looking at it now
@@ -934,50 +976,151 @@ $('follow').onclick = () => {
 
    Modelled on effect.institute: space plays and pauses, a click starts from
    the line you clicked, and the tape runs on by itself. */
-const narrator = createNarrator({
-  onState: ({ playing, index }) => {
-    const b = $('narrate');
-    b.classList.toggle('on', playing);
-    b.textContent = playing ? 'pause' : 'narrate';
-    const rail = $('rail');
-    rail.querySelectorAll('.said.saying').forEach(n => n.classList.remove('saying'));
-    const row = rail.querySelector(`.said[data-line="${index}"]`);
-    if (row) {
-      row.classList.add('saying');
-      const top = row.offsetTop - rail.clientHeight / 2 + row.offsetHeight / 2;
-      rail.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
-    }
-  },
-});
+/* What the tape is a tape *of*.
 
-/* Hand the narrator the current script. Rebuilt whenever the rail is, which
-   is cheap: the sections hold references to the rows, not copies of them. */
+   From inside a chapter it is that chapter's script. From the map it is the
+   whole board's: the outline, then each chapter as it is opened (see
+   src/board/tape.js for what goes on it). The scope is chosen when the reader
+   goes somewhere, and then held — the dive closes the map and switches chapter
+   itself, and a scope that followed the screen would turn into "this chapter"
+   the moment the first one opened and take the tape from under its own feet.
+
+   So anything that is a reader going somewhere calls rescope(), which stops
+   the tape and starts a new one at the top. The tape moving the board passes
+   `keep` and does not. */
+let tapeWhole = false;
+let tape = [];                  // the sections the narrator holds, as plain data
+
+function rescope() {
+  tapeWhole = mapOpen && worthAnOutline(board);
+  narrator.rewind();
+}
+
+const ICON = {
+  play: '<svg viewBox="0 0 12 12"><path d="M2.5 1v10L11 6z"/></svg>',
+  pause: '<svg viewBox="0 0 12 12"><rect x="2" y="1" width="3" height="10"/><rect x="7" y="1" width="3" height="10"/></svg>',
+};
+
+/* The narrator announces itself here, and everything that shows the tape —
+   the transport, the rail's markers, the card being described — is drawn from
+   that one announcement. Nothing else toggles them. */
+function paintTransport({ playing: speaking, index, total, rate }) {
+  const play = $('narrate');
+  play.classList.toggle('on', speaking);
+  play.innerHTML = speaking ? ICON.pause : ICON.play;
+  play.setAttribute('aria-label', speaking ? 'pause' : 'play');
+  play.disabled = !total;
+  $('tprev').disabled = !total || index <= 0;
+  $('tnext').disabled = !total || index >= total - 1;
+  $('tpos').textContent = total ? `${index < 0 ? '–' : index + 1}/${total}` : '';
+  $('rate').textContent = rateLabel(rate);
+
+  /* One player at a time. With a voice and something to say, the transport
+     is the player and the steps bar's timer goes away; it comes back as the
+     silent way through a flow when there is no voice or nothing was said. */
+  const drives = narrator.available && total > 0;
+  $('play').hidden = drives;
+  if (drives && playing) stopPlay();
+
+  const rail = $('rail');
+  const rows = [...rail.querySelectorAll('.said')];
+  const marks = railMarks(tape, index, viewing, rows.length);
+  rail.classList.toggle('scrub', index >= 0 && marks.some(Boolean));
+  rows.forEach((row, i) => {
+    row.classList.toggle('heard', marks[i] === 'heard');
+    row.classList.toggle('saying', marks[i] === 'now');
+  });
+  const row = rail.querySelector('.said.saying');
+  if (row) {
+    const top = row.offsetTop - rail.clientHeight / 2 + row.offsetHeight / 2;
+    rail.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }
+
+  // while the outline is read, the card it is about is the thing that is lit
+  const cards = $('mapcards');
+  const at = tape[index];
+  const lit = at?.kind === 'outline' && at.card ? cards.querySelector(`.mapcard[data-n="${at.card}"]`) : null;
+  cards.querySelectorAll('.mapcard.speaking').forEach(c => { if (c !== lit) c.classList.remove('speaking'); });
+  if (lit && !lit.classList.contains('speaking')) {
+    lit.classList.add('speaking');
+    lit.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
+const narrator = createNarrator({ onState: paintTransport });
+$('transport').hidden = !narrator.available;
+
+/* The words of an element, numbered by where they start. Wrapped on demand: a
+   map card is rebuilt whenever the board changes, and the one being read may
+   have been rebuilt since the sentence began. */
+const wordsIn = (el, wrap = true) => {
+  if (!el) return [];
+  if (wrap && !el.querySelector('.w')) wrapWords(el);
+  return [...el.querySelectorAll('.w')];
+};
+
+/* Where a section's words are on screen right now, or null when they are not
+   on screen at all — a chapter's rail row while another chapter is open. */
+function targetOf(s) {
+  if (s.kind === 'outline') {
+    if (s.part === 'lede') return $('maplede');
+    const card = $('mapcards').querySelector(`.mapcard[data-n="${s.card}"]`);
+    return card?.querySelector(s.part === 'title' ? '.t' : '.line') ?? null;
+  }
+  return viewing === s.chapter
+    ? $('rail').querySelector(`.said[data-line="${s.line}"] .said-body`)
+    : null;
+}
+
+/* Give a section its behaviour: what the board does as it begins, as each word
+   is spoken, and when it is done. The data is src/board/tape.js's; this is the
+   part that needs a page. */
+function decorate(s, k, all) {
+  const d = {
+    ...s,
+    async onStart() {
+      /* The board goes where the words are, at whatever scale that is: the map
+         for the outline, a chapter for a line, and in the chapter the step. A
+         chapter opened from the map grows out of its card; one reached from
+         another chapter is simply switched to. */
+      if (s.kind === 'outline') {
+        if (!mapOpen) showMap(true);
+      } else if (mapOpen || s.chapter !== viewing) {
+        if (mapOpen) {
+          await enterChapter(s.chapter, $('mapcards').querySelector(`.mapcard[data-n="${s.card}"]`), true);
+        } else showChapter(s.chapter, true);
+      }
+      const el = targetOf(s);
+      wordsIn(el).forEach(w => w.classList.remove('lit'));
+      // what is spoken is what is on screen, character for character
+      if (el) d.text = el.textContent;
+      if (s.kind === 'line' && s.step != null && view_of()?.active !== s.step) focus(s.step);
+    },
+    onWord(at) {
+      const words = wordsIn(targetOf(s));
+      const w = words[wordAt(words.map(x => +x.dataset.at), at)];
+      if (!w || w.classList.contains('lit')) return;
+      words.forEach(x => x.classList.remove('lit'));
+      w.classList.add('lit');
+    },
+    async onDone(alive) {
+      wordsIn(targetOf(s), false).forEach(w => w.classList.remove('lit'));
+      /* The end of a tour that began on the map goes back to it, after a
+         moment to take in the last thing said. */
+      if (all[0].kind === 'outline' && k === all.length - 1) {
+        await beat(1600);
+        if (alive() && !mapOpen) showMap(true);
+      }
+    },
+  };
+  return d;
+}
+
+/* Hand the narrator the current script. Rebuilt whenever the rail or the map
+   is, which is cheap: sections look their elements up when they need them. */
 function loadTape() {
-  const b = view_of();
-  const t = b?.transcript || [];
-  const states = lineStates(b);
-  narrator.load(t.map((e, i) => {
-    const row = $('rail').querySelector(`.said[data-line="${i}"]`);
-    const body = row?.querySelector('.said-body');
-    const words = body ? [...body.querySelectorAll('.w')] : [];
-    return {
-      text: body ? body.textContent : e.text,
-      step: states[i].step,
-      onStart() {
-        words.forEach(w => w.classList.remove('lit'));
-        // the board goes where the words are
-        if (states[i].step != null && view_of()?.active !== states[i].step) focus(states[i].step);
-      },
-      onWord(at) {
-        const k = wordAt(words.map(w => +w.dataset.at), at);
-        const best = k < 0 ? null : words[k];
-        if (!best || best.classList.contains('lit')) return;
-        words.forEach(w => w.classList.remove('lit'));
-        best.classList.add('lit');
-      },
-      onDone() { words.forEach(w => w.classList.remove('lit')); },
-    };
-  }));
+  tape = tapeOf(board, { whole: tapeWhole && !shown, surface: view_of(), viewing });
+  narrator.load(tape.map(decorate));
 }
 
 /* The voice list arrives late in Chrome — getVoices() is empty on the first
@@ -1012,6 +1155,9 @@ async function narrate(action = () => narrator.toggle()) {
   action();
 }
 $('narrate').onclick = () => narrate();
+$('tprev').onclick = () => narrate(() => narrator.prev());
+$('tnext').onclick = () => narrate(() => narrator.next());
+$('rate').onclick = () => narrator.setRate(nextRate(narrator.rate));
 
 /* Click a line of the script to walk the step it explains.
 
@@ -1027,9 +1173,12 @@ $('rail').addEventListener('click', e => {
   /* A click starts the tape at that line — "advance the tape", rather than
      "select an item". The step follows from the line, as it does when the
      tape reaches it by itself. */
-  if (narrator.available && narrator.playing) return narrator.play(Number(row.dataset.line));
+  const at = locate(tape, viewing, Number(row.dataset.line));
+  if (narrator.available && narrator.playing) return narrator.play(at >= 0 ? at : undefined);
   const want = clickStep(view_of(), Number(row.dataset.step));
   if (want !== undefined) focus(want);
+  // paused, it still moves the playhead: the next play starts from here
+  if (narrator.available && at >= 0) narrator.park(at);
 });
 $('prev').onclick = () => focus(Math.max(0, (board.active ?? 0) - 1));
 $('next').onclick = () => focus(board.active == null ? 0 : Math.min(board.flow.length - 1, board.active + 1));
@@ -1175,6 +1324,7 @@ async function replay() {
   userMoved = false;
   // a replay owns the screen, and it walks the chapters itself
   viewing = null; closeMap(); changed.clear(); renderChapters();
+  rescope();
   $('replay').classList.add('on');
   $('replay').textContent = 'stop';
 

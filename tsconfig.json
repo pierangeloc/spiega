@@ -25,6 +25,7 @@
     "src/board/settle.js",
     "src/board/script.js",
     "src/board/map.js",
+    "src/board/tape.js",
     "src/render/render.js",
     "src/render/layout.js",
     "src/render/floating.js",
