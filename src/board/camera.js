@@ -40,6 +40,10 @@ export function unionBox(boxes, keys) {
 /* What a step lights: the nodes it names, plus both ends of its edge. The
    same rule render.js uses to decide what is lit, so the camera frames
    exactly what the eye is being pointed at. */
+/**
+ * @param {import('./state.js').FlowStep|undefined|null} step
+ * @returns {string[]}
+ */
 export function litKeys(step) {
   if (!step) return [];
   const keys = new Set(step.lights || []);

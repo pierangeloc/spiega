@@ -11,7 +11,7 @@ import { boundaryShapes, intruders, EDGE_GAP } from '../src/render/layout.js';
 import { tagBox } from '../src/render/edges.js';
 import { snapshotHTML } from '../src/board/snapshot.js';
 import { KINDS } from '../src/render/glyphs.js';
-import { scriptSteps, linesFor, lineStates, clickStep, tagReport } from '../src/board/script.js';
+import { scriptSteps, linesFor, lineStates, clickStep, clickNode, tagReport } from '../src/board/script.js';
 import { frame, unionBox, litKeys } from '../src/board/camera.js';
 import { boardMap, linkLabel } from '../src/board/map.js';
 import { registeredAs } from '../src/doctor.js';
@@ -766,6 +766,50 @@ test('clicking a line walks its step, and clicking it again comes back out', () 
   assert.equal(clickStep(b, -1), undefined);
   assert.equal(clickStep(b, NaN), undefined);
   assert.equal(clickStep(emptyBoard(), 0), undefined, 'a board with no flow has nowhere to go');
+});
+
+/* A box is lit by both ends of every edge it is on, so in a chain a → b → c
+   the middle box is lit twice — once as the target of one hop and once as
+   the source of the next. There is no single step a box belongs to, and the
+   gesture has to say so: it walks the steps that light it. */
+test('clicking a box walks the steps that light it, and clears past the last', () => {
+  const b = emptyBoard();
+  applyOps(b, [
+    { op: 'node', id: 'a', label: 'A' },
+    { op: 'node', id: 'b', label: 'B' },
+    { op: 'node', id: 'c', label: 'C' },
+    { op: 'edge', from: 'a', to: 'b' },
+    { op: 'edge', from: 'b', to: 'c' },
+    { op: 'step', edge: 'a>b', step: 'one' },
+    { op: 'step', edge: 'b>c', step: 'two' },
+  ]);
+
+  assert.equal(clickNode(b, 'b'), 0, 'the first click on a box takes the first hop it is in');
+  applyOps(b, [{ op: 'focus', step: 0 }]);
+  assert.equal(clickNode(b, 'b'), 1, 'the next click walks to the next hop the same box is in');
+  applyOps(b, [{ op: 'focus', step: 1 }]);
+  assert.equal(clickNode(b, 'b'), null, 'past the last hop the board is lit again');
+
+  // a box in one step only: one click in, one click out
+  applyOps(b, [{ op: 'focus', step: null }]);
+  assert.equal(clickNode(b, 'c'), 1, 'the end of the chain is in the last hop');
+  applyOps(b, [{ op: 'focus', step: 1 }]);
+  assert.equal(clickNode(b, 'c'), null, 'a box in one step is one click in and one click out');
+
+  // a step that names a box through `lights` rather than through an edge
+  applyOps(b, [
+    { op: 'node', id: 'd', label: 'D' },
+    { op: 'step', lights: ['d'], step: 'three' },
+  ]);
+  assert.equal(clickNode(b, 'd'), 2, 'a box named by lights is in that step too');
+
+  // the walk starts at the beginning when the lit step is not one of the box's
+  assert.equal(clickNode(b, 'b', 2), 0, 'a step that lights something else does not move the walk');
+
+  // nowhere to walk to
+  assert.equal(clickNode(b, 'nowhere'), undefined, 'a box in no step has no hop to walk to');
+  assert.equal(clickNode(emptyBoard(), 'a'), undefined, 'a board with no flow has nowhere to go');
+  assert.equal(clickNode(b, 'a', 99), 0, 'a step that is not lit does not break the walk');
 });
 
 /* The rail shows what was said, in the order it was said. Tagged by topic
