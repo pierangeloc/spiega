@@ -56,7 +56,6 @@
   .btn:hover{background:var(--soft)}
   .btn:disabled{opacity:.3;cursor:default}
   .btn.on{background:var(--ink);color:var(--paper);box-shadow:2px 2px 0 var(--accent)}
-  .count{font-size:11px;color:var(--muted);letter-spacing:.06em}
   /* The chapters of one explanation. A tab per chapter, in the order they were
      taught, the one being read marked — the whole point of #51 is that the
      parts already explained stay visible, so this strip is the board saying
@@ -283,7 +282,6 @@
   <div class="bar">
     <span class="dot idle" id="live" title="waiting for the agent"></span>
     <h1 id="title">spiega</h1>
-    <span class="count" id="count"></span>
     <span class="spacer"></span>
     <button class="btn" id="rail-toggle" title="hide the transcript">transcript</button>
     <button class="btn" id="narrate" title="read the script aloud — space plays and pauses">narrate</button>
@@ -467,7 +465,6 @@ function render(fresh = null) {
   }
   const n = pending.length;
   if (!userMoved && !replaying) fit(groups.length > 0 && n > 0);
-  $('count').textContent = `${board.nodes.length} boxes · ${board.edges.length} lines`;
   return clock;
 }
 
@@ -1312,7 +1309,7 @@ function onState(b, fresh, amended = []) {
   if (viewing != null && !first) changed.add(null);
   // A replay owns the screen while it runs; the live board keeps updating
   // underneath and is shown again when the replay ends.
-  if (replaying) { $('count').textContent = 'replaying\u2026'; return; }
+  if (replaying) return;
   $('title').textContent = b.title || 'spiega';
   // The board name goes in the window title because that is the only handle an
   // OS has on a browser app window: `spiega focus` finds the window by it.
