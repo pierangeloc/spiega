@@ -307,6 +307,14 @@ to the hop it describes rather than hunting for the number. Clicking the step
 already lit clears it, so one gesture goes both ways. Lines tied to no step are
 not clickable and do not pretend to be.
 
+**Clicking a box.** The other way round. A box is not in one step but in
+several — both ends of an edge are lit by it, so a box in the middle of a chain
+takes part in two hops, and a step can name a box that is on no edge at all.
+Clicking the box walks those steps one at a time, and clears at the end. It
+answers the question lighting a step cannot: not *what does step 3 touch* but
+*where does this box take part*. A box that no step lights is not clickable and
+does not pretend to be.
+
 **Keys on the board:** `←` `→` walk the flow, `space` plays it, `r` replays the
 session, `+` `-` zoom a step at a time, `0` or `f` fits, `esc` stops.
 

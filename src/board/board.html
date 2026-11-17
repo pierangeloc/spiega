@@ -148,6 +148,13 @@
   /* ---- the board ---- */
   .stage{grid-column:2;position:relative;overflow:hidden;min-width:0;cursor:grab;-webkit-user-select:none;user-select:none}
   .stage.drag{cursor:grabbing}
+  /* A box that some step lights is a way into that step, and says so with the
+     cursor. A box no step touches is not clickable and does not pretend to be
+     — the same rule the rail follows for a line tied to no step. The class is
+     set after every render, because a step can arrive later and put a box
+     into the flow that was not in it before. */
+  .pan g[data-node].go{cursor:pointer}
+  .stage.drag .pan g[data-node].go{cursor:grabbing}
   /* user-select is inherited, so the rule above reaches everything laid over
      the board too. Those are text somebody has to be able to copy: the command
      the empty board shows, and the reason a board is not being saved. */
@@ -329,7 +336,7 @@
 import { renderSVG } from '/src/render/render.js';
 import { animateIn, seedOf } from '/src/board/draw-on.js';
 import { emptyBoard, applyOps } from '/src/board/state.js';
-import { lineStates, groupRuns, clickStep } from '/src/board/script.js';
+import { lineStates, groupRuns, clickStep, clickNode } from '/src/board/script.js';
 import { createNarrator, wrapWords, wordAt } from '/src/board/narrate.js';
 import { frame, unionBox, litKeys } from '/src/board/camera.js';
 import { boardMap, linkLabel } from '/src/board/map.js';
@@ -426,6 +433,17 @@ function render(fresh = null) {
   pan.innerHTML = r.svg;
   pan.dataset.w = r.width; pan.dataset.h = r.height;
   lastBoxes = r.boxes; lastOffset = r.offset;
+
+  /* Which boxes lead somewhere. A step lights both ends of its edge, so most
+     boxes on a board with a flow are in it — and a box that is in it is a way
+     into the steps that light it, and wears the cursor of one. The class is
+     set here rather than in the drawing because the renderer knows nothing
+     about the gesture. */
+  const leads = new Set();
+  (board.flow || []).forEach(s => litKeys(s).forEach(k => leads.add(k)));
+  pan.querySelectorAll('g[data-node]').forEach(g => {
+    g.classList.toggle('go', leads.has(g.dataset.node));
+  });
 
   // Anything whose key is new gets drawn on; everything else is simply there.
   // Stagger order is boxes, then enclosures, then the lines between them —
@@ -1404,7 +1422,19 @@ stage.addEventListener('wheel', e => {
 }, { passive: false });
 
 let drag = null;
+/* The press, and the box it landed on. The stage captures the pointer, so the
+   click that follows is delivered to the stage and not to the box under it:
+   the box is the one the press started on.
+
+   How far a press may travel and still be a click: the stage is draggable,
+   so the end of a pan is a press that moved — and a pan that happens to end
+   on a box must not walk the flow. */
+let press = null;
+let travelled = false;
+const CLICK_SLOP = 5;
 stage.addEventListener('pointerdown', e => {
+  press = { x: e.clientX, y: e.clientY, node: e.target.closest('g[data-node]') };
+  travelled = false;
   if (e.target.closest('.steps, .blank code, .warnings, .caption')) return;
   drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
   stage.classList.add('drag'); stage.setPointerCapture(e.pointerId);
@@ -1417,9 +1447,42 @@ stage.addEventListener('pointermove', e => {
   applyView();
 });
 const endDrag = () => { drag = null; stage.classList.remove('drag'); };
-stage.addEventListener('pointerup', endDrag);
+stage.addEventListener('pointerup', e => {
+  travelled = press ? Math.hypot(e.clientX - press.x, e.clientY - press.y) > CLICK_SLOP : false;
+  endDrag();
+});
 stage.addEventListener('pointercancel', endDrag);
 stage.addEventListener('dblclick', () => { userMoved = false; fit(true); });
+
+/* Clicking a box walks the steps that light it.
+
+   The gesture the rail already teaches, pointed the other way: a line of the
+   script leads to the hop it explains, and a box leads to the hops it takes
+   part in. A box is lit by several steps — both ends of an edge, so a box in
+   the middle of a chain is lit twice — and the walk goes through them one at
+   a time, clearing at the end.
+
+   One delegated listener, as the rail has: the boxes are redrawn on every
+   state change, so a listener per box would leak one on each redraw.
+
+   Which steps those are is decided in board/script.js, beside the rest of the
+   reasoning about steps, so it can be tested without a DOM. */
+function clickBox(g) {
+  if (replaying) return;              // a replay owns the screen while it runs
+  const id = g.dataset.node;
+  if (!id) return;
+  const b = view_of();
+  const want = clickNode(b, id, b?.active ?? null);
+  if (want !== undefined) focus(want);
+}
+
+stage.addEventListener('click', e => {
+  const g = travelled ? null : (e.target.closest('g[data-node]') || press?.node);
+  travelled = false;
+  press = null;
+  if (!g) return;
+  clickBox(g);
+});
 
 $('fit').onclick = () => { userMoved = false; fit(true); };
 $('snap').onclick = () => window.open(API + 'snapshot', '_blank');

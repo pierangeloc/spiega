@@ -25,6 +25,8 @@
    dim either: an opening sentence is about the whole board, not about step 4.
    ============================================================ */
 
+import { litKeys } from './camera.js';
+
 /** @typedef {import('./state.js').Board} Board */
 
 /** @typedef {{step: number|null, state: 'on'|'off'|'free'|'idle'}} LineState */
@@ -165,6 +167,46 @@ export function lineStates(board) {
 export function clickStep(board, step) {
   if (!Number.isInteger(step) || step < 0 || step >= (board?.flow?.length || 0)) return undefined;
   return board?.active === step ? null : step;
+}
+
+/* Clicking a box walks the steps that light it.
+
+   A box is not bound to one step, and cannot be: both ends of an edge are lit
+   by it, so in any chain a → b → c the middle box is lit twice — once as the
+   target of one hop and once as the source of the next — and that is the
+   normal shape of a flow, not an edge case. A step can also name a box through
+   `lights` that is on no edge at all, so the relation is many-to-many by
+   design and "the step this box belongs to" does not exist for most boxes.
+
+   So the gesture walks the steps that do light it: the first, then the next,
+   and past the last the board is lit again. For a box in exactly one step —
+   a datastore read once, a terminal output — that collapses to one click in
+   and one click out. For a box in the middle of a chain it answers the
+   question the board had no gesture for: what are all the hops this box is
+   in?
+
+   `from` is the step lit now. When that step lights the box the walk carries
+   on from it, so a second click goes to the next hop rather than back to the
+   first; when it lights something else the walk starts at the beginning, and
+   the reader gets the first hop that touches the box.
+
+   Returns the step to focus, null to clear, or undefined when the box is in
+   no step at all — nothing to walk to, so nothing happens. */
+/**
+ * @param {Board|undefined} board
+ * @param {string} id
+ * @param {number|null} [from]
+ * @returns {number|null|undefined}
+ */
+export function clickNode(board, id, from = board?.active ?? null) {
+  const flow = board?.flow || [];
+  /** @type {number[]} */
+  const steps = [];
+  flow.forEach((s, i) => { if (litKeys(s).includes(id)) steps.push(i); });
+  if (!steps.length) return undefined;
+  const at = from == null ? -1 : steps.indexOf(from);
+  if (at < 0) return steps[0];
+  return at + 1 < steps.length ? steps[at + 1] : null;
 }
 
 /* Do the tags run forwards?
