@@ -11,6 +11,8 @@ import { assign, boundaryShapes, intruders, EDGE_GAP } from '../src/render/layou
 import { audit } from '../src/render/audit.js';
 import { tagBox } from '../src/render/edges.js';
 import { snapshotHTML } from '../src/board/snapshot.js';
+import { exportHTML } from '../src/board/export.js';
+
 import { KINDS } from '../src/render/glyphs.js';
 import { scriptSteps, linesFor, lineStates, clickStep, clickNode, tagReport } from '../src/board/script.js';
 import { frame, unionBox, litKeys } from '../src/board/camera.js';
@@ -33,6 +35,27 @@ const isolatedEnv = home => {
 };
 let n = 0;
 const test = (name, fn) => { fn(); n++; console.log('  ok  ' + name); };
+
+test('interactive exports carry the live page, modules, and only the requested chapter', () => {
+  const b = emptyBoard();
+  applyOps(b, [{ op: 'title', text: 'Two chapters' },
+    { op: 'node', id: 'first', label: 'First', kind: 'service' },
+    { op: 'chapter', title: 'Second' },
+    { op: 'node', id: 'second', label: 'Second', kind: 'service' }]);
+  const whole = exportHTML(b, { viewing: 0 });
+  const one = exportHTML(b, { chapter: 0 });
+  assert.match(whole, /"viewing":0/);
+  assert.match(whole, /"chapters":\[\{/);
+  assert.match(one, /"chapters":\[\]/);
+  assert.match(one, /"First"/);
+  assert.doesNotMatch(one, /"Second"/);
+  for (const html of [whole, one]) {
+    assert.match(html, /<script type="importmap">/);
+    assert.match(html, /spiega:\/src\/render\/render.js/);
+    assert.doesNotMatch(html, /href="\/icon.svg"/);
+    assert.doesNotMatch(html, /from '\/src\//);
+  }
+});
 
 test('a late input sits beside its earliest consumer, not under the pipeline (#119)', () => {
   const spec = JSON.parse(fs.readFileSync(path.join(ROOT, 'test/boards/issue-119-source-columns.json'), 'utf8'));
@@ -652,6 +675,15 @@ test('the browser-side modules parse', () => {
                    'src/render/glyphs.js', 'src/render/edges.js', 'src/render/layout.js']) {
     parses(fs.readFileSync(path.join(ROOT, f), 'utf8'), f);
   }
+});
+
+test('a speaking map card leaves the line-clamp layout before wrapping words', () => {
+  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
+  const css = html.match(/<style>([\s\S]*?)<\/style>/)[1];
+  assert.match(css, /\.mapcard \.line\s*\{[^}]*display:-webkit-box/s,
+    'the idle card uses a three-line preview');
+  assert.match(css, /\.mapcard\.speaking \.line\s*\{[^}]*display:block/s,
+    'wrapped word spans in -webkit-box lose their intervening spaces in Chrome');
 });
 
 /* The play button toggles a timer, and a toggle that stops itself by clicking
@@ -1796,6 +1828,33 @@ await atest('a board that cannot be drawn says so with a 500, and the server sta
     const st = await fetch(U + '/state');
     assert.equal(st.status, 200, 'the server is still answering afterwards');
     assert.equal((await st.json()).nodes.length, 1, 'and the board is still there');
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise(r => server.close(r));
+  }
+});
+
+await atest('interactive export uses the named board and can isolate a chapter', async () => {
+  const { createServer } = await import('../src/board/server.js');
+  const { server } = createServer();
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    for (const name of ['one', 'two']) {
+      await fetch(base + '/boards', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }) });
+      await fetch(base + `/b/${name}/op`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ops: [
+        { op: 'node', id: name, label: name, kind: 'service' },
+        { op: 'chapter', title: 'Later' },
+        { op: 'node', id: name + '-later', label: name + '-later', kind: 'service' },
+      ] }) });
+    }
+    const all = await (await fetch(base + '/b/two/export?scope=all&viewing=0')).text();
+    const single = await (await fetch(base + '/b/two/export?scope=chapter&chapter=0')).text();
+    assert.match(all, /"viewing":0/);
+    assert.match(all, /"two-later"/);
+    assert.doesNotMatch(all, /"one-later"/);
+    assert.match(single, /"two"/);
+    assert.doesNotMatch(single, /"two-later"/);
   } finally {
     server.closeAllConnections?.();
     await new Promise(r => server.close(r));

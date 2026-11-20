@@ -49,6 +49,9 @@
   @keyframes pulse{50%{opacity:.25}}
   .bar h1{font-size:14px;font-weight:700;letter-spacing:.04em;margin:0;text-transform:uppercase;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* An embedded board can be narrower than the transport. Let the controls
+     scroll rather than clipping the last actions off the right edge. */
+  @media(max-width:820px){.bar{overflow-x:auto;scrollbar-width:thin}.bar h1{flex:none;max-width:40vw}.bar .spacer{flex:none}}
   .bar .spacer{flex:1}
   .btn{font:inherit;font-size:11.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
     border:1.5px solid var(--ink);border-radius:999px;padding:5px 13px;background:transparent;color:var(--ink);
@@ -288,7 +291,9 @@
   /* The card being described while the outline is read. It opens up so the
      whole of its line can be lit, not only the first three rows of it. */
   .mapcard.speaking{box-shadow:5px 5px 0 var(--accent);border-color:var(--accent)}
-  .mapcard.speaking .line{-webkit-line-clamp:none}
+  /* Playback wraps each word in a span. In a -webkit-box line clamp, Chrome
+     drops the whitespace text nodes between those spans, joining the words. */
+  .mapcard.speaking .line{display:block;-webkit-line-clamp:none}
   .mapcard.islive .n::after{content:" \25CF";color:var(--accent)}
   /* Opening a chapter: the card you clicked grows into the board behind it
      while the rest get out of the way, so the tab that comes up is visibly
@@ -324,7 +329,8 @@
     <button class="btn" id="replay" title="play the session back as it happened">replay</button>
     <button class="btn" id="follow" title="keep the lit boxes in view while walking the flow">follow</button>
     <button class="btn" id="fit">fit</button>
-    <button class="btn" id="snap" title="open a standalone copy of this board">snapshot</button>
+    <button class="btn" id="snap" title="download the whole interactive board">export all</button>
+    <button class="btn" id="snap-chapter" title="download just this interactive chapter">export chapter</button>
   </div>
 
   <nav class="chapters" id="chapters" hidden></nav>
@@ -388,10 +394,11 @@ const $ = id => document.getElementById(id);
    file serves every board. The renderer above is imported from /src/ instead:
    one copy, shared by all of them. */
 const API = location.pathname.replace(/\/?$/, '/');
+const exported = window.__SPIEGA_EXPORT__ || null;
 
 // which board this page is, as the server knows it — shown in the window title
 let boardTag = '';
-fetch(API + 'whoami').then(r => r.json()).then(w => { boardTag = w.name || ''; }).catch(() => {});
+if (!exported) fetch(API + 'whoami').then(r => r.json()).then(w => { boardTag = w.name || ''; }).catch(() => {});
 const pan = $('pan'), stage = $('stage');
 
 let board = null;      // the live board
@@ -1411,10 +1418,17 @@ $('replay').onclick = replay;
 /* ---------- plumbing ---------- */
 
 async function post(ops) {
+  if (globalThis.__SPIEGA_EXPORT__) {
+    // The file is a reader's private copy: step navigation changes only this
+    // tab, never a server or another reader's board.
+    if (ops[0]?.op === 'focus') { board = { ...board, active: ops[0].step }; onState(board); }
+    return;
+  }
   await fetch(API + 'op', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ops }) });
 }
 
 async function finish() {
+  if (globalThis.__SPIEGA_EXPORT__) return true;
   if (!board || board.settled || !board.nodes.length || replaying) return true;
   try {
     const response = await fetch(API + 'settle', {
@@ -1469,7 +1483,7 @@ function onState(b, fresh, amended = []) {
   document.title = (b.title ? `${b.title} · spiega` : 'spiega') + (boardTag ? ` [${boardTag}]` : '');
   setLink('live');
   clearTimeout(onState._t);
-  onState._t = setTimeout(() => setLink(es && es.readyState === EventSource.OPEN ? 'idle' : 'down'), 2500);
+  if (!exported) onState._t = setTimeout(() => setLink(es && es.readyState === EventSource.OPEN ? 'idle' : 'down'), 2500);
   if (first && chapterFromHash() != null) return void showChapter(chapterFromHash());
   /* Where a reader lands. A link into a chapter wins; otherwise an
      explanation that already has several chapters by the time this window
@@ -1547,10 +1561,27 @@ function connect() {
     }
   });
 }
-connect();
+if (exported) {
+  const saved = exported.board;
+  if (exported.viewing != null && saved.chapters?.[exported.viewing]) {
+    location.hash = `#${exported.viewing + 1}`;
+  } else if (exported.viewing === 'live') {
+    location.hash = '#live';
+  } else if (exported.viewing === 'map') {
+    location.hash = '#map';
+  }
+  onState(saved);
+  if (exported.active != null && viewing != null) {
+    chapterStep = Number(exported.active);
+    renderRail(); render(); renderSteps();
+  }
+  setLink('idle');
+  $('live').title = 'standalone copy';
+} else connect();
 
 /* Coming back to the window is the moment a stale board is most misleading. */
 addEventListener('visibilitychange', () => {
+  if (exported) return;
   if (document.visibilityState !== 'visible') return;
   if (!es || es.readyState !== EventSource.OPEN) connect();
   else fetch(API + 'state').then(r => r.json()).then(b => { if (b.rev !== board?.rev) onState(b); }).catch(() => {});
@@ -1635,7 +1666,25 @@ stage.addEventListener('click', e => {
 });
 
 $('fit').onclick = () => { userMoved = false; fit(true); };
-$('snap').onclick = () => window.open(API + 'snapshot', '_blank');
+function download(scope) {
+  if (exported) return;
+  const params = new URLSearchParams({ scope });
+  const current = viewing == null ? board?.chapters?.length || 0 : viewing;
+  if (scope === 'chapter') params.set('chapter', String(current));
+  else params.set('viewing', mapOpen ? 'map' : viewing == null ? 'live' : String(viewing));
+  const step = view_of()?.active;
+  if (step != null) params.set('step', String(step));
+  const link = document.createElement('a');
+  link.href = API + 'export?' + params;
+  link.click();
+}
+$('snap').onclick = () => download('all');
+$('snap-chapter').onclick = () => download('chapter');
+if (exported) {
+  $('snap').hidden = true;
+  $('snap-chapter').hidden = true;
+  if (exported.chapterOnly) $('replay').hidden = true;
+}
 $('rail-toggle').onclick = e => {
   $('main').classList.toggle('norail');
   const shown = !$('main').classList.contains('norail');

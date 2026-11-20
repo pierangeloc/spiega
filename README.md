@@ -283,6 +283,14 @@ spiega render my-spec.json -o my-spec.html    # a spec file you wrote
 spiega snapshot -o my-board.html              # whatever is on the board now
 ```
 
+The toolbar's **export all** and **export chapter** buttons download a different
+kind of standalone HTML: the live board interface, with its chapters, transcript,
+step navigation, pan/zoom and narration. **Export all** starts where that browser
+tab is looking; **export chapter** keeps only the chapter in view. The files need
+no spiega server and can be committed to a repository or served by GitHub Pages
+(including inside an iframe). `spiega snapshot` remains the static, script-free
+view for places that do not allow interactive HTML.
+
 The specs under [`examples/`](examples/) ship inside the package as well as the
 repo, so to render one of those, point at where it actually is — from a clone,
 `spiega render examples/order-flow.json -o out.html`.

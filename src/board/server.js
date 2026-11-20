@@ -437,6 +437,28 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     }
 
     // The board as one standalone file, for pasting into a PR or a doc.
+    if (rest === '/export') {
+      try { settle(entry); } catch (e) { return failedRender(res, e); }
+      const { exportHTML } = await import('./export.js');
+      const scope = url.searchParams.get('scope');
+      const chapter = Number(url.searchParams.get('chapter'));
+      if (scope === 'chapter' && (!Number.isInteger(chapter) || chapter < 0 || chapter > board.chapters.length)) {
+        return json(res, 400, { ok: false, error: 'no such chapter' });
+      }
+      let html;
+      try {
+        html = exportHTML(board, {
+          chapter: scope === 'chapter' ? chapter : null,
+          viewing: scope === 'all' && url.searchParams.has('viewing')
+            ? (['live', 'map'].includes(url.searchParams.get('viewing'))
+              ? url.searchParams.get('viewing') : Number(url.searchParams.get('viewing')))
+            : null,
+          active: url.searchParams.has('step') ? Number(url.searchParams.get('step')) : null,
+        });
+      } catch (e) { return failedRender(res, e); }
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-disposition': 'attachment; filename="spiega-board.html"' });
+      return res.end(html);
+    }
     if (rest === '/snapshot') {
       try { settle(entry); } catch (e) { return failedRender(res, e); }
       const { snapshotHTML } = await import('./snapshot.js');
