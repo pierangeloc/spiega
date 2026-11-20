@@ -159,3 +159,17 @@ for anything similar.
   what was said and what was drawn, which is what makes a replay worth having.
 - Comments say *why*, in prose, in the voice already in these files. If a
   comment only restates the line under it, delete it.
+
+## Agent skills
+
+### Issue tracker
+
+Track this repo's issues on GitHub (`pierangeloc/spiega`) using `gh`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout: root `GLOSSARY.md` and `docs/adr/` when they exist. See `docs/agents/domain.md`.
