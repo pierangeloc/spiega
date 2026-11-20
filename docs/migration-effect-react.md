@@ -1,7 +1,8 @@
 # Migration plan: TypeScript + Effect + React
 
 **Status:** proposal. No code has changed yet.
-**Decision taken:** the "no dependencies, no build step" convention in `AGENTS.md` is dropped. Users still get a zero-setup `npx spiega`, because npm ships a built `dist/`. Contributors run `npm install`.
+**Decision taken:** the "no dependencies, no build step" convention in `AGENTS.md` is dropped. Users still get a zero-setup `npx spiega`, because npm ships a built `dist/`. Contributors run `pnpm install`.
+**Decision taken:** pnpm workspaces; Vite + Vitest for the board; tsdown or tsup for the node packages; **Node as the only runtime**. Bun is something a contributor may reach for ad hoc — `bun install` and `bunx vite` work — but CI and the published artefact never depend on it.
 **Later:** the board UI is structured so React can be swapped for Foldkit once Foldkit reaches 1.0 and its licence is clear.
 
 ---
@@ -48,6 +49,7 @@
 6. **The browser rule survives.** `core` and `render` must stay browser-safe. This becomes a package boundary plus a lint rule (no `node:` imports, no Node-only deps), replacing today's graph-walk test.
 7. **Strict stays strict.** No `any`, no `@ts-ignore`, no loosened flags. That's the existing rule, carried over.
 8. **The hot path stays hot.** `POST /op` does no I/O and no awaiting on writes. The p99 benchmark stays in the suite and is re-run after every server change.
+9. **Node is the only runtime.** One engine, as load-bearing as the browser rule: CI runs Node and the published artefact runs on Node, so no code, script or test may require another runtime to pass. A contributor is welcome to reach for Bun locally — `bun install`, `bunx vite` — and nothing may come to depend on their having done so.
 
 ---
 
@@ -71,8 +73,8 @@ spiega/
 └─ spiega (published) = cli + server + built board assets, bundled into dist/
 ```
 
-- **Workspace:** pnpm workspaces with TypeScript project references, or a single package with folder-level `tsconfig`s if publishing several packages isn't wanted (see open questions).
-- **Build:** `tsup` (esbuild) for node packages; Vite for `board`. One publish artefact: `spiega` with a `bin`.
+- **Workspace:** pnpm workspaces with TypeScript project references.
+- **Build:** `tsdown` or `tsup` for the node packages; Vite for `board`. One publish artefact: `spiega` with a `bin`.
 - **Data flow is unchanged:** agent → MCP tool → `POST /op` → reducer → SSE → board page → `renderSVG`.
 
 ---
@@ -177,7 +179,7 @@ Replace the vendored ESM with `@dagrejs/dagre` pinned to the same version. Verif
 
 ### D8. Tests
 
-- **Runner:** Vitest (or `node:test` + `tsx`). The existing `.mjs` suites first run unchanged against built output, then get ported file by file.
+- **Runner:** Vitest, run under Node. The existing `.mjs` suites first run unchanged against built output, then get ported file by file.
 - **Kept as-is:** byte-checked pictures, the p99 budget, isolated-HOME install tests, origin tests, regression boards.
 - **New:**
   - property tests from `Arbitrary.make(Op)`
@@ -192,7 +194,7 @@ Estimates are focused working days, AI-assisted, rough.
 
 | Phase | Scope | Exit criteria | Est. |
 |---|---|---|---|
-| **0. Tooling** | Workspace, strict `tsconfig`, tsup/Vite, Vitest, lint rule "no `node:` in core/render", CI. Rewrite `AGENTS.md` conventions (dependencies allowed, build step, how agents run things). Existing JS keeps running via `allowJs`. | `npm test` green; `npm pack` → `npx spiega serve` works from the tarball on a clean machine; MCP starts in Claude Code. | 2–3 |
+| **0. Tooling** | pnpm workspace, strict `tsconfig`, tsdown/tsup + Vite, Vitest, lint rule "no `node:` in core/render", CI. Rewrite `AGENTS.md` conventions: dependencies allowed, build step, how agents run things, and **the runtime target is Node, single-engine** — a convention as load-bearing as the browser rule, and today only implied by `engines`. Existing JS keeps running via `allowJs`. | Suite green; `pnpm pack` → `npx spiega serve` works from the tarball on a clean machine; MCP starts in Claude Code; nothing in CI or the artefact needs a runtime other than Node. | 2–3 |
 | **1. Core domain** | `Op`/`Board` Schemas; port `state`, `script`, `settle`, `map`, `tape`, `camera`, `spec`. MCP `board_draw` gets a generated `inputSchema`. dagre to npm. | All suites green; pictures byte-identical; p99 holds; real op logs round-trip; generated tool schema accepted by 4 clients. | 4–6 |
 | **2. Render** | Port `theme`, `ink`, `glyphs`, `edges`, `callout`, `math` (the ~234 errors), then `render`, `layout`, `floating`, `audit`, `geom`. | Every gallery / example / regression SVG byte-identical. | 5–8 |
 | **3. Server + MCP** | Effect HTTP server, SSE, buffer/flush, op log, snapshot/export, origin middleware, MCP (after the D4 spike), `open`. | Route contract tests identical; `test/origin.mjs` and p99 pass; MCP smoke test in Claude Code, Claude Desktop, Cursor, opencode; cold start ≤ today + 100 ms. | 5–8 |
@@ -228,8 +230,6 @@ Estimates are focused working days, AI-assisted, rough.
 
 ## 9. Open questions
 
-1. **Monorepo or single package?** Several `@spiega/*` packages, or one `spiega` package with internal folders. Monorepo only pays off if `core` + `render` get reused, for example by the hosted viewer. (Likely yes.)
-2. **Effect v3 or v4?** Check v4's stability at the start of phase 1. Schema APIs differ between them.
-3. **pnpm or npm workspaces?**
-4. **Port `test/smoke.mjs` wholesale, or keep it running against `dist/` and port gradually?** Gradual is safer.
-5. **Does the hosted viewer** (from the product proposal) reuse `packages/board` directly? If so, design phase 4's store to work with both SSE (local) and a static, saved board (hosted).
+1. ~~**Effect v3 or v4?**~~ Settled: v4 — [ADR 0001](adr/0001-effect-v4.md). Whether its MCP module is the one we use is a separate question, spiked in #146.
+2. ~~**Port `test/smoke.mjs` wholesale, or gradually?**~~ Settled: gradually, against the built output — [ADR 0002](adr/0002-port-the-suite-gradually.md).
+3. **Does the hosted viewer** (from the product proposal) reuse `packages/board` directly? If so, design phase 4's store to work with both SSE (local) and a static, saved board (hosted).
