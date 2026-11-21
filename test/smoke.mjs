@@ -159,6 +159,40 @@ test('a kind with no glyph is drawn, and said out loud', () => {
   for (const kind of KINDS) assert.match(warnings[0], new RegExp(kind), `${kind} is offered`);
 });
 
+/* The three hops of `city-hubs-api` (#113): an edge is keyed by its ends, so
+   the second and third landed on the first and took its label away. The agent
+   was told nothing — op accepted, no fresh edge, a drawing saying the last
+   thing it was told. It gave up and crammed all three into one label, which is
+   where #110's doubled step pill came from. The picture is still one arrow;
+   this is only the board saying so. */
+test('a second hop between the same two boxes is said out loud, not silently swallowed', () => {
+  const b = emptyBoard();
+  const { errors, warnings } = applyOps(b, [
+    { op: 'node', id: 'ch', label: 'Charging' },
+    { op: 'node', id: 'corr', label: 'Corrections' },
+    { op: 'edge', from: 'ch', to: 'corr', label: 'createCorrection' },
+    { op: 'edge', from: 'ch', to: 'corr', label: 'listApprovedUpcoming' },
+    { op: 'edge', from: 'ch', to: 'corr', label: 'linkCorrectionsToInvoiceRun' },
+  ]);
+  assert.deepEqual(errors, []);
+  assert.equal(b.edges.length, 1, 'still the one arrow — this reports the flattening, it does not fix it');
+  assert.equal(warnings.length, 2, 'one per hop that was lost');
+  assert.match(warnings[0], /ch>corr/);
+  assert.match(warnings[0], /createCorrection/, 'names the label that was taken away');
+  assert.match(warnings[1], /listApprovedUpcoming/);
+});
+
+test('an edge op that corrects or styles a line already drawn says nothing', () => {
+  const b = emptyBoard();
+  applyOps(b, [{ op: 'edge', from: 'a', to: 'b', label: 'gRPC' }]);
+  const { warnings } = applyOps(b, [
+    { op: 'edge', from: 'a', to: 'b', label: 'gRPC', async: true },
+    { op: 'edge', from: 'a', to: 'b', via: [{ col: 1, row: 2 }] },
+    { op: 'edge', from: 'a', to: 'b', label: 'gRPC' },
+  ]);
+  assert.deepEqual(warnings, [], 'a board cannot be pedantic at an author mid-sentence');
+});
+
 test('every kind the renderer draws is accepted in silence', () => {
   const b = emptyBoard();
   const { warnings } = applyOps(b, KINDS.map((kind, i) => ({ op: 'node', id: `n${i}`, kind })));

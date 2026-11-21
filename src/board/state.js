@@ -473,6 +473,31 @@ const upsert = (list, item, keyOf, index = null) => {
 /** @param {Edge} e @returns {string} */
 const edgeId = e => `${e.from}>${e.to}`;
 
+/* An edge is keyed by its ends, so a second hop between the same two boxes
+   does not draw — it lands on the first one and takes its label with it (#113).
+
+   A conversation over time, request then poll then write back, is one of the
+   most ordinary shapes there is, and it is the one the board flattens. Until
+   an arrow can carry several labelled stops, the least we owe the agent is to
+   say that the hop it just described is not on the board. Nothing else tells
+   it: the op is accepted, `fresh.edges` comes back empty because the edge was
+   already known, and the drawing quietly says something else.
+
+   A warning rather than a refusal, and only when a label is actually losing
+   another label. Correcting a typo, or an `edge` op adding `via` or a style to
+   a line already drawn, is the same op shape and is exactly right; a board
+   cannot afford to be pedantic at an author mid-sentence. */
+/** @param {Board} board @param {Edge} e @param {string[]} warnings */
+const overwrittenLabel = (board, e, warnings) => {
+  if (!e.label) return;
+  const was = board.edges.find(x => edgeId(x) === edgeId(e));
+  if (!was?.label || was.label === e.label) return;
+  warnings.push(
+    `edge ${edgeId(e)}: "${e.label}" replaced "${was.label}" on the one arrow between those boxes. ` +
+    'A second hop between the same two does not draw as its own line. Say both in one label, ' +
+    'or give the exchange a box of its own to turn through.');
+};
+
 /* The array-valued fields a model writes by hand.
 
    `"members": "[\"a\",\"b\"]"` is not a fuzz case. The op body is JSON inside a
@@ -699,6 +724,7 @@ function applyOne(board, op, sweep, warnings = []) {
       }
       /** @type {Edge} */
       const e = { ...fields, from: fields.from, to: fields.to };
+      overwrittenLabel(board, e, warnings);
       if (upsert(board.edges, e, edgeId, indexesFor(board).edges)) fresh.edges.push(edgeId(e));
       break;
     }
