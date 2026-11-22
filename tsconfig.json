@@ -12,6 +12,7 @@
   },
   "include": [
     "vitest.config.ts",
+    "eslint.config.js",
     "src/index.ts",
     "src/board/state.js",
     "src/board/settle.js",
