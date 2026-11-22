@@ -238,7 +238,33 @@
      reconnect fixes. Not being saved means the session is going to be lost,
      which nothing here fixes. Two different alarms deserve two colours. */
   .unsaved{background:#9a6a15}
-  .zoom{position:absolute;right:14px;top:12px;display:flex;gap:6px}
+  /* The controls that act on the drawing, laid over the drawing (#126).
+
+     The bar is about the explanation — what is being said, where the tape is
+     up to, which chapter. `fit`, `follow` and the exports are about the
+     picture, and they were the ones falling off the right edge in a split
+     pane. Moving them is better than ranking and hiding them: a hidden button
+     on a laptop is as gone as one off the edge, and a relocated one is gone
+     from nowhere.
+
+     Top right, not bottom: the step cards own the bottom edge at full width
+     and the narration caption sits just above them, while a board is drawn
+     from the top left. This is the corner that stays empty on nearly every
+     board. */
+  .tools{position:absolute;right:14px;top:12px;z-index:5;display:flex;flex-direction:column;gap:7px;align-items:flex-end}
+  .tool{width:32px;height:32px;padding:0;display:flex;align-items:center;justify-content:center;
+    background:color-mix(in srgb, var(--panel) 86%, transparent);backdrop-filter:blur(3px)}
+  .tool svg{width:15px;height:15px;display:block;fill:none;stroke:currentColor;stroke-width:1.6;
+    stroke-linecap:round;stroke-linejoin:round}
+  /* The two exports are one button and a choice, because an icon can carry
+     "export" and cannot carry "export which". The sheet opens to the left:
+     there is no room to its right, and the stage below it is the drawing. */
+  .menu{position:relative}
+  .menu .sheet{position:absolute;top:0;right:38px;display:none;flex-direction:column;gap:4px;
+    background:var(--panel);border:1.5px solid var(--ink);border-radius:13px;padding:6px;
+    box-shadow:4px 4px 0 rgba(35,30,22,.18)}
+  .menu.open .sheet{display:flex}
+  .menu .sheet .btn{border:none;padding:5px 11px;text-align:right}
 
   /* ---- the map: the explanation from above ----
      A tab strip says a board has four chapters and nothing about how they
@@ -327,10 +353,6 @@
     </div>
     <select class="btn pick" id="voicepick" title="which voice reads it — choosing one speaks a sample"></select>
     <button class="btn" id="replay" title="play the session back as it happened">replay</button>
-    <button class="btn" id="follow" title="keep the lit boxes in view while walking the flow">follow</button>
-    <button class="btn" id="fit">fit</button>
-    <button class="btn" id="snap" title="download the whole interactive board">export all</button>
-    <button class="btn" id="snap-chapter" title="download just this interactive chapter">export chapter</button>
   </div>
 
   <nav class="chapters" id="chapters" hidden></nav>
@@ -339,6 +361,17 @@
     <aside class="rail" id="rail"><div class="empty">Nothing said yet.</div></aside>
     <div class="stage" id="stage">
       <div class="pan" id="pan"></div>
+    <div class="tools" id="tools">
+      <button class="btn tool" id="fit" title="fit the whole board in view (f)" aria-label="fit the whole board in view"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4"/></svg></button>
+      <button class="btn tool" id="follow" title="keep the lit boxes in view while walking the flow" aria-label="follow the flow" aria-pressed="false"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2"/><path d="M8 1v2.4M8 12.6V15M1 8h2.4M12.6 8H15"/></svg></button>
+      <div class="menu" id="exports">
+        <button class="btn tool" id="snap" title="download this board as one interactive file" aria-label="export this board" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v7.2M5 6.4 8 9.6l3-3.2M3 11v2.2h10V11"/></svg></button>
+        <div class="sheet">
+          <button class="btn" id="snap-all">whole board</button>
+          <button class="btn" id="snap-chapter">this chapter</button>
+        </div>
+      </div>
+    </div>
       <div class="blank" id="blank">
         <div class="k">the board is empty</div>
         <div><code>spiega draw '{"op":"node","label":"API Gateway","kind":"gateway"}'</code></div>
@@ -969,10 +1002,16 @@ function frameStep() {
   applyView();
 }
 
-$('follow').classList.toggle('on', following);
+/* An icon has no word to go off, so the state has to be legible some other
+   way: `on` fills it, and aria-pressed says the same thing out loud. */
+const showFollow = () => {
+  $('follow').classList.toggle('on', following);
+  $('follow').setAttribute('aria-pressed', String(following));
+};
+showFollow();
 $('follow').onclick = () => {
   following = !following;
-  $('follow').classList.toggle('on', following);
+  showFollow();
   try { localStorage.setItem('spiega.follow', following ? 'on' : 'off'); } catch { /* private window */ }
   if (following) frameStep();     // show what it does, rather than describing it
 };
@@ -1616,7 +1655,7 @@ const CLICK_SLOP = 5;
 stage.addEventListener('pointerdown', e => {
   press = { x: e.clientX, y: e.clientY, node: e.target.closest('g[data-node]') };
   travelled = false;
-  if (e.target.closest('.steps, .blank code, .warnings, .caption')) return;
+  if (e.target.closest('.steps, .blank code, .warnings, .caption, .tools')) return;
   drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
   stage.classList.add('drag'); stage.setPointerCapture(e.pointerId);
 });
@@ -1633,7 +1672,10 @@ stage.addEventListener('pointerup', e => {
   endDrag();
 });
 stage.addEventListener('pointercancel', endDrag);
-stage.addEventListener('dblclick', () => { userMoved = false; fit(true); });
+stage.addEventListener('dblclick', e => {
+  if (e.target.closest('.tools')) return;   // a double-tap on fit is two fits, not a reset
+  userMoved = false; fit(true);
+});
 
 /* Clicking a box walks the steps that light it.
 
@@ -1678,11 +1720,25 @@ function download(scope) {
   link.href = API + 'export?' + params;
   link.click();
 }
-$('snap').onclick = () => download('all');
-$('snap-chapter').onclick = () => download('chapter');
+/* One icon, two scopes. An icon can say "export" and cannot say "export
+   which", so the choice is a sheet rather than a second glyph nobody can
+   tell apart from the first. */
+const exportMenu = $('exports');
+const closeExports = () => {
+  exportMenu.classList.remove('open');
+  $('snap').setAttribute('aria-expanded', 'false');
+};
+$('snap').onclick = () => {
+  const open = !exportMenu.classList.contains('open');
+  exportMenu.classList.toggle('open', open);
+  $('snap').setAttribute('aria-expanded', String(open));
+};
+$('snap-all').onclick = () => { closeExports(); download('all'); };
+$('snap-chapter').onclick = () => { closeExports(); download('chapter'); };
+addEventListener('pointerdown', e => { if (!e.target.closest('#exports')) closeExports(); });
+addEventListener('keydown', e => { if (e.key === 'Escape') closeExports(); });
 if (exported) {
-  $('snap').hidden = true;
-  $('snap-chapter').hidden = true;
+  exportMenu.hidden = true;
   if (exported.chapterOnly) $('replay').hidden = true;
 }
 $('rail-toggle').onclick = e => {
