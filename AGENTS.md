@@ -18,6 +18,7 @@ the published package, manifest and all.
 pnpm install
 pnpm run build       # assembles dist/
 pnpm test            # builds, then runs the suites inside dist/, under vitest
+pnpm run lint        # the browser rule, over the source tree
 pnpm run typecheck   # root plus every package, strict
 pnpm run pack        # the tarball npm would publish
 ```
@@ -93,10 +94,20 @@ board renders `THE BOARD IS EMPTY` while the server happily holds the nodes and
 streams them to a page that is not listening. No terminal error. No failing
 test — `node:fs` resolves fine in the test runner.
 
-`pnpm test` walks the graph from `board.html` and fails on any `node:` import
-reachable from the page. Do not route around it. (It is a test in the suite
-today; #133 moves it to a lint rule, which is where a rule about imports
-belongs — update this paragraph when it lands.)
+`pnpm run lint` enforces that, and fails naming the file and the specifier. It
+is `eslint.config.js`, and it is a rule per file rather than a walk from the
+page, because membership in a browser-safe package *is* reachability: it covers
+`packages/core`, `packages/render`, all of `src/render`, and all of `src/board`
+except the handful of node-side modules named in the config. So a new
+browser-side module is covered by having been written, and a new node-side one
+fails until you add it to that list — say which it is, deliberately, rather
+than widening a glob. Do not route around it, and note that lint reads the
+source tree while the suite reads `dist/`.
+
+Two things the page-walk asserted are not about any one file, so they are still
+tests in `smoke.mjs`: that the page's root imports exist on disk, and that
+nothing it reaches is `vendor/` or `settle.js` — an unsettled board must not
+fetch dagre.
 
 **A green suite does not mean a working board.** The suite runs in node. The
 browser is a second consumer with almost no coverage, and it is the one that

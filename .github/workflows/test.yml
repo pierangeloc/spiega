@@ -86,6 +86,24 @@ jobs:
             | node node_modules/spiega/src/mcp/server.js | tee /tmp/fresh/mcp.out
           grep -q '"name":"board_draw"' /tmp/fresh/mcp.out
 
+  lint:
+    runs-on: ubuntu-latest
+    name: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The browser rule, and a job of its own for the same reason typecheck is
+      # one: this answers "can the page still load its modules", which is not
+      # the question the suite answers, and a run that cannot tell you which of
+      # the two broke is worth less than two runs that can. It needs no build —
+      # it reads the source tree, not dist/.
+      - run: pnpm run lint
+
   types:
     runs-on: ubuntu-latest
     name: typecheck

@@ -30,6 +30,7 @@
   "scripts": {
     "build": "node tools/build.js",
     "test": "pnpm run build && vitest run",
+    "lint": "eslint .",
     "typecheck": "tsc --noEmit && pnpm -r --if-present run typecheck",
     "pack": "pnpm run build && npm pack ./dist --pack-destination .",
     "release": "pnpm test && pnpm run typecheck && npm publish ./dist",
@@ -51,6 +52,7 @@
     "hand-drawn"
   ],
   "devDependencies": {
+    "eslint": "^10.15.0",
     "tsdown": "0.23.7",
     "typescript": "^5.9.3",
     "vitest": "^5.1.1"

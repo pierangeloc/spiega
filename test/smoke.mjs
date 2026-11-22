@@ -4725,36 +4725,57 @@ await atest('install pi writes a skill, a direct MCP server and the instruction 
   fs.rmSync(home, { recursive: true, force: true });
 });
 
-await atest('nothing the browser imports reaches for a node builtin', async () => {
+/* What is left of the walk that used to start here. Whether a module reachable
+   from the board page imports something a browser cannot fetch is now a lint
+   rule, scoped to the browser-safe globs — see eslint.config.js, and run
+   `pnpm run lint`. These two are not about any one file, so no per-file rule
+   states them, and they are the half of the walk worth keeping: that the page's
+   roots are really there, and where the page stops. */
+const boardRoots = () => {
   const entry = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
-  const seen = new Set();
-  const bad = [];
+  return [...entry.matchAll(/^import[^'"\n]*from\s*['"](\/[^'"]+)['"]/gm)].map(m => m[1]);
+};
 
+test('every module the board page imports is on disk', () => {
+  const roots = boardRoots();
+  // The number is the renderer being loaded off disk at all: if the page ever
+  // goes back to a bundle, or to inline script, the lint rule is still green
+  // while covering modules the page no longer runs, and this is what notices.
+  assert.ok(roots.length >= 5, 'the board page should import the renderer modules off disk');
+  assert.ok(roots.some(spec => spec.startsWith('/src/render/')),
+    'the board page should import the renderer off disk, not a bundle');
+
+  const missing = roots.filter(spec => !fs.existsSync(path.join(ROOT, spec.replace(/^\//, ''))));
+  assert.deepEqual(missing, [],
+    'imported by the board page and not there:\n  ' + missing.join('\n  '));
+});
+
+/* Dagre is vendored for `settle`, which orders a finished board once, in the
+   server process. A board that is still being drawn must not pay for it, and
+   the page is the one consumer that would pay by fetching it. */
+test('the board page does not reach dagre', () => {
+  const seen = new Set();
   const walk = spec => {
     const file = path.join(ROOT, spec.replace(/^\//, ''));
     if (seen.has(file)) return;
     seen.add(file);
     let src;
-    try { src = fs.readFileSync(file, 'utf8'); }
-    catch { bad.push(`${spec} is imported by the board page but does not exist`); return; }
-    for (const m of src.matchAll(/^\s*(?:import|export)[^'"\n]*from\s*['"]([^'"]+)['"]/gm)) {
+    try { src = fs.readFileSync(file, 'utf8'); } catch { return; }
+    // Only the specifiers a browser would actually fetch. Anything else is the
+    // lint rule's business, and this walk no longer has an opinion about it.
+    for (const m of src.matchAll(/^\s*(?:import|export)[^'"\n]*from\s*['"]([./][^'"]*)['"]/gm)) {
       const dep = m[1];
-      if (dep.startsWith('node:') || !/^[./]/.test(dep)) {
-        bad.push(`${path.relative(ROOT, file)} imports "${dep}", which a browser cannot resolve`);
-        continue;
-      }
       walk(dep.startsWith('/') ? dep : path.join(path.dirname(spec), dep));
     }
   };
+  boardRoots().forEach(walk);
 
-  const roots = [...entry.matchAll(/^import[^'"\n]*from\s*['"](\/[^'"]+)['"]/gm)].map(m => m[1]);
-  assert.ok(roots.length >= 5, 'the board page should import the renderer modules off disk');
-  roots.forEach(walk);
-
-  assert.deepEqual(bad, [], 'the board page would fail to load:\n  ' + bad.join('\n  '));
   assert.ok(seen.size >= 8, 'the walk should reach the whole renderer, not stop at the first file');
-  assert.ok(![...seen].some(file => file.includes('/vendor/') || file.endsWith('/board/settle.js')),
-    'an unsettled board page must not fetch or evaluate dagre');
+  const reached = [...seen]
+    .filter(file => file.includes('/vendor/') || file.endsWith('/board/settle.js'))
+    .map(file => path.relative(ROOT, file));
+  assert.deepEqual(reached, [],
+    'an unsettled board page must not fetch or evaluate dagre:\n  ' + reached.join('\n  '));
 });
 
 /* The one way this suite can shrink without anyone noticing. Suites used to be
