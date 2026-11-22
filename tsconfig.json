@@ -1,26 +1,17 @@
 {
-  // Types are opt-in and off the critical path: `npm test` does NOT run this,
-  // so a fresh clone still passes with no install, which is the promise in
-  // AGENTS.md. Run `npm install && npm run typecheck` to check types.
+  // The JavaScript that has not been ported yet. Types are opt-in here: the
+  // modules below say `// @ts-check` and are listed one by one, because
+  // turning `checkJs` on would also check the render modules they import,
+  // which together still carry ~234 strict errors. Annotating those is the
+  // render port's job (#141–#145), not this file's.
   //
-  // checkJs is off on purpose. The six modules below opt in with `// @ts-check`
-  // instead, which is the standard way to adopt types one file at a time.
-  // Turning checkJs on would also check the six render modules they import —
-  // theme.js, ink.js, glyphs.js, edges.js, callout.js and math.js — which
-  // together carry ~234 strict errors today. Annotating those is the next step,
-  // not this one.
+  // Shared options live in tsconfig.base.json, which every package extends.
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "allowJs": true,
-    "checkJs": false,
-    "noEmit": true,
-    "strict": true,
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "skipLibCheck": true,
-    "types": []
+    "noEmit": true
   },
   "include": [
+    "src/index.ts",
     "src/board/state.js",
     "src/board/settle.js",
     "src/board/script.js",

@@ -5,7 +5,9 @@ The short version is three commands, and it is in
 how to update it, and what to do when an agent turns out to be reading a
 different spiega than the one you think.
 
-Spiega runs on Node 20 or newer, with no dependencies and no build step. The
+Spiega runs on Node 20 or newer, and the published package brings no
+dependencies with it — what npm installs is already built. (A clone is
+different: see below.) The
 board is an ordinary web page: `spiega open` gives it a chromeless window of
 its own if you have Chrome, Brave, Edge or Chromium, and otherwise a tab in
 your default browser.
@@ -26,12 +28,15 @@ Or from a clone, if you want to change it:
 ```bash
 git clone https://github.com/pierangeloc/spiega.git
 cd spiega
+pnpm install              # the toolchain; the package itself has no dependencies
+pnpm run build            # assembles dist/, which is what actually runs
 npm link                  # `spiega` now points at this checkout
 ```
 
 `npm link` rather than a copy on purpose: the CLI, the MCP server and the agent
 skill all resolve to that directory, so `git pull` updates every one of them at
-once.
+once — followed by `pnpm run build`, which is the one thing a pull does not do
+for you.
 
 Check it:
 

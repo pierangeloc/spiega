@@ -2,6 +2,11 @@ node_modules/
 *.log
 .DS_Store
 
+# The built package. `pnpm run build` assembles it and `pnpm run pack` packs
+# it; nothing in here is edited by hand.
+/dist/
+/spiega-*.tgz
+
 # boards people render locally
 /board.html
 /bench/

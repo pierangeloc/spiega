@@ -1,0 +1,4 @@
+# The workspace root is not published. `pnpm run build` assembles the package
+# people actually install into dist/, and that directory is what gets packed.
+packages:
+  - packages/*

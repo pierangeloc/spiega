@@ -29,7 +29,16 @@ while [ -h "$target" ]; do
   esac
 done
 root=$(CDPATH= cd -- "$(dirname -- "$target")/.." && pwd -P)
-cli=$root/src/cli.js
+
+# In the published package this launcher sits beside the built src/, so the
+# first path is the only one that exists. In a checkout it is the other way
+# round: the build output is under dist/, and that is what must run — once a
+# module has been ported, the source tree alone no longer starts. Preferring
+# dist means `spiega` from a clone is the same program users get, and a clone
+# that has not been built yet still runs today's JavaScript rather than
+# failing with nothing to say.
+cli=$root/dist/src/cli.js
+[ -f "$cli" ] || cli=$root/src/cli.js
 
 # The floor lives in package.json; this only repeats it if the read fails.
 floor=$(sed -n 's/.*"node"[[:space:]]*:[[:space:]]*">=[[:space:]]*\([0-9][0-9]*\).*/\1/p' \

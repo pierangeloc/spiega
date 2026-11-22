@@ -54,17 +54,42 @@ const tilde = p => String(p).replace(HOME, '~');
 const THIS = () => (isCheckout() ? 'this checkout' : 'this install');
 
 /* Is ROOT itself a repository? `git -C` walks up, so containment is not
-   enough — see checkout() for what that cost. */
+   enough — see checkout() for what that cost.
+
+   The build gives that question a second right answer. What runs is the
+   assembled package under dist/, so a contributor's own copy is one level
+   below the repository rather than being it, and the strict equality below
+   called every developer an npm install. The enclosing repository therefore
+   counts, but only when it is demonstrably the repository this copy was built
+   from: same package name, and this copy sitting exactly where the build puts
+   it. An install under nvm's prefix — the bug this function exists for — fails
+   both halves, because the clone enclosing it is nvm's and knows nothing about
+   spiega. */
 let _isCheckout = null;
 export function isCheckout() {
   if (_isCheckout === null) {
     const top = sh('git', ['-C', ROOT, 'rev-parse', '--show-toplevel']);
     try {
+      const real = p => fs.realpathSync(p);
       _isCheckout = Boolean(top) && fs.existsSync(top) &&
-        fs.realpathSync(top) === fs.realpathSync(ROOT);
+        (real(top) === real(ROOT) || builtFrom(top));
     } catch { _isCheckout = false; }
   }
   return _isCheckout;
+}
+
+/* dist/ is where tools/build.js puts the package, and the manifest it writes
+   there is copied from the repository's own — so the two names matching is
+   what tells a build apart from a package that merely happens to sit inside
+   somebody else's clone. */
+function builtFrom(top) {
+  if (path.basename(ROOT) !== 'dist' ||
+      fs.realpathSync(path.dirname(ROOT)) !== fs.realpathSync(top)) return false;
+  const name = f => {
+    try { return JSON.parse(fs.readFileSync(f, 'utf8')).name; } catch { return null; }
+  };
+  const mine = name(path.join(ROOT, 'package.json'));
+  return Boolean(mine) && mine === name(path.join(top, 'package.json'));
 }
 
 /* ---------- the checkout ---------- */

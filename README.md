@@ -240,7 +240,7 @@ somewhere to land.
 ## Install
 
 ```bash
-npm install -g spiega     # Node 20 or newer, no dependencies, no build step
+npm install -g spiega     # Node 20 or newer, and nothing else to install
 spiega install            # wire it into the coding agents it finds on this machine
 spiega doctor             # and check that it took
 ```

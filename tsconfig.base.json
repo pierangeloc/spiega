@@ -1,0 +1,21 @@
+{
+  // The compiler options every package shares. Strict from the first commit,
+  // and strict means strict: no `any`, no `@ts-ignore`, no flag loosened to
+  // buy a green check. That rule is older than the migration — it is why the
+  // modules that opted in early are worth having opted in.
+  //
+  // `allowJs` is what lets the migration proceed module by module: a ported
+  // TypeScript module sits beside the JavaScript it has not replaced yet, and
+  // the build compiles both. `checkJs` stays off, so a JavaScript module is
+  // checked only once it says `// @ts-check` itself.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "strict": true,
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "skipLibCheck": true,
+    "types": []
+  }
+}
