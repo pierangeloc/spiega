@@ -7,6 +7,64 @@ here, not in either of those.
 Read this before changing anything. It is short on purpose: it holds the things
 that have actually gone wrong here, not general advice.
 
+## What runs is `dist/`, not what you edited
+
+There are dependencies and there is a build step. A pnpm workspace, TypeScript
+compiled by tsdown, JavaScript copied across untouched, and the assembled
+result in `dist/` — which is not a folder inside the published package, it *is*
+the published package, manifest and all.
+
+```sh
+pnpm install
+pnpm run build       # assembles dist/
+pnpm test            # builds, then runs the suite inside dist/
+pnpm run typecheck   # root plus every package, strict
+pnpm run pack        # the tarball npm would publish
+```
+
+The layout inside `dist/` is the repository's own, deliberately: the board page
+imports the renderer off disk as `/src/render/render.js`, and every module here
+finds its neighbours by walking up from its own file. Flattening the artefact
+would move all of those at once.
+
+**The thing to internalise: nothing you edit runs until it is built.** The
+suite runs inside `dist/` (ADR 0002 — `docs/adr/0002-port-the-suite-gradually.md`),
+`bin/spiega` prefers `dist/src/cli.js`, and after `spiega install` the agents on
+your machine are wired to `dist/` too. `pnpm test` builds first, so the suite is
+safe. These are not:
+
+```sh
+node dist/test/settle.mjs          # one suite alone — build first, or it is stale
+pnpm run build && node dist/test/settle.mjs
+```
+
+A `git pull` does not build either, which is the shape this fails in: your
+agents keep running the previous build, and nothing anywhere says so. A
+`post-merge` hook in `.git/hooks` that runs `node tools/build.js` costs two
+lines and removes the whole class.
+
+The picture tools are the exception that still runs from the source tree —
+`tools/shapes.js` and `tools/regressions.js` write *beside themselves*, so the
+built copies would write into `dist/docs` and be wiped by the next build. Run
+`pnpm run shapes` and `node tools/regressions.js` from the root as before.
+`tools/example.js` takes its paths from the command line and does not care.
+When the render modules are ported, these three stop working from source and
+will have to be taught to write back into the repository; that is the port's
+job, not a thing to patch around now.
+
+## Node is the only runtime
+
+CI runs Node, the published artefact runs on Node, the floor is Node 24 and
+`engines` says so. **No code, script, test or tool here may require another
+runtime to pass.** Reach for Bun on your own machine if you like it; the moment
+anything in this repository depends on your having done so, a contributor
+without it has a repo that does not build, and the failure is theirs to debug
+rather than yours.
+
+The floor is 24 rather than 22 for a reason worth keeping: node strips types
+unflagged from 23.6, so from 24 a `.ts` file runs with no loader and no build
+in front of it. `tsdown.config.ts` already relies on it.
+
 ## The browser is a consumer, and the test suite barely sees it
 
 `src/board/board.html` imports the renderer **off disk, unbundled**:
@@ -28,8 +86,10 @@ board renders `THE BOARD IS EMPTY` while the server happily holds the nodes and
 streams them to a page that is not listening. No terminal error. No failing
 test — `node:fs` resolves fine in the test runner.
 
-`npm test` now walks the graph from `board.html` and fails on any `node:`
-import reachable from the page. Do not route around it.
+`pnpm test` walks the graph from `board.html` and fails on any `node:` import
+reachable from the page. Do not route around it. (It is a test in the suite
+today; #133 moves it to a lint rule, which is where a rule about imports
+belongs — update this paragraph when it lands.)
 
 **A green suite does not mean a working board.** The suite runs in node. The
 browser is a second consumer with almost no coverage, and it is the one that
@@ -90,12 +150,17 @@ look good; these are meant to be the boards that once looked wrong.
 ### Glyphs
 
 ```sh
-npm run shapes                                   # regenerates docs/shapes/*.svg
+pnpm run shapes                                  # regenerates docs/shapes/*.svg
 rsvg-convert -z 2 docs/shapes/vessel.svg -o /tmp/v.png
 ```
 
 Compare a new shape against the one it could be confused with — a neutral
 `vessel` next to `datastore`, not on its own.
+
+Unlike `docs/gallery`, `docs/examples` and `docs/regressions`, the shape
+gallery is **not** byte-checked by the suite, so nothing tells you it has gone
+stale — it has drifted at least once already. If you touch a glyph, run it and
+commit what comes out.
 
 ### The board's own CSS
 
@@ -117,17 +182,22 @@ Check the narrow width. A board is often a split pane, and a message that fits
 in a full window loses its second half in one — which is the half that carries
 the consequence.
 
-## Types are opt-in, and not in `npm test`
+## Types are strict, and checked on their own
 
-Four modules carry `// @ts-check` with JSDoc — `board/state.js`,
-`board/script.js`, `render/render.js`, `render/layout.js` — checked by
-`npm install && npm run typecheck`.
+`pnpm run typecheck` runs `tsc` over the root and then over every package.
+Strict means strict: **never buy a green check with `any`, `@ts-ignore` or a
+loosened flag.** That rule predates the migration and is the only reason the
+modules that opted in early are worth having opted in.
 
-It is deliberately **not** part of `npm test`, because `tsc` is the repo's only
-dependency and a fresh clone must still pass its suite with nothing installed.
-Keep it that way. If you add types to another module, add `// @ts-check` to it
-and list it in `tsconfig.json`; never buy a green check with `any`,
-`@ts-ignore` or a loosened flag, which is the whole reason the four are strict.
+The JavaScript that has not been ported is checked file by file. `checkJs` is
+off; a module opts in by saying `// @ts-check` and being listed in
+`tsconfig.json` — do both, or it is checked by nobody. Turning `checkJs` on
+would pull in the render modules it imports, which together still carry ~234
+strict errors; annotating those is the render port's job (#141–#145).
+
+It is a separate job from `pnpm test` on purpose. The suite answers "does it
+work", the checker answers "do the types hold", and a run that cannot tell you
+which of the two broke is worth less than two runs that can.
 
 ## POST /op is on the critical path of somebody talking
 
@@ -148,11 +218,13 @@ for anything similar.
 
 ## Conventions
 
-- No dependencies, no build step. `git clone && node src/cli.js serve` is the
-  point of the thing, and the code you read is the code that runs.
-  The one exception is dagre's checked-in ESM bundle in `vendor/`: it orders a
-  finished board once, at `settle`, without an install or a build. The live
-  layout and the ink stay ours. Do not turn that exception into a package tree.
+- **The published package has no dependencies, and never gains one lightly.**
+  The build does — that is what a dev dependency is for — but what npm installs
+  is already built, and `npx spiega` on a machine with nothing on it is the
+  point of the thing. A runtime dependency is a decision, not a convenience.
+  Dagre is the standing exception and stays vendored in `vendor/` as a
+  checked-in ESM bundle: it orders a finished board once, at `settle`. The live
+  layout and the ink stay ours.
 - The op log is append-only. Restore is `applyOps` over the lines read back,
   so there is no second representation to keep in step.
 - Below `LOG_CAP`, never compact: compaction loses the interleaving between
