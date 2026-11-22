@@ -3,6 +3,12 @@ import { defineConfig } from 'tsdown';
 /* The TypeScript half of the build. tools/build.js assembles the package and
  * calls this for whatever under src/ has been ported.
  *
+ * JavaScript, though everything it builds is TypeScript. Node runs TypeScript
+ * unflagged only from 23.6, so on the floor this repo builds on — 22 — tsdown
+ * has to read a `.ts` config through `unrun`, a loader it does not ship and
+ * would have to be installed beside it. A plain ESM config needs nothing,
+ * and `defineConfig` still types it in an editor.
+ *
  * It is an *unbundled* build, and that is not a style preference. The board
  * page imports the renderer off disk as plain modules — `/src/render/render.js`
  * — and the server hands those files to the browser one at a time, so a

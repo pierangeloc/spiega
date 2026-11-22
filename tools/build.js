@@ -82,7 +82,7 @@ function compile() {
     console.error('spiega build: tsdown is not installed — run `pnpm install` first.');
     process.exit(1);
   }
-  const r = spawnSync(bin, ['--silent'], { cwd: ROOT, stdio: 'inherit' });
+  const r = spawnSync(bin, ['--logLevel', 'warn'], { cwd: ROOT, stdio: 'inherit' });
   if (r.status !== 0) process.exit(r.status ?? 1);
 }
 
