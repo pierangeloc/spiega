@@ -5,16 +5,17 @@ The short version is three commands, and it is in
 how to update it, and what to do when an agent turns out to be reading a
 different spiega than the one you think.
 
-Spiega runs on Node 22 or newer, and the published package brings no
+Spiega runs on Node 24 or newer, and the published package brings no
 dependencies with it — what npm installs is already built. (A clone is
 different: see below.) The
 board is an ordinary web page: `spiega open` gives it a chromeless window of
 its own if you have Chrome, Brave, Edge or Chromium, and otherwise a tab in
 your default browser.
 
-Developed and used on **macOS**, and tested on macOS and Linux across Node 22
-and 24. Node 22 is the floor because it is the floor the build toolchain
-supports, and Node 20 has been out of support since April 2026. Windows paths are in the code and nobody has run them in anger — if
+Developed and used on **macOS**, and tested on macOS and Linux across Node 24
+and 26. Node 24 is the floor because it is where node runs TypeScript without
+being asked to, which is what the toolchain here is built on; it is supported
+until April 2028. Windows paths are in the code and nobody has run them in anger — if
 you are on Windows, expect to file the first issue, and say so and it will get
 fixed.
 

@@ -43,7 +43,7 @@ cli=$root/dist/src/cli.js
 # The floor lives in package.json; this only repeats it if the read fails.
 floor=$(sed -n 's/.*"node"[[:space:]]*:[[:space:]]*">=[[:space:]]*\([0-9][0-9]*\).*/\1/p' \
   "$root/package.json" 2>/dev/null | head -n 1)
-[ -n "${floor:-}" ] || floor=22
+[ -n "${floor:-}" ] || floor=24
 
 # A node is usable only if it actually runs and clears the floor. A binary that
 # exists but cannot load its libraries fails here rather than inside the CLI.

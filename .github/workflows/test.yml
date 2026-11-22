@@ -3,13 +3,15 @@ name: test
 # The suite is the only gate, and it has to run somewhere that is not the
 # author's laptop — macOS because that is where this is developed, Linux
 # because that is where most people will first try it, and the floor from
-# package.json because claiming `engines: node >= 22` without running it there
+# package.json because claiming `engines: node >= 24` without running it there
 # is a guess.
 #
-# One floor, and it is 22. The build toolchain does not run below it — tsdown
-# declares `^22.18 || ^24.11 || >=26` — so a lower floor in package.json would
-# be a promise no job here could keep. 24 is the second column because it is
-# what most people have.
+# Two columns: the floor, and the Active LTS people are moving to. The floor
+# is 24 because that is where node runs TypeScript without a loader, which is
+# what everything in this toolchain assumes — and tsdown, which cannot run
+# below 22.18 at all, would make a lower floor a promise no job here could
+# keep. Nothing is tested on 22: it is EOL in April 2027 and the package
+# refuses to run on it.
 #
 # Node is the only runtime any of this may need. pnpm and the build run on
 # node, the suite runs on node, and the published artefact runs on node. A
@@ -27,7 +29,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        node: [22, 24]
+        node: [24, 26]
     name: ${{ matrix.os }} · node ${{ matrix.node }}
     steps:
       - uses: actions/checkout@v4
@@ -49,7 +51,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run pack
@@ -92,7 +94,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Strict, and deliberately a job of its own: the modules that have opted
