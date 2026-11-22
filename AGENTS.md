@@ -17,7 +17,7 @@ the published package, manifest and all.
 ```sh
 pnpm install
 pnpm run build       # assembles dist/
-pnpm test            # builds, then runs the suite inside dist/
+pnpm test            # builds, then runs the suites inside dist/, under vitest
 pnpm run typecheck   # root plus every package, strict
 pnpm run pack        # the tarball npm would publish
 ```
@@ -36,7 +36,14 @@ safe. These are not:
 ```sh
 node dist/test/settle.mjs          # one suite alone — build first, or it is stale
 pnpm run build && node dist/test/settle.mjs
+pnpm run build && pnpm vitest run dist/test/settle.spec.mjs   # the same, named
 ```
+
+Vitest is the runner, not the idiom: the suites still assert with
+`node:assert` and still run on their own under plain node. What it collects is
+one `test/*.spec.mjs` per suite, which is the only reason a suite has a name
+in the output — a suite that loses its spec stops running, so `smoke.mjs`
+refuses any file in `test/` that asserts and has no spec beside it.
 
 A `git pull` does not build either, which is the shape this fails in: your
 agents keep running the previous build, and nothing anywhere says so. A

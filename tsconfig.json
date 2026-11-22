@@ -11,6 +11,7 @@
     "noEmit": true
   },
   "include": [
+    "vitest.config.ts",
     "src/index.ts",
     "src/board/state.js",
     "src/board/settle.js",

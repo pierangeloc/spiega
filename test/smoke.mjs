@@ -34,7 +34,22 @@ const isolatedEnv = home => {
   return env;
 };
 let n = 0;
-const test = (name, fn) => { fn(); n++; console.log('  ok  ' + name); };
+/* Plenty of the checks below are declared async through this sync `test`, and
+   their promises used to go unheld: node turned a late rejection into a dead
+   process, which read as a failure and was good enough. Under a runner it is
+   not — a rejection that lands after the module has finished evaluating is an
+   unhandled error belonging to nobody, printed beside a run that says it
+   passed. So they are kept and settled at the foot of the file. */
+const pending = [];
+const test = (name, fn) => {
+  const running = fn();
+  /* Caught here and not at the foot of the file: a rejection is reported as
+     unhandled the moment it has no handler, and something that awaits it a
+     tick later is already too late to stop the report. */
+  if (running) pending.push(running.then(() => null, e => e));
+  n++;
+  console.log('  ok  ' + name);
+};
 
 test('interactive exports carry the live page, modules, and only the requested chapter', () => {
   const b = emptyBoard();
@@ -4458,18 +4473,6 @@ test('a caller with its own line budget is never handed more lines than it asked
   }
 });
 
-/* Boards on disk, and the p99 budget on POST /op, live in their own file and
-   their own process: the state directory is read from HOME at import, and a
-   test must never write into the real ~/.spiega. */
-await atest('boards persist across a restart, and POST /op keeps its latency budget', async () => {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const { stdout } = await promisify(execFile)(
-    process.execPath, [path.join(ROOT, 'test/persist.mjs')],
-    { env: { ...process.env }, maxBuffer: 4 << 20 });
-  process.stdout.write(stdout);
-});
-
 /* The state directory belongs to HOME, not to the runtime's idea of home.
 
    Bun resolves the home directory once at startup and never re-reads HOME, so
@@ -4754,64 +4757,26 @@ await atest('nothing the browser imports reaches for a node builtin', async () =
     'an unsettled board page must not fetch or evaluate dagre');
 });
 
-await atest('the board server belongs to this machine, not to the web', async () => {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const { stdout } = await promisify(execFile)(
-    process.execPath, [path.join(ROOT, 'test/origin.mjs')],
-    { env: { ...process.env }, maxBuffer: 4 << 20 });
-  process.stdout.write(stdout);
+/* The one way this suite can shrink without anyone noticing. Suites used to be
+   spawned from here, so a lost one took its `ok` line with it; now the runner
+   collects a spec per suite, and a suite with no spec beside it is simply one
+   fewer name in a run that still says it passed. So: a file in test/ that
+   asserts has to be collected. readable.mjs does not assert — it is the
+   terminal end of the audit and a module this file imports — and that is the
+   whole of the exemption. */
+test('every suite in test/ is collected by the runner', () => {
+  const dir = path.join(ROOT, 'test');
+  const files = fs.readdirSync(dir).filter(f => f.endsWith('.mjs'));
+  const specs = new Set(files.filter(f => f.endsWith('.spec.mjs')));
+  const orphans = files
+    .filter(f => !f.endsWith('.spec.mjs'))
+    .filter(f => fs.readFileSync(path.join(dir, f), 'utf8').includes("from 'node:assert"))
+    .filter(f => !specs.has(f.replace(/\.mjs$/, '.spec.mjs')));
+  assert.deepEqual(orphans, [],
+    'these suites assert, and nothing runs them:\n  ' + orphans.join('\n  '));
+  assert.ok(specs.size >= 10, `only ${specs.size} suites are collected`);
 });
 
-await atest('a board that is not being saved says so', async () => {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const { stdout } = await promisify(execFile)(
-    process.execPath, [path.join(ROOT, 'test/saving.mjs')],
-    { env: { ...process.env }, maxBuffer: 4 << 20 });
-  process.stdout.write(stdout);
-});
-
-await atest('a board that is saved but not open is still a board', async () => {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const { stdout } = await promisify(execFile)(process.execPath, [path.join(ROOT, 'test/registry.mjs')]);
-  process.stdout.write(stdout);
-});
-
-await atest('a step can say which phase of the explanation it belongs to', async () => {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const { stdout } = await promisify(execFile)(process.execPath, [path.join(ROOT, 'test/groups.mjs')]);
-  process.stdout.write(stdout);
-});
-
-await atest('one explanation keeps the chapters it has already taught', async () => {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const { stdout } = await promisify(execFile)(process.execPath, [path.join(ROOT, 'test/chapters.mjs')]);
-  process.stdout.write(stdout);
-});
-
-await atest('an agent is told what the drawing came out like, and only when it drew', async () => {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const { stdout } = await promisify(execFile)(process.execPath, [path.join(ROOT, 'test/audit.mjs')]);
-  process.stdout.write(stdout);
-});
-
-await atest('finished boards settle once, with replayable coordinates', async () => {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const { stdout } = await promisify(execFile)(process.execPath, [path.join(ROOT, 'test/settle.mjs')]);
-  process.stdout.write(stdout);
-});
-
-await atest('narration is one transport over a tape that can be the whole board', async () => {
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
-  const { stdout } = await promisify(execFile)(process.execPath, [path.join(ROOT, 'test/tape.mjs')]);
-  process.stdout.write(stdout);
-});
-
+const failed = (await Promise.all(pending)).find(Boolean);
+if (failed) throw failed;
 console.log(`\n${n} passed`);

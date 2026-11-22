@@ -19,6 +19,7 @@
     "integrations",
     "examples",
     "test",
+    "!test/*.spec.mjs",
     "docs/logo/*.svg",
     "docs/*.md"
   ],
@@ -28,7 +29,7 @@
   "license": "MIT",
   "scripts": {
     "build": "node tools/build.js",
-    "test": "pnpm run build && node dist/test/smoke.mjs",
+    "test": "pnpm run build && vitest run",
     "typecheck": "tsc --noEmit && pnpm -r --if-present run typecheck",
     "pack": "pnpm run build && npm pack ./dist --pack-destination .",
     "release": "pnpm test && pnpm run typecheck && npm publish ./dist",
@@ -51,7 +52,8 @@
   ],
   "devDependencies": {
     "tsdown": "0.23.7",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.1"
   },
   "repository": {
     "type": "git",
