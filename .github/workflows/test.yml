@@ -3,8 +3,20 @@ name: test
 # The suite is the only gate, and it has to run somewhere that is not the
 # author's laptop — macOS because that is where this is developed, Linux
 # because that is where most people will first try it, and the floor from
-# package.json because claiming `engines: node >= 20` without running it there
+# package.json because claiming `engines: node >= 24` without running it there
 # is a guess.
+#
+# Two columns: the floor, and the Active LTS people are moving to. The floor
+# is 24 because that is where node runs TypeScript without a loader, which is
+# what everything in this toolchain assumes — and tsdown, which cannot run
+# below 22.18 at all, would make a lower floor a promise no job here could
+# keep. Nothing is tested on 22: it is EOL in April 2027 and the package
+# refuses to run on it.
+#
+# Node is the only runtime any of this may need. pnpm and the build run on
+# node, the suite runs on node, and the published artefact runs on node. A
+# contributor is welcome to reach for Bun locally; nothing here may come to
+# depend on their having done so.
 on:
   push:
     branches: [main]
@@ -17,28 +29,74 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        node: [20, 22, 24]
+        node: [24, 26]
     name: ${{ matrix.os }} · node ${{ matrix.node }}
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      # No `npm ci`: the suite itself has no dependencies, and running it on a
-      # bare checkout is the promise in AGENTS.md — a clone must pass with
-      # nothing installed. If that ever stops being true, this job says so.
-      - run: npm test
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # The suite runs against dist/, which `pnpm test` builds first: what is
+      # asserted is the package people install, not the tree it came from.
+      - run: pnpm test
+
+  artefact:
+    runs-on: ubuntu-latest
+    name: npx from the tarball
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run pack
+      # A clone proves nothing about what npm ships. This installs the tarball
+      # somewhere with no checkout in sight, draws on a board over the CLI, and
+      # asks the board for its state — the path a first-time user takes.
+      - name: draw on a board from the tarball
+        run: |
+          set -eux
+          mkdir -p /tmp/fresh && cd /tmp/fresh
+          npm init -y >/dev/null
+          npm install "$GITHUB_WORKSPACE"/spiega-*.tgz
+          export SPIEGA_BOARD=ci SPIEGA_PORT=7391
+          npx spiega --version
+          npx spiega draw '[{"op":"node","id":"gw","kind":"gateway","label":"API Gateway"},{"op":"node","id":"svc","kind":"service","label":"Orders"},{"op":"edge","from":"gw","to":"svc","label":"gRPC"}]'
+          npx spiega say 'the gateway forwards to orders'
+          curl -sf http://127.0.0.1:7391/b/ci/ | grep -q "/src/render/render.js"
+          curl -sf http://127.0.0.1:7391/src/render/render.js >/dev/null
+          curl -sf http://127.0.0.1:7391/b/ci/state | grep -q 'API Gateway'
+          npx spiega snapshot -o /tmp/fresh/board.html
+          grep -q '<svg' /tmp/fresh/board.html
+          npx spiega stop --all
+      # An MCP client starts this process and speaks JSON-RPC over stdin. If it
+      # does not answer, an agent simply has no board and is told nothing.
+      - name: the MCP server answers
+        run: |
+          set -eux
+          cd /tmp/fresh
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"1"}}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | node node_modules/spiega/src/mcp/server.js | tee /tmp/fresh/mcp.out
+          grep -q '"name":"board_draw"' /tmp/fresh/mcp.out
 
   types:
     runs-on: ubuntu-latest
     name: typecheck
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
-      # tsc is the one dependency, and it is deliberately not part of `npm
-      # test` so a fresh clone still passes. CI is where both get run.
-      - run: npm ci
-      - run: npm run typecheck
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Strict, and deliberately a job of its own: the modules that have opted
+      # in are checked with no `any`, no `@ts-ignore` and no loosened flag.
+      - run: pnpm run typecheck

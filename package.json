@@ -1,8 +1,10 @@
 {
   "name": "spiega",
   "version": "0.5.0",
+  "private": true,
   "description": "A hand-drawn board an AI agent draws on while it explains software architecture.",
   "type": "module",
+  "packageManager": "pnpm@12.5.1",
   "bin": {
     "spiega": "bin/spiega"
   },
@@ -21,16 +23,19 @@
     "docs/*.md"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "license": "MIT",
   "scripts": {
-    "test": "node test/smoke.mjs",
-    "prepublishOnly": "npm test && npm run typecheck",
-    "typecheck": "tsc --noEmit",
-    "serve": "node src/cli.js serve --open",
-    "mcp": "node src/mcp/server.js",
-    "shapes": "node tools/shapes.js"
+    "build": "node tools/build.js",
+    "test": "pnpm run build && node dist/test/smoke.mjs",
+    "typecheck": "tsc --noEmit && pnpm -r --if-present run typecheck",
+    "pack": "pnpm run build && npm pack ./dist --pack-destination .",
+    "release": "pnpm test && pnpm run typecheck && npm publish ./dist",
+    "serve": "pnpm run build && node dist/src/cli.js serve --open",
+    "mcp": "pnpm run build && node dist/src/mcp/server.js",
+    "shapes": "node tools/shapes.js",
+    "clean": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\""
   },
   "keywords": [
     "diagram",
@@ -45,6 +50,7 @@
     "hand-drawn"
   ],
   "devDependencies": {
+    "tsdown": "0.23.7",
     "typescript": "^5.9.3"
   },
   "repository": {

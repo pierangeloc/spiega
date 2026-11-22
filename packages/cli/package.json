@@ -1,0 +1,17 @@
+{
+  "name": "@spiega/cli",
+  "version": "0.5.0",
+  "private": true,
+  "description": "serve, install, doctor, migrate, bench.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "license": "MIT"
+}

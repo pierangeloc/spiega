@@ -1,0 +1,17 @@
+{
+  "name": "@spiega/core",
+  "version": "0.5.0",
+  "private": true,
+  "description": "The board: ops, state, chapters, steps. Browser-safe.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "license": "MIT"
+}
