@@ -15,6 +15,11 @@
    are not about any one file and stayed in the suite: that the page's root
    imports exist on disk, and that nothing it reaches is vendor/ or settle.js. */
 
+// Brought in for its parser, not for its rule sets: nothing here extends
+// typescript-eslint's recommended configs. ESLint has no TypeScript of its own,
+// and a rule asked of a file it cannot parse is a rule that is not running.
+import tseslint from 'typescript-eslint';
+
 // Exactly the test the walk applied to every specifier it found: anything that
 // does not start with `.` or `/` is something the page cannot fetch. That is
 // `node:fs` and `dagre` alike, and one expression is why both are still caught
@@ -41,6 +46,48 @@ const browserSafe = {
 
 const nodeSide = { 'no-restricted-imports': 'off', 'no-restricted-syntax': 'off' };
 
+/* The same rule, said in the one dialect that can tell a type import from a
+   value one. `import type { Op } from '@spiega/core'` is erased at compile
+   time: nothing is fetched, so it cannot blank the board, and it is what lets
+   a browser-side module speak the typed domain while `effect` stays out of the
+   page's import graph. Core ESLint cannot see the distinction — it has no
+   TypeScript to look at — and would fail every ported module for naming a type
+   it is allowed to name. `allowTypeImports` is the whole reason this duplicate
+   exists; a value import of the same specifier still fails, identically. */
+const browserSafeTs = {
+  'no-restricted-imports': 'off',
+  '@typescript-eslint/no-restricted-imports': ['error', {
+    patterns: [{ regex: UNFETCHABLE, allowTypeImports: true, message: `a browser cannot resolve this — ${WHY}` }],
+  }],
+  'no-restricted-syntax': browserSafe['no-restricted-syntax'],
+};
+
+/* Where the browser rule applies, as directories rather than as globs, because
+   it is now asked twice of the same places: of the JavaScript by the core rule,
+   and of the TypeScript it is being ported into by the rule above. Two lists
+   would drift, and the half that drifted would be the one nobody notices — a
+   directory silently outside the rule reads exactly like one inside it. */
+const BROWSER_SAFE = [
+  // The typed packages are browser-safe by definition: they are what the render
+  // port is moving src/render into, and the page will import them.
+  'packages/core/**', 'packages/render/**',
+  // All of src/render — every file there is pure today, audit.js included, even
+  // though the page does not reach it.
+  'src/render/**',
+  // src/board is covered wholesale rather than by a list of the seven modules
+  // board.html imports, so that the next browser-side module is covered by
+  // having been written. The cost is that a new node-side one fails until it is
+  // named below, which is the direction worth failing in.
+  'src/board/**',
+];
+
+// One glob per directory per extension. A brace list would read better and
+// would be wrong: `*.{ts}`, with a single alternative, matches nothing at all
+// through ESLint's matcher, and a block that matches nothing turns every rule
+// in it off without saying so.
+/** @param {...string} exts */
+const files = (...exts) => BROWSER_SAFE.flatMap(dir => exts.map(e => `${dir}/*.${e}`));
+
 export default [
   {
     // dist/ is a copy — the JavaScript is assembled into it byte-for-byte — so
@@ -50,24 +97,24 @@ export default [
     ignores: ['dist/**', 'vendor/**', '.agents/**'],
   },
   {
-    // The typed packages are browser-safe by definition: they are what the
-    // render port is moving src/render into, and the page will import them.
-    files: ['packages/core/**/*.{js,mjs,ts}', 'packages/render/**/*.{js,mjs,ts}'],
+    /* Every .ts file in the repository, browser-safe or not, so that one is
+       parsed as TypeScript at all. Without this the rules below do not fail on
+       a bad import — they fail on `Parsing error: Unexpected token`, which is
+       the rule not running, dressed as the rule running. No rules are turned on
+       here: this block exists to make the ones that follow legible to it. */
+    files: ['**/*.ts'],
+    languageOptions: { parser: tseslint.parser },
+    plugins: { '@typescript-eslint': tseslint.plugin },
+  },
+  {
+    files: files('js', 'mjs'),
     rules: browserSafe,
   },
   {
-    // All of src/render — every file there is pure today, audit.js included,
-    // even though the page does not reach it.
-    files: ['src/render/**/*.js'],
-    rules: browserSafe,
-  },
-  {
-    // src/board is covered wholesale rather than by a list of the seven modules
-    // board.html imports, so that the next browser-side module is covered by
-    // having been written. The cost is that a new node-side one fails until it
-    // is named below, which is the direction worth failing in.
-    files: ['src/board/**/*.js'],
-    rules: browserSafe,
+    // Last of the browser-safe blocks, so it replaces the core rule for the
+    // ported modules wherever both would match.
+    files: files('ts'),
+    rules: browserSafeTs,
   },
   {
     // The node side. These run only in the server process, and the board page
