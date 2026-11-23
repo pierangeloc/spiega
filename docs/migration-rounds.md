@@ -27,21 +27,22 @@ tsdown + Vitest, the browser rule as lint, the conventions rewritten, and the
 two holes phase 0 left — lint that could not parse TypeScript, and a build
 that did not compile `packages/`.
 
-**Phase 1 is nearly closed.** Round 1 (#135) and all three tracks of Round 2
-(#137, #138, #139) have landed: `packages/core/src/schema/` holds the op union
-and the board Schema, `state.ts`, `script.ts`, `tape.ts`, `map.ts`, `camera.ts`,
-`spec.ts` and `settle.ts` are all strict TypeScript, and `vendor/` is gone
-(`@dagrejs/dagre@3.1.3` comes from npm). What remains in phase 1 is #140 (old op
-logs through the Schema — needs anonymised real op logs from `~/.spiega`) and
-#136 (real MCP tool schemas, `ready-for-human`).
+**Phase 1 is closed but for one human task.** Round 1 (#135), all three tracks
+of Round 2 (#137, #138, #139) and #140 have landed: `packages/core/src/schema/`
+holds the op union, the board Schema and the versioned log decoder, `state.ts`,
+`script.ts`, `tape.ts`, `map.ts`, `camera.ts`, `spec.ts` and `settle.ts` are all
+strict TypeScript, and `vendor/` is gone (`@dagrejs/dagre@3.1.3` comes from
+npm). What remains in phase 1 is #136 (real MCP tool schemas,
+`ready-for-human`).
 
 **Phases 2, 3 and 4 have all started:**
-- **Phase 2 (render):** #141 (`theme.ts`, `math.ts`, `geom.ts`) landed; #142
-  (`ink` and `glyphs`) is now unblocked.
+- **Phase 2 (render):** #141 (`theme.ts`, `math.ts`, `geom.ts`) and #142
+  (`ink.ts`, `glyphs.ts`) landed; #143 (`edges`, `callout`) is now unblocked.
 - **Phase 3 (server):** #147 (Effect HTTP read routes, loopback/origin
   middleware, `SpiegaHome`/`SpiegaConfig`/`BoardStore` services in
-  `packages/server/`) landed; #149 (event stream as a Stream over a PubSub) is
-  now unblocked. #148 (`POST /op` on Effect) waits on #140.
+  `packages/server/`) and #149 (the event stream as a `Stream` over a bounded
+  `PubSub`) landed; #148 (`POST /op` on Effect) and #150 (snapshot, export and
+  the board window) are now unblocked.
 - **Phase 4 (board app):** #152 (framework-free `Model`, `Msg`, `Cmd`, pure
   `update`, and fixture store in `packages/board/src/app/`) landed; #153 (React
   board beside the old one) waits on #145 finishing the render port.
@@ -102,22 +103,34 @@ runtime dependency, and the browser-rule exemption for
 | #138 | script, tape, map, camera, spec | **done** (#172) — all five ported in place |
 | #139 | dagre from npm, settle ported | **done** (#174) — `@dagrejs/dagre@3.1.3` from npm, `src/board/settle.ts`, `vendor/` deleted |
 
-### Round 3 — #141, #147, #152 done; #140 and #136 remaining
+### Round 3 — done but for #136
 
 | | | status / watch |
 |---|---|---|
 | #141 | render leaves (`theme`, `math`, `geom`) | **done** (#173) — unblocks #142 |
 | #147 | Effect HTTP server (read routes + security middleware) | **done** (#176) — unblocks #149 |
 | #152 | board app model, messages, pure update, fixture store | **done** (#175) — `packages/board/src/app/` + `test/board-app.mjs` |
-| #140 | old op logs restore through the Schema | **unblocked** — needs anonymised copies of real op logs out of `~/.spiega` as goldens before handing to an agent; unblocks #148 |
+| #140 | old op logs restore through the Schema | **done** (#177) — `packages/core/src/schema/log.ts` with versioned `MIGRATIONS`, goldens in `test/fixtures/logs/`; unblocks #148 |
 | #136 | `board_draw` advertises a real schema | **unblocked** — `ready-for-human` (needs four real MCP clients) |
 
-### Round 4 — unblocked now
+### Round 4 — done
+
+| | | status / unblocks |
+|---|---|---|
+| #142 | Port `ink` and `glyphs` (Phase 2) | **done** (#179) — all 22 `docs/shapes/*.svg` plus the gallery, example and regression sets byte-identical; unblocks #143 → #144 → #145 → #153 |
+| #149 | Event stream as a `Stream` over a `PubSub` (Phase 3) | **done** (#178) — `packages/server/src/events.ts`, `PubSub.sliding(16)`, Node `pipeline` backpressure, heartbeat on a `TestClock`; unblocks #150 → #158 (and #156) |
+
+### Round 5 — unblocked now
 
 | | | unblocks |
 |---|---|---|
-| #142 | Port `ink` and `glyphs` (Phase 2) | #143 → #144 → #145 → #153 (the render critical path) |
-| #149 | Event stream as a `Stream` over a `PubSub` (Phase 3) | #150 → #158 (and #156) |
+| #143 | Port `edges` and `callout` (Phase 2) | #144 → #145 → #153 (the render critical path) |
+| #148 | `POST /op` on Effect, still off the hot path (Phase 3) | the rest of phase 3 — watch the p99 budget |
+| #150 | Snapshot, export and the board window on Effect (Phase 3) | #158 |
+
+#148 and #150 both touch `src/board/server.js`; #143 does not touch either. If
+all three run at once, land #148 before #150 — the `POST /op` diff is the one
+whose benchmark has to be read against a clean `main`.
 
 ### The human track, startable now
 
