@@ -1,0 +1,74 @@
+{"op":"clear","keepTitle":false}
+{"op":"title","text":"Billing Architecture"}
+{"op":"chapter","title":"Chapter 1"}
+{"op":"say","text":"Narration line 1 describing this part of the flow."}
+{"op":"node","id":"node-1","kind":"datastore","label":"Store 1","sub":"sub-1"}
+{"op":"say","text":"Narration line 2 describing this part of the flow."}
+{"op":"node","id":"node-2","kind":"external","label":"Partner 2","sub":"sub-2"}
+{"op":"node","id":"node-3","kind":"external","label":"Partner 3","sub":"sub-3"}
+{"op":"edge","from":"node-3","to":"node-2","label":"call 1"}
+{"op":"say","text":"Narration line 3 describing this part of the flow."}
+{"op":"node","id":"node-4","kind":"service","label":"Service 4","sub":"sub-4"}
+{"op":"node","id":"node-5","kind":"datastore","label":"Store 5","sub":"sub-5"}
+{"op":"edge","from":"node-1","to":"node-4","label":"call 2","async":true}
+{"op":"edge","from":"node-5","to":"node-4","label":"call 3","async":true}
+{"op":"edge","from":"node-2","to":"node-4","label":"call 4","async":true}
+{"op":"say","text":"Narration line 4 describing this part of the flow."}
+{"op":"node","id":"node-6","kind":"queue","label":"Queue 6","sub":"sub-6","depth":3}
+{"op":"edge","from":"node-4","to":"node-6","label":"call 5","async":true}
+{"op":"note","id":"note-1","label":"Note 2"}
+{"op":"say","text":"Narration line 5 describing this part of the flow."}
+{"op":"say","text":"Narration line 6 describing this part of the flow."}
+{"op":"edge","from":"node-4","to":"node-3","label":"call 6"}
+{"op":"say","text":"Narration line 7 describing this part of the flow."}
+{"op":"node","id":"node-7","kind":"service","label":"Service 7","sub":"sub-7"}
+{"op":"edge","from":"node-1","to":"node-7","label":"call 7","async":true}
+{"op":"edge","from":"node-6","to":"node-7","label":"call 8","async":true}
+{"op":"say","text":"Narration line 8 describing this part of the flow."}
+{"op":"say","text":"Narration line 9 describing this part of the flow."}
+{"op":"node","id":"node-8","kind":"service","label":"Service 8","sub":"sub-8"}
+{"op":"node","id":"node-9","kind":"external","label":"Partner 9","sub":"sub-9"}
+{"op":"edge","from":"node-7","to":"node-8","label":"call 9"}
+{"op":"edge","from":"node-8","to":"node-9","label":"call 10"}
+{"op":"note","id":"note-3","label":"Note 4"}
+{"op":"say","text":"Narration line 10 describing this part of the flow."}
+{"op":"step","edge":"node-10","step":"Step 1 handles the request"}
+{"op":"step","edge":"node-11","step":"Step 2 handles the request"}
+{"op":"step","edge":"node-12","step":"Step 3 handles the request"}
+{"op":"step","edge":"node-13","step":"Step 4 handles the request"}
+{"op":"step","edge":"node-14","step":"Step 5 handles the request"}
+{"op":"step","edge":"node-15","step":"Step 6 handles the request"}
+{"op":"step","edge":"node-16","step":"Step 7 handles the request"}
+{"op":"tag","line":5,"step":3}
+{"op":"tag","line":8,"step":4}
+{"op":"tag","line":9,"step":5}
+{"op":"tag","line":10,"step":6}
+{"op":"chapter","title":"Chapter 2"}
+{"op":"say","text":"Narration line 11 describing this part of the flow."}
+{"op":"node","id":"node-17","kind":"datastore","label":"Store 17","sub":"sub-17"}
+{"op":"node","id":"node-18","kind":"service","label":"Service 18","sub":"sub-18"}
+{"op":"edge","from":"node-17","to":"node-18","label":"call 11"}
+{"op":"say","text":"Narration line 12 describing this part of the flow.","edge":"node-19"}
+{"op":"say","text":"Narration line 13 describing this part of the flow.","edge":"node-19"}
+{"op":"node","id":"node-20","kind":"datastore","label":"Store 20","sub":"sub-20"}
+{"op":"node","id":"node-21","kind":"service","label":"Service 21","sub":"sub-21"}
+{"op":"edge","from":"node-20","to":"node-21","label":"call 12"}
+{"op":"say","text":"Narration line 14 describing this part of the flow.","edge":"node-22"}
+{"op":"say","text":"Narration line 15 describing this part of the flow.","edge":"node-22"}
+{"op":"node","id":"node-23","kind":"datastore","label":"Store 23","sub":"sub-23"}
+{"op":"node","id":"node-24","kind":"service","label":"Service 24","sub":"sub-24"}
+{"op":"edge","from":"node-23","to":"node-24","label":"call 13"}
+{"op":"say","text":"Narration line 16 describing this part of the flow.","edge":"node-25"}
+{"op":"say","text":"Narration line 17 describing this part of the flow.","edge":"node-25"}
+{"op":"node","id":"node-7","kind":"service","label":"Service 7","sub":"sub-7"}
+{"op":"edge","from":"node-18","to":"node-7","label":"call 14"}
+{"op":"edge","from":"node-21","to":"node-7","label":"call 15"}
+{"op":"edge","from":"node-24","to":"node-7","label":"call 16"}
+{"op":"step","edge":"node-19","step":"Step 8 handles the request"}
+{"op":"step","edge":"node-22","step":"Step 9 handles the request"}
+{"op":"step","edge":"node-25","step":"Step 10 handles the request"}
+{"op":"say","text":"Narration line 18 describing this part of the flow."}
+{"op":"settle","positions":{"node-17":{"col":0,"row":2},"node-18":{"col":1,"row":2},"node-20":{"col":0,"row":1},"node-21":{"col":1,"row":1},"node-23":{"col":0,"row":0},"node-24":{"col":1,"row":0},"node-7":{"col":2,"row":0}},"routes":{}}
+{"op":"focus","step":0}
+{"op":"focus","step":1}
+{"op":"focus","step":2}

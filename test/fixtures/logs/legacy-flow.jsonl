@@ -1,0 +1,28 @@
+{"op":"title","text":"Request Pipeline"}
+{"op":"node","id":"node-1","kind":"note","lines":["Note 1 line 1","Note 1 line 2","Note 1 line 3"]}
+{"op":"node","id":"node-2","kind":"note","lines":["Note 2 line 1","Note 2 line 2","Note 2 line 3","Note 2 line 4"]}
+{"op":"node","id":"node-3","kind":"note","lines":["Note 3 line 1","Note 3 line 2"]}
+{"op":"node","id":"node-4","kind":"source","label":"Component 4","sub":"sub-4"}
+{"op":"node","id":"node-5","kind":"blob","label":"Component 5","sub":"sub-5","w":176,"h":88}
+{"op":"node","id":"node-6","kind":"particle","label":"Component 6","sub":"sub-6"}
+{"op":"node","id":"node-7","kind":"particle","label":"Component 7","sub":"sub-7"}
+{"op":"node","id":"node-8","kind":"particle","label":"Component 8","sub":"sub-8"}
+{"op":"node","id":"node-9","kind":"particle","label":"Component 9"}
+{"op":"node","id":"node-10","kind":"particle","label":"Component 10","sub":"sub-10"}
+{"op":"node","id":"node-11","kind":"blob","label":"Component 11","sub":"sub-11","w":176,"h":88}
+{"op":"node","id":"node-12","kind":"particle","label":"Component 12","sub":"sub-12"}
+{"op":"node","id":"node-13","kind":"blob","label":"Component 13","sub":"sub-13","w":186,"h":88}
+{"op":"edge","from":"node-4","to":"node-5","label":"call 1"}
+{"op":"edge","from":"node-4","to":"node-7","label":"call 2"}
+{"op":"edge","from":"node-4","to":"node-6","label":"call 3"}
+{"op":"edge","from":"node-6","to":"node-8","label":"call 4"}
+{"op":"edge","from":"node-7","to":"node-8"}
+{"op":"edge","from":"node-8","to":"node-9","label":"call 6"}
+{"op":"edge","from":"node-9","to":"node-10","label":"call 7"}
+{"op":"edge","from":"node-10","to":"node-11","label":"call 8"}
+{"op":"edge","from":"node-10","to":"node-7","label":"call 9"}
+{"op":"edge","from":"node-11","to":"node-12","label":"call 10","async":true}
+{"op":"edge","from":"node-12","to":"node-11","label":"call 11"}
+{"op":"edge","from":"node-12","to":"node-13","label":"call 12","async":true}
+{"op":"boundary","id":"bnd-1","label":"Zone 1","members":["node-5","node-6","node-7"]}
+{"op":"flow","steps":[{"edge":"node-14","step":"Step 1 handles the request","_n":1,"_i":0},{"edge":"node-15","step":"Step 2 handles the request","_n":2,"_i":1},{"edge":"node-16","step":"Step 3 handles the request","_n":3,"_i":2},{"edge":"node-17","step":"Step 4 handles the request","_n":4,"_i":3},{"edge":"node-18","step":"Step 5 handles the request","_n":5,"_i":4},{"edge":"node-19","step":"Step 6 handles the request","_n":6,"_i":5},{"edge":"node-20","step":"Step 7 handles the request","lights":["node-5"],"_n":7,"_i":6},{"edge":"node-21","step":"Step 8 handles the request","_n":8,"_i":7},{"edge":"node-22","step":"Step 9 handles the request","_n":9,"_i":8},{"edge":"node-23","step":"Step 10 handles the request","_n":10,"_i":9}]}

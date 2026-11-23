@@ -1,0 +1,43 @@
+{"op":"title","text":"Media Processing"}
+{"op":"node","id":"node-1","kind":"client","label":"Client 1"}
+{"op":"node","id":"node-2","kind":"service","label":"Service 2","sub":"sub-2"}
+{"op":"edge","from":"node-1","to":"node-2","label":"call 1"}
+{"op":"node","id":"node-3","kind":"datastore","label":"Store 3","sub":"sub-3"}
+{"op":"edge","from":"node-1","to":"node-3","label":"call 2"}
+{"op":"step","edge":"node-4","step":"Step 1 handles the request"}
+{"op":"step","edge":"node-5","step":"Step 2 handles the request"}
+{"op":"say","text":"Narration line 1 describing this part of the flow."}
+{"op":"focus","step":0}
+{"op":"say","text":"Narration line 2 describing this part of the flow.","step":1}
+{"op":"focus","step":1}
+{"op":"say","text":"Narration line 3 describing this part of the flow.","step":2}
+{"op":"node","id":"node-6","kind":"queue","label":"Queue 6","depth":3,"sub":"sub-6"}
+{"op":"edge","from":"node-3","to":"node-6","label":"call 3","async":true}
+{"op":"step","edge":"node-7","step":"Step 3 handles the request"}
+{"op":"focus","step":2}
+{"op":"say","text":"Narration line 4 describing this part of the flow.","step":3}
+{"op":"say","text":"Narration line 5 describing this part of the flow.","step":3}
+{"op":"node","id":"node-8","kind":"compute","label":"Component 8","replicas":3,"sub":"sub-8"}
+{"op":"edge","from":"node-6","to":"node-8","label":"call 4"}
+{"op":"step","edge":"node-9","step":"Step 4 handles the request"}
+{"op":"focus","step":3}
+{"op":"say","text":"Narration line 6 describing this part of the flow.","step":4}
+{"op":"say","text":"Narration line 7 describing this part of the flow.","step":4}
+{"op":"edge","from":"node-8","to":"node-3","label":"call 5"}
+{"op":"step","edge":"node-10","step":"Step 5 handles the request"}
+{"op":"focus","step":4}
+{"op":"say","text":"Narration line 8 describing this part of the flow.","step":5}
+{"op":"say","text":"Narration line 9 describing this part of the flow.","step":5}
+{"op":"node","id":"node-11","kind":"datastore","label":"Store 11","sub":"sub-11"}
+{"op":"edge","from":"node-8","to":"node-11","label":"call 6"}
+{"op":"edge","from":"node-8","to":"node-6","label":"call 7"}
+{"op":"step","edge":"node-12","step":"Step 6 handles the request"}
+{"op":"step","edge":"node-13","step":"Step 7 handles the request"}
+{"op":"focus","step":5}
+{"op":"say","text":"Narration line 10 describing this part of the flow.","step":6}
+{"op":"focus","step":6}
+{"op":"say","text":"Narration line 11 describing this part of the flow.","step":7}
+{"op":"note","label":"Note 1"}
+{"op":"say","text":"Narration line 12 describing this part of the flow."}
+{"op":"tag","line":12,"step":null}
+{"op":"settle","positions":{"node-1":{"col":0,"row":0},"node-2":{"col":1,"row":1},"node-3":{"col":1,"row":0},"node-6":{"col":2,"row":1},"node-8":{"col":3,"row":0},"node-11":{"col":4,"row":0},"node-14":{"col":-1,"row":0}},"routes":{}}
