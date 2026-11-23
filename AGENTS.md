@@ -51,14 +51,13 @@ agents keep running the previous build, and nothing anywhere says so. A
 `post-merge` hook in `.git/hooks` that runs `node tools/build.js` costs two
 lines and removes the whole class.
 
-The picture tools are the exception that still runs from the source tree —
-`tools/shapes.js` and `tools/regressions.js` write *beside themselves*, so the
-built copies would write into `dist/docs` and be wiped by the next build. Run
-`pnpm run shapes` and `node tools/regressions.js` from the root as before.
-`tools/example.js` takes its paths from the command line and does not care.
-When the render modules are ported, these three stop working from source and
-will have to be taught to write back into the repository; that is the port's
-job, not a thing to patch around now.
+The picture tools that draw a board run from the build now, because the reducer
+is TypeScript and no longer exists in the source tree: `pnpm run shapes` and
+`pnpm run gallery` build first and pass `docs/shapes` and `docs/gallery` on the
+command line so the built copies write back into the repository rather than
+into `dist/docs`, and `node dist/tools/example.js` takes its paths from the
+command line. `tools/regressions.js` imports no board code and still runs from
+the root as `node tools/regressions.js`.
 
 ## Node is the only runtime
 
@@ -146,7 +145,7 @@ board that has ever been wrong. A screenshot pasted into a PR says the same
 thing once and then rots.
 
 ```sh
-node tools/example.js test/boards/issue-53-crowding.json \
+pnpm run build && node dist/tools/example.js test/boards/issue-53-crowding.json \
   docs/regressions/issue-53-crowding.svg
 node tools/regressions.js        # rewrites docs/regressions.md
 ```

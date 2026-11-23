@@ -37,8 +37,9 @@
     "release": "pnpm test && pnpm run typecheck && npm publish ./dist",
     "serve": "pnpm run build && node dist/src/cli.js serve --open",
     "mcp": "pnpm run build && node dist/src/mcp/server.js",
-    "shapes": "node tools/shapes.js",
-    "clean": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\""
+    "shapes": "pnpm run build && node dist/tools/shapes.js docs/shapes",
+    "clean": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\"",
+    "gallery": "pnpm run build && node dist/tools/gallery.js docs/gallery"
   },
   "keywords": [
     "diagram",
@@ -53,6 +54,7 @@
     "hand-drawn"
   ],
   "devDependencies": {
+    "@spiega/core": "workspace:*",
     "eslint": "^10.15.0",
     "tsdown": "0.23.7",
     "typescript": "^5.9.3",

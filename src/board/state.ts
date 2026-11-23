@@ -1,4 +1,3 @@
-// @ts-check
 /* ============================================================
    spiega state — the board as a list of operations.
 
@@ -13,181 +12,50 @@
    That half lives in ./log.js, because THIS FILE IS LOADED BY THE BROWSER —
    board.html imports it straight off disk — and a browser cannot resolve
    `node:fs`. Importing one here takes the whole page down with it.
+
+   The same rule is why the types below arrive through `import type`: the board
+   and the ops are defined as Schemas in @spiega/core, and a type import is
+   erased at compile time, so `effect` never reaches the page. Decoding happens
+   at POST /op, where there is a runtime to do it in.
    ============================================================ */
+
+import type {
+  Board, Boundary, Callout, Chapter, Edge, FlowStep, LogEntry, Node, Op, Placed, Placement,
+  TranscriptLine,
+} from '@spiega/core';
 
 import { KINDS } from '../render/glyphs.js';
 import { scriptSteps } from './script.js';
 
-/** @typedef {import('../render/layout.js').Placed} Placed */
+/* The domain, re-exported from where the reducer's callers have always asked
+   for it. The renderer and the rail say `import('./state.js').Board`, and a
+   board is still what this module is about even now that its shape is written
+   down next door. */
+export type {
+  Board, Boundary, Callout, Chapter, Edge, FlowStep, LogEntry, Node, Op, Placed, Placement,
+  TranscriptLine,
+};
 
-/**
- * A thing drawn on the board. Only `id` is always there; the rest are either
- * layout instructions or drawing hints, and an op that carries none of them is
- * still a valid node.
- *
- * @typedef {Object} Node
- * @property {string} id
- * @property {string} [label]
- * @property {string} [sub]
- * @property {string} [kind]
- * @property {string} [body]
- * @property {number} [col]
- * @property {number} [row]
- * @property {string} [place]
- * @property {number} [w]
- * @property {number} [h]
- * @property {string[]} [lines]
- * @property {number} [slots]
- * @property {number} [depth]
- * @property {number} [replicas]
- * @property {'left'|'right'} [notch]
- * @property {string[]} [members]
- * @property {string} [tint]
- */
+/* The op shapes a caller names one at a time. settle.js asks for SettleOp,
+   because it builds one: the answer dagre gave, as the op that records it. */
+export type SettleOp = Extract<Op, { op: 'settle' }>;
+export type SayOp = Extract<Op, { op: 'say' }>;
 
-/**
- * @typedef {Object} Edge
- * @property {string} from
- * @property {string} to
- * @property {string} [label]
- * @property {number} [step]
- * @property {boolean} [async]
- * @property {string} [style]
- * @property {string} [bend]
- * @property {import('../render/layout.js').Placement[]} [via]
- */
+export type Fresh = { nodes: string[], edges: string[], boundaries: string[] };
+export type ApplyResult =
+  | { ok: true, fresh: Fresh, op: Op }
+  | { ok: false, error: string, fresh: Fresh };
+export type ApplyOpsResult = { fresh: Fresh, errors: string[], warnings: string[], applied: Op[] };
 
-/**
- * @typedef {Object} Boundary
- * @property {string} id
- * @property {string} [label]
- * @property {string[]} [members]
- * @property {string} [tint]
- */
-
-/**
- * @typedef {Object} Callout
- * @property {string} id
- * @property {string} [at]
- * @property {string} [label]
- * @property {string} [side]
- * @property {number} [wrap]
- */
-
-/**
- * A step may name the phase of the explanation it belongs to. The step names
- * its group and never the other way round: the log is append-only and step
- * indices renumber the moment one is inserted, while a key does not.
- *
- * @typedef {Object} FlowStep
- * @property {string} [edge]
- * @property {string[]} [lights]
- * @property {string} [label]
- * @property {string} [group]
- * @property {number|null} [_n]
- * @property {number} [_i]
- */
-
-/**
- * A line of the script. `step` counts from 0 here; the op vocabulary counts
- * from 1, because that is the number shown on the board.
- *
- * @typedef {Object} TranscriptLine
- * @property {string} text
- * @property {number} at
- * @property {number} [step]
- * @property {string} [edge]
- */
-
-/**
- * The log is the ops themselves, plus the moment they arrived. Kept loose on
- * purpose: anything an op carries has to survive a replay back to the board.
- *
- * @typedef {Record<string, unknown> & {
- *   op: string,
- *   at?: number,
- *   step?: number|string|null|boolean,
- *   edge?: string
- * }} LogEntry
- */
-
-/**
- * One drawing surface: everything a board held before chapters existed. A
- * finished chapter is exactly this, set aside whole, which is why the renderer
- * and the rail take one without knowing chapters are a thing.
- *
- * @typedef {Object} Chapter
- * @property {string} title
- * @property {Node[]} nodes
- * @property {Edge[]} edges
- * @property {Boundary[]} boundaries
- * @property {FlowStep[]} flow
- * @property {Callout[]} callouts
- * @property {TranscriptLine[]} transcript
- * @property {Record<string, string>} groups
- * @property {number|null} active
- * @property {Placed} placed
- * @property {boolean} settled
- */
-
-/**
- * The board is one explanation. Its current chapter lives directly on it —
- * `nodes`, `edges` and the rest, where they have always been — and the
- * chapters it has finished sit beside it in `chapters`, in the order they were
- * taught. One title names the explanation; `chapter` names the surface being
- * drawn on now.
- *
- * @typedef {Object} Board
- * @property {string} title
- * @property {string} chapter
- * @property {Chapter[]} chapters
- * @property {Node[]} nodes
- * @property {Edge[]} edges
- * @property {Boundary[]} boundaries
- * @property {FlowStep[]} flow
- * @property {Callout[]} callouts
- * @property {TranscriptLine[]} transcript
- * @property {Record<string, string>} groups
- * @property {number|null} active
- * @property {Placed} placed
- * @property {LogEntry[]} log
- * @property {number} rev
- * @property {boolean} settled
- */
-
-/* The wire format: one object per line in the log and one POST body per op. */
-
-/** @typedef {{op: 'clear', keepTitle?: boolean}} ClearOp */
-/** @typedef {{op: 'chapter', title?: string}} ChapterOp */
-/** @typedef {{op: 'amend', chapter: number|string, ops?: Op|Op[]}} AmendOp */
-/** @typedef {{op: 'title', text?: string}} TitleOp */
-/** @typedef {{op: 'say', text?: string, step?: number|string|null, edge?: string}} SayOp */
-/** @typedef {{op: 'tag', match?: string, line?: number|string, step?: number|string|null|false, edge?: string}} TagOp */
-/** @typedef {{op: 'node'|'note'} & Partial<Node>} NodeOp */
-/** @typedef {{op: 'edge'} & Partial<Edge>} EdgeOp */
-/** @typedef {{op: 'callout'} & Partial<Callout>} CalloutOp */
-/** @typedef {{op: 'boundary'} & Partial<Boundary>} BoundaryOp */
-/** @typedef {{op: 'step'} & FlowStep} StepOp */
-/** @typedef {{op: 'group', id?: string, label?: string}} GroupOp */
-/** @typedef {{op: 'flow', steps?: FlowStep[]}} FlowOp */
-/** @typedef {{op: 'focus', step?: number|string|null}} FocusOp */
-/** @typedef {{op: 'remove', id: string}} RemoveOp */
-/** @typedef {{op: 'settle', positions: Placed, routes?: Record<string, import('../render/layout.js').Placement[]>}} SettleOp */
-/**
- * @typedef {ClearOp | ChapterOp | AmendOp | TitleOp | SayOp | TagOp | NodeOp
- *   | EdgeOp | CalloutOp | BoundaryOp | StepOp | GroupOp | FlowOp | FocusOp
- *   | RemoveOp | SettleOp} Op
- */
-
-/** @typedef {{nodes: string[], edges: string[], boundaries: string[]}} Fresh */
-/** @typedef {{ok: true, fresh: Fresh, op: Op} | {ok: false, error: string, fresh: Fresh}} ApplyResult */
-/** @typedef {{fresh: Fresh, errors: string[], warnings: string[], applied: Op[]}} ApplyOpsResult */
+/* Reading a field off a value whose shape is nobody's promise — a line of JSON
+   out of a log, or an ops array a client wrote by hand. */
+const field = (v: unknown, key: string): unknown =>
+  v !== null && typeof v === 'object' && key in v ? Reflect.get(v, key) : undefined;
 
 /* The fields a chapter owns. A chapter break puts these aside and starts them
    again; everything else on the board — its title, its log, its revision — is
    the explanation's and outlives any one chapter. */
-/** @returns {Omit<Chapter, 'title'>} */
-export const emptySurface = () => ({
+export const emptySurface = (): Omit<Chapter, 'title'> => ({
   nodes: [],
   edges: [],
   boundaries: [],
@@ -200,8 +68,7 @@ export const emptySurface = () => ({
   settled: false,
 });
 
-/** @returns {Board} */
-export const emptyBoard = () => ({
+export const emptyBoard = (): Board => ({
   title: '',
   chapter: '',
   chapters: [],
@@ -235,8 +102,7 @@ export const LOG_CAP = 4000;
    then names its first chapter means to use them in that chapter, and
    counting them would file a chapter with nothing in it but a dictionary —
    and take the names away from the steps that were about to use them. */
-/** @param {Board} b */
-const blankSurface = b => !b.nodes.length && !b.edges.length && !b.boundaries.length &&
+const blankSurface = (b: Board) => !b.nodes.length && !b.edges.length && !b.boundaries.length &&
   !b.callouts.length && !b.flow.length && !b.transcript.length;
 
 /* A chapter as it is set aside, with its script already attributed.
@@ -248,8 +114,7 @@ const blankSurface = b => !b.nodes.length && !b.edges.length && !b.boundaries.le
    has to carry its own answer, resolved here while the walk still applies to
    it. The arrays themselves are handed over rather than copied: the live
    fields are replaced wholesale a line later, so nothing is shared. */
-/** @param {Board} board @returns {Chapter} */
-function closeChapter(board) {
+function closeChapter(board: Board): Chapter {
   const at = scriptSteps(board);
   return {
     title: board.chapter,
@@ -270,9 +135,8 @@ function closeChapter(board) {
 /* Put a surface on the board and take back whatever was there. Called twice,
    it is a swap: the second call returns the surface the first lent out, with
    whatever has been drawn on it in between. */
-/** @param {Board} board @param {Chapter} to @returns {Chapter} */
-function swapSurface(board, to) {
-  const was = {
+function swapSurface(board: Board, to: Chapter): Chapter {
+  const was: Chapter = {
     title: board.chapter,
     nodes: board.nodes, edges: board.edges, boundaries: board.boundaries,
     flow: board.flow, callouts: board.callouts, transcript: board.transcript,
@@ -290,16 +154,18 @@ function swapSurface(board, to) {
 /* Every chapter in the order it was taught, the live one last. Numbered from
    one, as the strip numbers them, because that is the number a person reads
    off the board and says out loud. */
-/** @param {Board} board @returns {{title: string, live?: boolean}[]} */
-const everyChapter = board =>
+const everyChapter = (board: Board): { title: string, live?: boolean }[] =>
   [...board.chapters.map(c => ({ title: c.title })), { title: board.chapter, live: true }];
 
 /* Which chapter an amendment is aimed at: the number on the strip, or the
    name on the tab. Returns an index into `everyChapter`, or a sentence saying
    why not — an agent that has the number wrong is told what the numbers are,
-   because it cannot look at the board to find out. */
-/** @param {Board} board @param {number|string} want @returns {number|string} */
-function chapterWanted(board, want) {
+   because it cannot look at the board to find out.
+
+   `want` may be missing, for the same reason every other op is read
+   defensively: an amendment that never said which chapter is answered with
+   the list, not with a throw. */
+function chapterWanted(board: Board, want: number | string | undefined): number | string {
   const all = everyChapter(board);
   const list = all.map((c, i) => `${i + 1} ${c.title || 'untitled'}${c.live ? ' (being drawn)' : ''}`).join(', ');
   if (typeof want === 'number' || /^\d+$/.test(String(want))) {
@@ -333,8 +199,7 @@ const NOT_AMENDABLE = new Set(['amend', 'chapter', 'clear', 'title']);
    The log is lent a scratch array meanwhile: the amendment is one entry in the
    board's log, carrying the ops it applied, rather than a handful of ops that
    would replay into the wrong chapter. */
-/** @param {Board} board @param {number} i @param {Op[]} ops @returns {ApplyOpsResult} */
-function amendChapter(board, i, ops) {
+function amendChapter(board: Board, i: number, ops: unknown[]): ApplyOpsResult {
   const live = swapSurface(board, board.chapters[i]);
   const log = board.log;
   board.log = [];
@@ -357,34 +222,26 @@ function amendChapter(board, i, ops) {
    rather than on it — the board is serialised to the browser and to snapshots,
    and an index has no business travelling with it. */
 
-/**
- * @typedef {Object} Indexes
- * @property {Map<string, number>} nodes
- * @property {Map<string, number>} edges
- * @property {Map<string, number>} boundaries
- * @property {Map<string, number>} callouts
- */
+type Indexes = {
+  nodes: Map<string, number>,
+  edges: Map<string, number>,
+  boundaries: Map<string, number>,
+  callouts: Map<string, number>,
+};
 
-/** @type {WeakMap<Board, Indexes>} */
-const INDEXES = new WeakMap();
+const INDEXES = new WeakMap<Board, Indexes>();
 
-/** @param {Board} board @returns {Indexes} */
-const indexesFor = board => {
-  let ix = INDEXES.get(board);
-  if (ix) return ix;
-  ix = /** @type {Indexes} */ ({
+const indexesFor = (board: Board): Indexes => {
+  const known = INDEXES.get(board);
+  if (known) return known;
+  const ix: Indexes = {
     nodes: new Map(),
     edges: new Map(),
     boundaries: new Map(),
     callouts: new Map(),
-  });
-  /**
-   * @template T
-   * @param {Map<string, number>} map
-   * @param {T[]} list
-   * @param {(x: T) => string} key
-   */
-  const fill = (map, list, key) => list.forEach((x, i) => map.set(key(x), i));
+  };
+  const fill = <T>(map: Map<string, number>, list: T[], key: (x: T) => string) =>
+    list.forEach((x, i) => map.set(key(x), i));
   fill(ix.nodes, board.nodes || [], x => x.id);
   fill(ix.edges, board.edges || [], edgeId);
   fill(ix.boundaries, board.boundaries || [], x => x.id);
@@ -400,8 +257,7 @@ const indexesFor = board => {
    cost back on the remove; dropping it is O(1), and the next op that actually
    needs an index pays for one rebuild. A run of removes now costs one rebuild
    in total instead of one per op, and only if something is drawn afterwards. */
-/** @param {Board} board */
-const dropIndexes = board => { INDEXES.delete(board); };
+const dropIndexes = (board: Board) => { INDEXES.delete(board); };
 
 /* Removes are collected and swept, not applied one at a time.
 
@@ -414,12 +270,11 @@ const dropIndexes = board => { INDEXES.delete(board); };
    behind it. That is what keeps the interleaving exact: a node drawn after
    its own removal is a new node, not a survivor of the sweep, and a callout
    added after the removal is not swept away with the thing it points at. */
-/** @typedef {{ids: (string|undefined)[]}} Sweep */
-/** @returns {Sweep} */
-const newSweep = () => ({ ids: [] });
+type Sweep = { ids: (string | undefined)[] };
 
-/** @param {Board} board @param {Sweep} sweep */
-const sweepRemoved = (board, sweep) => {
+const newSweep = (): Sweep => ({ ids: [] });
+
+const sweepRemoved = (board: Board, sweep: Sweep) => {
   const ids = sweep.ids;
   if (!ids.length) return;
   if (ids.length === 1) {
@@ -433,7 +288,7 @@ const sweepRemoved = (board, sweep) => {
     board.boundaries = board.boundaries.filter(b => b.id !== id);
     // a callout pointing at something that is gone has nothing to say
     board.callouts = board.callouts.filter(c => c.id !== id && c.at !== id
-      && !String(c.at || '').split('>').includes(/** @type {string} */ (id)));
+      && !(id !== undefined && String(c.at || '').split('>').includes(id)));
   } else {
     const gone = new Set(ids);
     board.nodes = board.nodes.filter(n => !gone.has(n.id));
@@ -451,15 +306,12 @@ const sweepRemoved = (board, sweep) => {
    of paying for a sweep nobody will see. */
 const TOUCHES_LISTS = new Set(['node', 'note', 'edge', 'callout', 'boundary', 'settle']);
 
-/**
- * @template T
- * @param {T[]} list
- * @param {T} item
- * @param {(x: T) => string} keyOf
- * @param {Map<string, number>|null} [index]
- * @returns {boolean}
- */
-const upsert = (list, item, keyOf, index = null) => {
+const upsert = <T extends object>(
+  list: T[],
+  item: T,
+  keyOf: (x: T) => string,
+  index: Map<string, number> | null = null,
+): boolean => {
   const id = keyOf(item);
   const known = index ? index.get(id) : undefined;
   const i = known != null && list[known] && keyOf(list[known]) === id
@@ -470,8 +322,7 @@ const upsert = (list, item, keyOf, index = null) => {
   list.push(item); return true;
 };
 
-/** @param {Edge} e @returns {string} */
-const edgeId = e => `${e.from}>${e.to}`;
+const edgeId = (e: Pick<Edge, 'from' | 'to'>): string => `${e.from}>${e.to}`;
 
 /* An edge is keyed by its ends, so a second hop between the same two boxes
    does not draw — it lands on the first one and takes its label with it (#113).
@@ -487,8 +338,7 @@ const edgeId = e => `${e.from}>${e.to}`;
    another label. Correcting a typo, or an `edge` op adding `via` or a style to
    a line already drawn, is the same op shape and is exactly right; a board
    cannot afford to be pedantic at an author mid-sentence. */
-/** @param {Board} board @param {Edge} e @param {string[]} warnings */
-const overwrittenLabel = (board, e, warnings) => {
+const overwrittenLabel = (board: Board, e: Edge, warnings: string[]) => {
   if (!e.label) return;
   const was = board.edges.find(x => edgeId(x) === edgeId(e));
   if (!was?.label || was.label === e.label) return;
@@ -508,8 +358,53 @@ const overwrittenLabel = (board, e, warnings) => {
    process — and every other board in it — down. So the door refuses it, the
    way an unknown op is refused. `flow.steps` already survives a non-array; a
    string where the elements are read is the inconsistency this closes. */
-/** @param {unknown} value */
-const stringIds = value => Array.isArray(value) && value.every(v => typeof v === 'string');
+const stringIds = (value: unknown): boolean =>
+  Array.isArray(value) && value.every(v => typeof v === 'string');
+
+/* `"col": "3"` — the other thing a model writes by hand, and the one the op
+   schema lets through on purpose: refusing a box over the quotes around its
+   column would be pedantry mid-sentence. Converting it is this file's job
+   rather than the schema's, and it has to happen here, where the op lands,
+   because everything downstream does arithmetic on these fields and `"3" + 1`
+   is `"31"`. The board holds the number it has always said it holds.
+
+   A string that is not a number at all — `"w": "wide"` — is dropped and the
+   agent told, the way a group it cannot use is: the box still draws, measured
+   from its own words, which is exactly what happens when the field was never
+   there. Converting it anyway would put NaN on the board, and NaN draws as a
+   hole in the middle of somebody's explanation.
+
+   Only the keys that arrived, so a node is on the board with the same fields
+   it was drawn with. The caller hands over the fields it has taken out of the
+   op, so that what comes back lands on top of the rest of them. */
+const oneNumber = (
+  v: number | string | undefined,
+  key: string,
+  what: string,
+  warnings: string[],
+): number | undefined => {
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  if (Number.isFinite(n)) return n;
+  warnings.push(`${what}: "${key}" must be a number, got ${JSON.stringify(v)}; drawn without it.`);
+  return undefined;
+};
+
+const counted = <K extends string>(
+  fields: Partial<Record<K, number | string>>,
+  keys: readonly K[],
+  what: string,
+  warnings: string[],
+): Partial<Record<K, number>> => {
+  const out: Partial<Record<K, number>> = {};
+  for (const k of keys) {
+    const n = oneNumber(fields[k], k, what, warnings);
+    if (n !== undefined) out[k] = n;
+  }
+  return out;
+};
+
+const NODE_NUMBERS = ['col', 'row', 'w', 'h', 'slots', 'depth', 'replicas'] as const;
 
 /* The group a step says it belongs to, tidied in place.
 
@@ -518,8 +413,7 @@ const stringIds = value => Array.isArray(value) && value.every(v => typeof v ===
    still reads, it simply joins no phase. So the group is dropped and the
    agent is told, the way a kind with no glyph is — a header missing from the
    rail is a smaller loss than a hop missing from the flow. */
-/** @param {FlowStep} step @param {string[]} warnings */
-const phase = (step, warnings) => {
+const phase = (step: FlowStep, warnings: string[]) => {
   const id = typeof step.group === 'string' ? step.group.trim() : '';
   if (!id) {
     if (step.group !== '' && typeof step.group !== 'string') {
@@ -531,8 +425,8 @@ const phase = (step, warnings) => {
   step.group = id;
 };
 
-/** @param {unknown} value */
-const waypoints = value => Array.isArray(value) && value.every(p => p && Number.isFinite(p.col) && Number.isFinite(p.row));
+const waypoints = (value: unknown): boolean => Array.isArray(value) && value.every(p =>
+  p && Number.isFinite(field(p, 'col')) && Number.isFinite(field(p, 'row')));
 
 /* An op is an object with a string `op` naming the operation. Anything else is
    refused rather than read: `[null]` in an ops array — the other thing a client
@@ -541,34 +435,30 @@ const waypoints = value => Array.isArray(value) && value.every(p => p && Number.
    it where it arrives is what lets `applyOps` keep its promise never to throw
    on input.
 
-   Returns the reason, or null when the value is an op. */
-/** @param {unknown} op @returns {string|null} */
-const notAnOp = op => {
+   Structural, and only structural: it answers "is this an op at all", not "is
+   this a well-formed one". That is the honest shape of the contract — the
+   field values are each refused or coerced by the case that reads them, and
+   since #135 a request has been decoded against the Schema before it ever
+   arrives here. */
+const isOp = (op: unknown): op is Op =>
+  !!op && typeof op === 'object' && !Array.isArray(op) && typeof field(op, 'op') === 'string';
+
+/* Why it is not one, for the agent that sent it. */
+const notAnOp = (op: unknown): string => {
   if (!op || typeof op !== 'object' || Array.isArray(op)) {
     const what = op === null ? 'null' : Array.isArray(op) ? 'an array' : typeof op;
     return `not an op: expected an object with a string "op", got ${what}`;
   }
-  const name = /** @type {{op?: unknown}} */ (op).op;
-  return typeof name === 'string' ? null
-    : `not an op: "op" must be a string naming the operation, got ${name === undefined ? 'nothing' : typeof name}`;
+  const name = field(op, 'op');
+  return `not an op: "op" must be a string naming the operation, got ${name === undefined ? 'nothing' : typeof name}`;
 };
 
 /* Applying an op returns the keys of whatever is new, so the client knows what
    to animate on and what was already on the board. It also returns the ops it
-   accepted, which is exactly what the log writer buffers. */
-/**
- * @param {Board} board
- * @param {Op} op
- * @param {Sweep} sweep
- * @param {string[]} [warnings] where applyOne says what it drew but could not draw right
- * @returns {ApplyResult}
- */
-function applyOne(board, op, sweep, warnings = []) {
-  /** @type {Fresh} */
-  const fresh = { nodes: [], edges: [], boundaries: [] };
-  // `applyOp` reaches here directly, so the check cannot live only in applyOps
-  const bad = notAnOp(op);
-  if (bad) return { ok: false, error: bad, fresh };
+   accepted, which is exactly what the log writer buffers.
+   `warnings` is where applyOne says what it drew but could not draw right. */
+function applyOne(board: Board, op: Op, sweep: Sweep, warnings: string[] = []): ApplyResult {
+  const fresh: Fresh = { nodes: [], edges: [], boundaries: [] };
   // recorded before the switch, so a `clear` wipes the log with everything else
   const record = () => {
     board.log.push({ ...op, at: Date.now() });
@@ -614,12 +504,17 @@ function applyOne(board, op, sweep, warnings = []) {
        It lands where it is aimed and nowhere else: what is being drawn now is
        untouched, and so is whoever is reading it. */
     case 'amend': {
-      const inner = /** @type {Op[]} */ (op.ops == null ? [] : [].concat(/** @type {never} */ (op.ops)));
-      const refused = inner.find(o => o && NOT_AMENDABLE.has(o.op));
-      if (refused) {
-        return { ok: false, fresh, error:
-          `amend: "${refused.op}" is about the whole explanation, not about one chapter of it, ` +
-          `so it cannot go inside an amendment.` };
+      /* The ops an amendment carries are typed loosely on purpose (op.ts), so
+         that an agent with one field wrong is told the field rather than the
+         sixteen members of a union it is not. They go through the same door as
+         anything else below. */
+      const inner: unknown[] = op.ops == null ? [] : Array.isArray(op.ops) ? [...op.ops] : [op.ops];
+      for (const one of inner) {
+        if (isOp(one) && NOT_AMENDABLE.has(one.op)) {
+          return { ok: false, fresh, error:
+            `amend: "${one.op}" is about the whole explanation, not about one chapter of it, ` +
+            `so it cannot go inside an amendment.` };
+        }
       }
       const where = chapterWanted(board, op.chapter);
       if (typeof where === 'string') return { ok: false, fresh, error: `amend: ${where}` };
@@ -650,8 +545,7 @@ function applyOne(board, op, sweep, warnings = []) {
        on the board (1-based), `edge` survives steps being reordered. Neither
        is required: see board/script.js for what happens without them. */
     case 'say': {
-      /** @type {TranscriptLine} */
-      const line = { text: String(op.text || ''), at: Date.now() };
+      const line: TranscriptLine = { text: String(op.text || ''), at: Date.now() };
       if (op.step != null && Number.isFinite(Number(op.step))) line.step = Math.max(0, Number(op.step) - 1);
       if (op.edge) line.edge = String(op.edge);
       board.transcript.push(line);
@@ -688,7 +582,7 @@ function applyOne(board, op, sweep, warnings = []) {
 
     case 'note':
     case 'node': {
-      const { op: _op, ...fields } = op;
+      const { op: _op, col, row, w, h, slots, depth, replicas, ...fields } = op;
       // `lines` is text, not ids, but the same two callers read it as a list
       if (fields.lines !== undefined && !stringIds(fields.lines)) {
         return { ok: false, error: `${op.op}: "lines" must be an array of strings`, fresh };
@@ -702,28 +596,40 @@ function applyOne(board, op, sweep, warnings = []) {
       if (op.op === 'node' && fields.kind && !KINDS.includes(fields.kind)) {
         warnings.push(`node "${id}": no glyph for kind "${fields.kind}", drawn as a service. Kinds: ${KINDS.join(', ')}.`);
       }
-      /** @type {Node} */
-      const n = { ...fields, id, kind: op.op === 'note' ? 'note' : (fields.kind || 'service') };
+      const numbers = counted({ col, row, w, h, slots, depth, replicas }, NODE_NUMBERS,
+        `${op.op} "${id}"`, warnings);
+      const n: Node = { ...fields, ...numbers, id,
+        kind: op.op === 'note' ? 'note' : (fields.kind || 'service') };
       if (upsert(board.nodes, n, x => x.id, indexesFor(board).nodes)) fresh.nodes.push(n.id);
-      // Keep frozen slots current without pinning feedback nodes, or mutating
-      // the coordinates held by an earlier settle op in the log.
-      if (board.placed[id]) {
+      /* Keep frozen slots current without pinning feedback nodes, or mutating
+         the coordinates held by an earlier settle op in the log.
+
+         `hasOwn`, not a truthiness test: a node called `toString` found the
+         prototype's method sitting in `placed`, and froze itself at a position
+         made of two undefineds. Every id on the board comes from an agent, so
+         every lookup keyed by one asks for the object's own. */
+      if (Object.hasOwn(board.placed, id)) {
         board.placed[id] = {
-          col: fields.col ?? board.placed[id].col,
-          row: fields.row ?? board.placed[id].row,
+          col: numbers.col ?? board.placed[id].col,
+          row: numbers.row ?? board.placed[id].row,
         };
       }
       break;
     }
 
     case 'edge': {
-      const { op: _op, ...fields } = op;
+      const { op: _op, step, ...fields } = op;
       if (!fields.from || !fields.to) break;
       if (fields.via !== undefined && !waypoints(fields.via)) {
         return { ok: false, error: 'edge: via must be an array of finite col and row pairs', fresh };
       }
-      /** @type {Edge} */
-      const e = { ...fields, from: fields.from, to: fields.to };
+      /* `step` is the badge this arrow carries, and `null` is how an arrow is
+         told not to carry one — so it passes through where a number is
+         converted. */
+      const badge = step === null ? null
+        : oneNumber(step, 'step', `edge ${fields.from}>${fields.to}`, warnings);
+      const e: Edge = { ...fields, from: fields.from, to: fields.to,
+        ...(badge === undefined ? {} : { step: badge }) };
       overwrittenLabel(board, e, warnings);
       if (upsert(board.edges, e, edgeId, indexesFor(board).edges)) fresh.edges.push(edgeId(e));
       break;
@@ -734,10 +640,9 @@ function applyOne(board, op, sweep, warnings = []) {
        names, which leaves no way to say something *about* a thing without
        crowding it. */
     case 'callout': {
-      const { op: _op, ...fields } = op;
+      const { op: _op, wrap, ...fields } = op;
       const id = fields.id || `callout-${(fields.at || '').replace(/[^a-z0-9]+/gi, '-')}-${board.callouts.length}`;
-      /** @type {Callout} */
-      const c = { ...fields, id };
+      const c: Callout = { ...fields, ...counted({ wrap }, ['wrap'], `callout "${id}"`, warnings), id };
       if (upsert(board.callouts, c, x => x.id, indexesFor(board).callouts)) fresh.boundaries.push(c.id);
       break;
     }
@@ -748,22 +653,22 @@ function applyOne(board, op, sweep, warnings = []) {
         return { ok: false, error: 'boundary: "members" must be an array of string ids', fresh };
       }
       const id = fields.id || (fields.label || 'b').toLowerCase().replace(/[^a-z0-9]+/g, '-');
-      /** @type {Boundary} */
-      const b = { ...fields, id };
+      const b: Boundary = { ...fields, id };
       if (upsert(board.boundaries, b, x => x.id, indexesFor(board).boundaries)) fresh.boundaries.push(b.id);
       break;
     }
 
     case 'step': {
-      const { op: _op, ...step } = op;
+      const { op: _op, _i, ...step } = op;
       /* A string here would not throw — `new Set('ab')` is the two characters —
          it would light nothing and say nothing, which is the harder failure to
          notice. Refused for the same reason as members. */
       if (step.lights !== undefined && !stringIds(step.lights)) {
         return { ok: false, error: 'step: "lights" must be an array of string ids', fresh };
       }
-      if (step.group !== undefined) phase(step, warnings);
-      board.flow.push(step);
+      const hop: FlowStep = { ...step, ...counted({ _i }, ['_i'], 'step', warnings) };
+      if (hop.group !== undefined) phase(hop, warnings);
+      board.flow.push(hop);
       break;
     }
 
@@ -790,17 +695,24 @@ function applyOne(board, op, sweep, warnings = []) {
         return { ok: false, error: `flow: steps[${bad}].lights must be an array of string ids`, fresh };
       }
       board.flow = steps.map(s => {
-        const step = { ...s };
+        const { _i, ...rest } = s;
+        const step: FlowStep = { ...rest, ...counted({ _i }, ['_i'], 'flow', warnings) };
         if (step.group !== undefined) phase(step, warnings);
         return step;
       });
       break;
     }
 
-    case 'focus':
-      board.active = op.step == null ? null
-        : Math.max(0, Math.min(board.flow.length - 1, Number(op.step)));
+    /* Which step the board is walking. A step that is not a number is nothing
+       to walk to, so it focuses nothing — `Number('later')` used to leave NaN
+       in `active`, and a rail asked to light hop NaN lights nothing while the
+       board insists something is focused. */
+    case 'focus': {
+      const step = op.step == null ? undefined : oneNumber(op.step, 'step', 'focus', warnings);
+      board.active = step === undefined ? null
+        : Math.max(0, Math.min(board.flow.length - 1, step));
       break;
+    }
 
     case 'settle': {
       const positions = op.positions;
@@ -816,11 +728,10 @@ function applyOne(board, op, sweep, warnings = []) {
       // Restores and browser replay therefore show exactly the same handover.
       // Compaction copies only the frozen subset. Feedback drawn since then
       // stays unpinned instead of gaining a new layout just because we saved.
-      const frozen = Object.fromEntries(board.nodes.filter(n => positions[n.id]).map(n => [n.id, {
+      const frozen: Placed = Object.fromEntries(board.nodes.filter(n => Object.hasOwn(positions, n.id)).map(n => [n.id, {
         col: positions[n.id].col, row: positions[n.id].row,
       }]));
-      /** @type {NonNullable<SettleOp['routes']>} */
-      const routes = {};
+      const routes: Record<string, Placement[]> = {};
       for (const e of board.edges) {
         const via = op.routes?.[edgeId(e)];
         if (via?.length) {
@@ -830,7 +741,7 @@ function applyOne(board, op, sweep, warnings = []) {
       }
       op = { op: 'settle', positions: frozen, ...(op.routes ? { routes } : {}) };
       for (const n of board.nodes) {
-        if (!frozen[n.id]) continue;
+        if (!Object.hasOwn(frozen, n.id)) continue;
         n.col = frozen[n.id].col;
         n.row = frozen[n.id].row;
       }
@@ -850,8 +761,7 @@ function applyOne(board, op, sweep, warnings = []) {
     default: {
       // The union covers every op above; this is the branch a line of JSON takes
       // when it names something the vocabulary does not know.
-      const unknown = /** @type {{op?: unknown}} */ (op);
-      return { ok: false, error: `unknown op "${String(unknown.op)}"`, fresh };
+      return { ok: false, error: `unknown op "${String(field(op, 'op'))}"`, fresh };
     }
   }
   if (op.op !== 'clear') record();
@@ -859,47 +769,37 @@ function applyOne(board, op, sweep, warnings = []) {
   return { ok: true, fresh, op };
 }
 
-/**
- * @param {Board} board
- * @param {Op} op
- * @returns {ApplyResult}
- */
-export function applyOp(board, op) {
+/* The two doors. They take anything, because they are what refuses it: the
+   browser, a log read back off disk and an amendment's inner ops all arrive
+   here without having been through a compiler. */
+export function applyOp(board: Board, op: unknown): ApplyResult {
   const sweep = newSweep();
+  const fresh: Fresh = { nodes: [], edges: [], boundaries: [] };
+  if (!isOp(op)) return { ok: false, error: notAnOp(op), fresh };
   const result = applyOne(board, op, sweep);
   sweepRemoved(board, sweep);
   return result;
 }
 
-/**
- * @param {Board} board
- * @param {Op|Op[]} ops
- * @returns {ApplyOpsResult}
- */
-export function applyOps(board, ops) {
-  /** @type {Fresh} */
-  const all = { nodes: [], edges: [], boundaries: [] };
-  /** @type {string[]} */
-  const errors = [];
-  /** @type {string[]} */
-  const warnings = [];
-  /** @type {Op[]} */
-  const applied = [];
-  const list = Array.isArray(ops) ? ops : [ops];
+export function applyOps(board: Board, ops: unknown): ApplyOpsResult {
+  const all: Fresh = { nodes: [], edges: [], boundaries: [] };
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const applied: Op[] = [];
+  const list: unknown[] = Array.isArray(ops) ? ops : [ops];
   const sweep = newSweep();
   for (const op of list) {
-    /* Checked here as well as in applyOne because the sweep below reads `op.op`
-       before it gets there, and a value that is not an op cannot see the lists
-       — it must not end the run early and flush a sweep nobody asked for. */
-    const bad = notAnOp(op);
-    if (bad) { errors.push(bad); continue; }
+    /* Checked before the sweep below, which reads `op.op`: a value that is not
+       an op cannot see the lists, so it must not end the run early and flush a
+       sweep nobody asked for. */
+    if (!isOp(op)) { errors.push(notAnOp(op)); continue; }
     // End the run of removes before anything that can see the lists, so the
     // op is applied to the board as if each remove had landed on its own.
     if (sweep.ids.length && TOUCHES_LISTS.has(op.op)) sweepRemoved(board, sweep);
     const r = applyOne(board, op, sweep, warnings);
     if (!r.ok) errors.push(r.error);
     else applied.push(r.op);
-    for (const k of /** @type {(keyof Fresh)[]} */ (Object.keys(all))) all[k].push(...r.fresh[k]);
+    for (const k of ['nodes', 'edges', 'boundaries'] as const) all[k].push(...r.fresh[k]);
   }
   sweepRemoved(board, sweep);
   return { fresh: all, errors, warnings, applied };
@@ -911,10 +811,8 @@ export function applyOps(board, ops) {
    a compacted board replays as a flat rebuild rather than as the session. That
    is acceptable only past LOG_CAP, where the in-memory log has already dropped
    its head; below it, never compact. */
-/** @param {Board} board @returns {Op[]} */
-export function boardOps(board) {
-  /** @type {Op[]} */
-  const ops = [{ op: 'title', text: board.title || '' }];
+export function boardOps(board: Board): Op[] {
+  const ops: Op[] = [{ op: 'title', text: board.title || '' }];
   /* Each chapter rebuilt in the order it was taught, each opened by the op
      that starts it. The first `chapter` lands on an empty surface and so only
      names it, which is exactly what it did the first time round. */
@@ -935,10 +833,8 @@ export function boardOps(board) {
 
 /* One surface as the ops that rebuild it. `at` is the resolved step of each
    line, for a surface whose attribution is not yet on its lines. */
-/** @param {Chapter|Board} s @param {(number|null)[]} [at] @returns {Op[]} */
-function surfaceOps(s, at = []) {
-  /** @type {Op[]} */
-  const ops = [];
+function surfaceOps(s: Chapter | Board, at: (number | null)[] = []): Op[] {
+  const ops: Op[] = [];
   for (const n of s.nodes) ops.push({ op: 'node', ...n });
   for (const b of s.boundaries) ops.push({ op: 'boundary', ...b });
   for (const e of s.edges) ops.push({ op: 'edge', ...e });
@@ -949,8 +845,7 @@ function surfaceOps(s, at = []) {
   for (const [id, label] of Object.entries(s.groups || {})) ops.push({ op: 'group', id, label });
   if (s.flow.length) ops.push({ op: 'flow', steps: s.flow.slice() });
   for (const [i, line] of s.transcript.entries()) {
-    /** @type {SayOp} */
-    const say = { op: 'say', text: line.text };
+    const say: SayOp = { op: 'say', text: line.text };
     const step = line.step ?? at[i];
     if (step != null) say.step = step + 1;
     if (line.edge) say.edge = line.edge;
@@ -962,6 +857,5 @@ function surfaceOps(s, at = []) {
   if (s.active != null) ops.push({ op: 'focus', step: s.active });
   return ops;
 }
-
 
 export { edgeId };
