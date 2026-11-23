@@ -11,7 +11,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Context, Effect, Layer } from 'effect';
 import { SpiegaConfig, SpiegaHome } from './config.js';
+import type { Board, Chapter } from './board.js';
 import { createBoardEvents, type BoardEvents } from './events.js';
+import type { OpLog } from './oplog.js';
 
 export interface BoardSnapshot {
   readonly rev: number;
@@ -21,9 +23,12 @@ export interface BoardSnapshot {
 
 export interface BoardEntry {
   readonly name: string;
-  readonly board: BoardSnapshot;
+  readonly board: Board;
   readonly viewers: number;
   readonly events: BoardEvents;
+  /* Where the ops a board lands go to be saved. Null for a board that is not
+     being saved at all, which draws exactly the same. */
+  readonly log: OpLog | null;
 }
 
 export interface SavedBoardInfo {
@@ -36,6 +41,7 @@ export type SavingStatus =
   | { readonly saving: false; readonly why: 'memory' }
   | { readonly saving: false; readonly why: 'unwritable'; readonly file: string }
   | { readonly saving: false; readonly why: 'other-server'; readonly file: string }
+  | { readonly saving: false; readonly why: 'write-failed'; readonly file: string; readonly error: string }
   | { readonly saving: true; readonly file: string };
 
 export interface BoardStoreShape {
@@ -44,6 +50,13 @@ export interface BoardStoreShape {
   readonly listOpen: () => ReadonlyArray<BoardEntry>;
   readonly listSaved: () => ReadonlyArray<SavedBoardInfo>;
   readonly saving: (name: string) => SavingStatus;
+  /* Let one board go and leave the others drawing: flush its log, drop it and
+     take it off the registry. Resolves to how many boards are still held. */
+  readonly close: (name: string) => Promise<number>;
+  /* What the drawing came out like, for the agent that cannot see it. Null
+     where the board cannot be rendered — the ops landed and an explanation
+     does not stop because the measurement of it failed. */
+  readonly audit: (surface: Board | Chapter) => Promise<unknown>;
 }
 
 /* Every persisted board log on disk, newest first. Deliberately only a
@@ -80,7 +93,7 @@ export class BoardStore extends Context.Service<BoardStore, BoardStoreShape>()(
      Useful for tests that want to exercise the Effect read routes against a
      temp home layer without mutating process.env. */
   static readonly memory = (
-    initial: Readonly<Record<string, BoardSnapshot>> = {},
+    initial: Readonly<Record<string, Board>> = {},
   ): Layer.Layer<BoardStore, never, SpiegaHome | SpiegaConfig> =>
     Layer.effect(
       BoardStore,
@@ -90,7 +103,7 @@ export class BoardStore extends Context.Service<BoardStore, BoardStoreShape>()(
         const entries = new Map<string, BoardEntry>();
         for (const [name, board] of Object.entries(initial)) {
           const events = createBoardEvents();
-          entries.set(name, { name, board, get viewers() { return events.viewers; }, events });
+          entries.set(name, { name, board, get viewers() { return events.viewers; }, events, log: null });
         }
         return BoardStore.of({
           get: (name) => entries.get(name),
@@ -104,6 +117,12 @@ export class BoardStore extends Context.Service<BoardStore, BoardStoreShape>()(
             config.persist
               ? { saving: true, file: home.boardFile(name) }
               : { saving: false, why: 'memory' },
+          close: async (name) => {
+            entries.get(name)?.events.close();
+            entries.delete(name);
+            return entries.size;
+          },
+          audit: async () => null,
         });
       }),
     );

@@ -15,7 +15,8 @@ process.env.USERPROFILE = HOME;
 
 const { createServer, boardFile } = await import('../src/board/server.js');
 const { emptyBoard, applyOps, boardOps, LOG_CAP } = await import('../src/board/state.js');
-const { createLog, restoreBoard } = await import('../src/board/log.js');
+const { openLogFile, restoreBoard } = await import('../src/board/log.js');
+const { createOpLog, createBoardEvents, draw } = await import('../packages/server/src/index.js');
 
 let n = 0;
 const test = async (name, fn) => {
@@ -273,14 +274,16 @@ await test('POST /op does no file I/O and does not wait for the flush', async ()
 
 /* The budget: added latency on POST /op < 0.2 ms p99.
 
-   What that measures is the work the route does per op — applyOps and the
-   buffer push. HTTP and the event loop are not part of it, and would make the
-   number about localhost rather than about persistence. A write, an await, or
-   the old findIndex scan put back into this path fails here. */
+   What that measures is the work the route does per op — `draw`, which screens
+   the op against the Schema, applies it, hands it to the log's queue and
+   builds the reply. HTTP and the event loop are not part of it, and would make
+   the number about localhost rather than about persistence. A write, an await,
+   or the old findIndex scan put back into this path fails here. */
 await test('the per-op work on POST /op stays under 0.2 ms p99', async () => {
   const board = emptyBoard();
   const file = path.join(HOME, 'bench.jsonl');
-  const log = createLog(file, { debounce: 1e9, snapshot: () => boardOps(board) });
+  const log = createOpLog(openLogFile(file, { snapshot: () => boardOps(board) }), { debounce: 1e9 });
+  const entry = { name: 'bench', board, viewers: 0, events: createBoardEvents(), log };
   const samples = [];
   for (let i = 0; i < 3000; i++) {
     const op = i % 3 === 0
@@ -289,12 +292,12 @@ await test('the per-op work on POST /op stays under 0.2 ms p99', async () => {
         ? { op: 'node', id: 'n' + (i % 40), label: 'N' + (i % 40) }
         : { op: 'edge', from: 'n' + (i % 40), to: 'n' + ((i + 1) % 40) };
     const t0 = process.hrtime.bigint();
-    const r = applyOps(board, [op]);
-    log.push(r.applied);
+    draw(entry, { ops: [op] });
     samples.push(Number(process.hrtime.bigint() - t0) / 1e6);
   }
   samples.sort((a, b) => a - b);
   const p99 = samples[Math.floor(samples.length * 0.99)];
+  console.log(`        p99 ${p99.toFixed(4)} ms (budget 0.2 ms), median ${samples[1500].toFixed(4)} ms, max ${samples[2999].toFixed(3)} ms`);
   assert.ok(p99 < 0.2, `p99 was ${p99.toFixed(3)} ms, budget 0.2 ms`);
   await log.close();
 });
@@ -335,7 +338,7 @@ await test('restore of a typical session and of a capped one stay quick', async 
 // file exits with its status instead of hanging on a socket
 await test('a tidy shutdown leaves no lock behind', async () => {
   const file = boardFile('tidy');
-  const log = createLog(file, {});
+  const log = createOpLog(openLogFile(file));
   assert.equal(log.owner, true, 'the first writer owns the board');
   assert.ok(fs.existsSync(file + '.lock'), 'and holds a lock while it does');
   log.push([{ op: 'node', id: 'a', kind: 'service', label: 'A' }]);

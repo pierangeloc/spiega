@@ -1569,7 +1569,9 @@ function setSaving(s) {
   if (!why) return;
   $('unsavedwhy').textContent = why === 'other-server'
     ? 'another spiega owns this board\u2019s file \u2014 nothing drawn here will survive a restart'
-    : 'this board\u2019s file could not be opened \u2014 nothing drawn here will survive a restart';
+    : why === 'write-failed'
+      ? 'writing this board\u2019s file is failing (' + (s.error || 'unknown error') + ') \u2014 what is drawn since will not survive a restart unless it recovers'
+      : 'this board\u2019s file could not be opened \u2014 nothing drawn here will survive a restart';
 }
 
 function connect() {

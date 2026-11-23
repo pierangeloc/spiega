@@ -97,93 +97,47 @@ const releaseLock = lockFile => {
   } catch { /* not ours, or already gone */ }
 };
 
-/* A buffered append-only log.
+/* The file half of the append-only log: the lock, the append, the compaction.
 
-   `push` is the request path and does nothing but put op objects in an array.
-   The first push arms a short timer; the timer stringifies and appends the
-   batch in one write. No fsync, no rewriting: a hard crash may lose the last
-   tick of ops, which is the trade this is allowed to make. */
-export function createLog(file, { lines = 0, tail = true, debounce = 100, snapshot = null } = {}) {
+   Nothing here buffers or keeps time. What to write, and when, belongs to the
+   queue and the flush fiber in packages/server/src/oplog.ts, because the route
+   that feeds it is on the critical path of somebody talking and must be able to
+   hand ops over without ever touching this. Every method returns a promise, or
+   nothing, and none is called from a request. No fsync, no rewriting: a hard
+   crash may lose the last tick of ops, which is the trade this is allowed to
+   make. */
+export function openLogFile(file, { lines = 0, tail = true, snapshot = null } = {}) {
   const lockFile = file + '.lock';
-  let owned = acquireLock(lockFile);
-  let pending = [];
-  let timer = null;
-  let chain = Promise.resolve();
-  let closed = false;
+  const owned = acquireLock(lockFile);
   let lineCount = lines;
   let needsNewline = !tail;
-
-  const arm = () => {
-    if (timer || closed) return;
-    timer = setTimeout(() => { timer = null; flush(); }, debounce);
-    timer.unref?.();
-  };
-
-  const append = async data => {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    await fs.promises.appendFile(file, (needsNewline ? '\n' : '') + data, 'utf8');
-    needsNewline = false;
-  };
-
-  const compact = async () => {
-    if (!snapshot) return;
-    const ops = snapshot();
-    const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    await fs.promises.writeFile(tmp, ops.map(op => JSON.stringify(op)).join('\n') + '\n', 'utf8');
-    await fs.promises.rename(tmp, file);
-    lineCount = ops.length;
-    needsNewline = false;
-  };
-
-  const flush = () => {
-    if (timer) { clearTimeout(timer); timer = null; }
-    if (!owned) return chain;
-    const batch = pending;
-    pending = [];
-    if (!batch.length) return chain;
-    chain = chain.then(async () => {
-      try {
-        await append(batch.map(op => JSON.stringify(op)).join('\n') + '\n');
-      } catch (e) {
-        // The board keeps working; losing the write is better than taking the
-        // server down mid-sentence. Put the ops back so the next flush retries.
-        pending = batch.concat(pending);
-        arm();
-        if (!flush.warned) { flush.warned = true; console.error(`spiega: could not write ${file}: ${e.message}`); }
-        return;
-      }
-      lineCount += batch.length;
-      // Compact only when the file has passed the cap and nothing is waiting:
-      // a snapshot taken while ops are still buffered would write them twice.
-      if (lineCount > LOG_CAP && pending.length === 0) {
-        try { await compact(); }
-        catch (e) {
-          if (!flush.warned) { flush.warned = true; console.error(`spiega: could not compact ${file}: ${e.message}`); }
-        }
-      }
-    });
-    return chain;
-  };
+  let released = false;
 
   return {
     get file() { return file; },
     get owner() { return owned; },
     get lines() { return lineCount; },
-    push(ops) {
-      if (closed || !owned) return;
-      for (const op of [].concat(ops)) pending.push(op);
-      arm();
+    async append(ops) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const data = ops.map(op => JSON.stringify(op)).join('\n') + '\n';
+      await fs.promises.appendFile(file, (needsNewline ? '\n' : '') + data, 'utf8');
+      needsNewline = false;
+      lineCount += ops.length;
     },
-    flush,
-    compact,
-    async close() {
-      if (closed) return chain;
-      closed = true;
-      if (timer) { clearTimeout(timer); timer = null; }
-      await flush();
+    async compact() {
+      if (!snapshot) return;
+      const ops = snapshot();
+      const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      await fs.promises.writeFile(tmp, ops.map(op => JSON.stringify(op)).join('\n') + '\n', 'utf8');
+      await fs.promises.rename(tmp, file);
+      lineCount = ops.length;
+      needsNewline = false;
+    },
+    release() {
+      if (released) return;
+      released = true;
       if (owned) releaseLock(lockFile);
-      return chain;
     },
   };
 }

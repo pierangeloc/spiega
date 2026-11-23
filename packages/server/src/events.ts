@@ -12,7 +12,7 @@ interface Revision {
 export interface BoardEvents {
   readonly viewers: number;
   readonly pending: number;
-  readonly publish: (event: 'patch' | 'replay', data: unknown) => void;
+  readonly publish: (event: 'patch' | 'replay' | 'saving', data: unknown) => void;
   readonly close: () => void;
   readonly stream: (
     board: () => BoardSnapshot,

@@ -125,7 +125,7 @@ runtime dependency, and the browser-rule exemption for
 | | | unblocks |
 |---|---|---|
 | #143 | Port `edges` and `callout` (Phase 2) | #144 → #145 → #153 (the render critical path) |
-| #148 | `POST /op` on Effect, still off the hot path (Phase 3) | the rest of phase 3 — watch the p99 budget |
+| #148 | `POST /op` on Effect, still off the hot path (Phase 3) | **in review** — draw, settle and close on the Effect router; `Queue` + flush fiber in `packages/server/src/oplog.ts`; the rest of phase 3 — watch the p99 budget |
 | #150 | Snapshot, export and the board window on Effect (Phase 3) | #158 |
 
 #148 and #150 both touch `src/board/server.js`; #143 does not touch either. If

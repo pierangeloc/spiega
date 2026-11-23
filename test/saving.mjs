@@ -122,9 +122,82 @@ await test('the board raises the banner for exactly the boards that are not save
   assert.match(shown({ saving: false, why: 'other-server', file: '/x' }), /another spiega/);
   assert.match(shown({ saving: false, why: 'other-server', file: '/x' }), /will not survive|survive a restart/);
   assert.match(shown({ saving: false, why: 'unwritable', file: '/x' }), /could not be opened/);
+  const failing = shown({ saving: false, why: 'write-failed', file: '/x', error: 'ENOSPC: no space left on device' });
+  assert.match(failing, /writing this board.s file is failing \(ENOSPC: no space left on device\)/,
+    'a board whose writes are failing says what the disk said');
+  assert.match(failing, /will not survive a restart/);
+  assert.equal(shown({ saving: true, file: '/x' }), null, 'and the banner clears when it recovers');
 
   assert.match(html, /addEventListener\('saving'/,
     'the banner is useless if nothing listens for the event the server sends');
+});
+
+/* The failure that starts part-way through. A board that was being saved, and
+   then is not, draws exactly as before — so the draw must not fail, and the
+   board has to say so, on the stream a viewer is already holding as well as on
+   /whoami. A directory where the file should be makes every append fail. */
+await test('a write that fails does not fail the draw, and the board says so, and says when it recovers', async () => {
+  const name = 'failing';
+  const file = path.join(HOME, '.spiega', 'boards', `${name}.jsonl`);
+  fs.mkdirSync(file, { recursive: true });
+  const { app, U } = await listen(name, { debounce: 60_000 });
+
+  const res = await fetch(U + '/events', { headers: { accept: 'text/event-stream' } });
+  const reader = res.body.getReader();
+  let buf = '';
+  const savingFrames = [];
+  const frames = async until => {
+    for (let i = 0; i < 50 && !until(); i++) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += Buffer.from(value).toString('utf8');
+      for (let m; (m = buf.match(/event: saving\ndata: (.*)\n\n/));) {
+        savingFrames.push(JSON.parse(m[1]));
+        buf = buf.slice(m.index + m[0].length);
+      }
+    }
+  };
+  const warned = [];
+  const saved = console.error;
+  console.error = (...a) => { warned.push(a.join(' ')); };
+  try {
+    await frames(() => savingFrames.length >= 1);
+    assert.equal(savingFrames[0].saving, true, 'saving, as far as anybody knows, until a write fails');
+
+    const r = await fetch(U + '/op', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ops: [{ op: 'node', id: 'kept', kind: 'service', label: 'Kept' }] }),
+    });
+    assert.equal(r.status, 200, 'the draw must not fail because the log cannot be written');
+    assert.equal((await r.json()).ok, true);
+    assert.equal((await whoami(U)).saving, true, 'nothing has been written yet, so nothing has failed yet');
+
+    await app.flush();
+    await frames(() => savingFrames.length >= 2);
+    assert.equal(savingFrames[1].saving, false);
+    assert.equal(savingFrames[1].why, 'write-failed', 'the viewer already on the board is told');
+    assert.equal(savingFrames[1].file, file);
+    assert.match(savingFrames[1].error, /EISDIR/);
+
+    const who = await whoami(U);
+    assert.deepEqual([who.saving, who.why], [false, 'write-failed'], 'and so is whoever connects next');
+    assert.equal((await firstSaving(U)).why, 'write-failed');
+    assert.equal(warned.filter(l => l.includes('could not write')).length, 1, 'the terminal hears about it once');
+
+    const st = await (await fetch(U + '/state')).json();
+    assert.deepEqual(st.nodes.map(x => x.id), ['kept'], 'the board is still drawn on');
+
+    // the disk comes back: the ops that were kept are written, and the board says that too
+    fs.rmSync(file, { recursive: true });
+    await app.flush();
+    await frames(() => savingFrames.length >= 3);
+    assert.equal(savingFrames[2].saving, true, 'a banner that never clears would be a second lie');
+    assert.equal((await whoami(U)).saving, true);
+    assert.ok(fs.readFileSync(file, 'utf8').includes('"kept"'), 'nothing that was drawn while it failed was lost');
+  } finally {
+    console.error = saved;
+    try { await reader.cancel(); } catch {}
+  }
 });
 
 for (const s of SERVERS) s.close();
