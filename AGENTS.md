@@ -175,10 +175,12 @@ rsvg-convert -z 2 docs/shapes/vessel.svg -o /tmp/v.png
 Compare a new shape against the one it could be confused with — a neutral
 `vessel` next to `datastore`, not on its own.
 
-Unlike `docs/gallery`, `docs/examples` and `docs/regressions`, the shape
-gallery is **not** byte-checked by the suite, so nothing tells you it has gone
-stale — it has drifted at least once already. If you touch a glyph, run it and
-commit what comes out.
+The gallery is byte-checked by the suite, like `docs/gallery`,
+`docs/examples` and `docs/regressions`: if you touch a glyph, run it and commit
+what comes out, or the suite fails naming the files you did not regenerate. It
+is checked because it drifted once while nothing was watching — the committed
+glyphs had been drawn by an older renderer, and `docs/vocabulary.md` points at
+them instead of describing them.
 
 ### The board's own CSS
 
