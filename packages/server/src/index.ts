@@ -1,6 +1,6 @@
 /* ============================================================
    @spiega/server — the Effect HTTP board server, security middleware,
-   and configuration services.
+   configuration services, and the board's own window.
    ============================================================ */
 
 export {
@@ -39,11 +39,47 @@ export {
   type SavingStatus,
 } from './store.js';
 
-export { BoardApp, MIME, ReadApp, ReadRoutes, WriteRoutes } from './routes.js';
-export { ApplyFailed, BoardNotFound, InvalidJson, LogWriteError, NotJson } from './errors.js';
+export { BoardApp, MIME, ReadApp, ReadRoutes, RenderRoutes, WriteRoutes } from './routes.js';
+export {
+  ApplyFailed,
+  BoardNotFound,
+  InvalidJson,
+  LaunchFailed,
+  LogWriteError,
+  NoBoardWindow,
+  NoBrowserRunning,
+  NoSuchChapter,
+  NoWindowRaising,
+  NotJson,
+  RenderFailed,
+} from './errors.js';
 export { createOpLog, makeOpLog, type LogFile, type OpLog, type OpLogHandle, type OpLogOptions } from './oplog.js';
 export { draw, settle, type Drawn } from './ops.js';
 export { createBoardEvents, type BoardEvents } from './events.js';
+
+export {
+  BROWSER_APPS,
+  BoardWindows,
+  Desktop,
+  OPENING_MS,
+  findChromium,
+  focusBoard,
+  liveWindows,
+  noteOpened,
+  notRaisedHow,
+  openBoard,
+  openedAt,
+  runningBrowsers,
+  showBoard,
+  type BoardWindowsShape,
+  type DesktopShape,
+  type Found,
+  type NotRaised,
+  type OpenOptions,
+  type Opened,
+  type Raised,
+  type Shown,
+} from './window.js';
 
 export {
   createBoardReadBridge,
@@ -52,6 +88,7 @@ export {
   createReadNodeServer,
   createReadWebHandler,
   isReadRoute,
+  isRenderRoute,
   isWriteRoute,
   type ReadAppServices,
   type ReadBridge,

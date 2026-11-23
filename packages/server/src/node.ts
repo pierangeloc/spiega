@@ -7,11 +7,13 @@
    Entry points:
    - `createReadWebHandler` / `createBoardWebHandler`: pure Fetch Request ->
      Response handlers for direct in-process Effect testing without binding a
-     socket, over the read routes alone and over the read and write routes.
+     socket, over the read routes alone and over every route.
    - `createReadBridge`: `handle(req, res): Promise<boolean>` used by
-     `src/board/server.js` so every security check, every read route and the
-     write routes (draw, settle, close) run through Effect's HttpRouter. What
-     it declines is for the legacy handler, until #150 moves it.
+     `src/board/server.js` so every security check, every read route, the
+     write routes (draw, settle, close) and the routes that draw a board into
+     a file (export, snapshot, snapshot.svg) run through Effect's HttpRouter.
+     What it declines — creating a board and /replay — is for the legacy
+     handler.
    - `createReadNodeServer`: a standalone `node:http.Server` serving only the
      Effect read app, for HTTP-level tests (including raw Host headers).
    ============================================================ */
@@ -50,9 +52,9 @@ export const createBoardWebHandler = (
   });
 
 /* Which requests belong to the Effect read router.
-   Creating a board (/boards POST) and the render routes (/replay, /export,
-   /snapshot, /snapshot.svg) return false so src/board/server.js handles them
-   until #150 moves them. */
+   Creating a board (/boards POST) and /replay return false so
+   src/board/server.js handles them; the routes that draw a board into a file
+   are claimed by `isRenderRoute`. */
 export const isReadRoute = (method: string, pathname: string): boolean => {
   if (method !== 'GET') return false;
   if (
@@ -79,6 +81,15 @@ export const isWriteRoute = (method: string, pathname: string): boolean => {
   const m = /^\/b\/([^/]+)(\/.*)?$/.exec(pathname);
   const rest = m?.[2];
   return rest === '/op' || rest === '/settle' || rest === '/close';
+};
+
+/* The routes that draw a board into a file: the export, the snapshot and the
+   bare SVG. GET only, as the read routes are. */
+export const isRenderRoute = (method: string, pathname: string): boolean => {
+  if (method !== 'GET') return false;
+  const m = /^\/b\/([^/]+)(\/.*)?$/.exec(pathname);
+  const rest = m?.[2];
+  return rest === '/export' || rest === '/snapshot' || rest === '/snapshot.svg';
 };
 
 /* Convert a Node IncomingMessage (headers + method + url) into a Web Request.
@@ -176,14 +187,15 @@ export const createReadBridge = (
     const origin = req.headers.origin;
     const pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname;
 
-    // Security rejections, OPTIONS preflights, and the read and write routes
-    // are handled by the Effect HttpRouter + SecurityMiddleware.
+    // Security rejections, OPTIONS preflights, and the read, write and render
+    // routes are handled by the Effect HttpRouter + SecurityMiddleware.
     const writes = isWriteRoute(method, pathname);
     const mustHandle =
       !isLoopbackHost(host) ||
       !isSameOrAbsentOrigin(origin, host) ||
       method === 'OPTIONS' ||
       isReadRoute(method, pathname) ||
+      isRenderRoute(method, pathname) ||
       writes;
 
     if (!mustHandle) return false;
