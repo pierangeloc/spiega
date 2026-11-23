@@ -11,17 +11,18 @@ import fs from 'node:fs';
 import { renderSVG } from '../render/render.js';
 import { lineStates, groupRuns } from './script.js';
 import { PAPER, PANEL, INK, MUTED, RULE, SOFT, ACCENT, MONO, paperTexture } from '../render/theme.js';
+import type { Board } from './state.js';
 
-const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-const mdish = s => esc(s)
+const esc = (s: unknown): string => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const mdish = (s: unknown): string => esc(s)
   .replace(/`([^`]+)`/g, '<code>$1</code>')
   .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
 
 /* The icon, inlined rather than linked: a snapshot is one file you can mail,
    and a <link> to the server would make it stop being that the moment the
    server goes away. There is a test for standalone, so keep it that way. */
-let ICON;
-function iconURI() {
+let ICON: string | undefined;
+function iconURI(): string {
   if (ICON !== undefined) return ICON;
   try {
     const file = new URL('../../docs/logo/spiega-mark.svg', import.meta.url);
@@ -32,12 +33,20 @@ function iconURI() {
   return ICON;
 }
 
-function favicon() {
+function favicon(): string {
   const uri = iconURI();
   return uri ? `<link rel="icon" type="image/svg+xml" href="${uri}">` : '';
 }
 
-export function snapshotHTML(board, { active = null, title = null } = {}) {
+/* `active` is the step to light, counting from 0: a number from the CLI, the
+   query string's own text from GET /snapshot, and nothing at all for the step
+   the board is on. */
+export type SnapshotOptions = {
+  active?: number | string | null,
+  title?: string | null,
+};
+
+export function snapshotHTML(board: Board, { active = null, title = null }: SnapshotOptions = {}): string {
   const step = active == null || active === '' ? board.active : Number(active);
   // The same filter-free render the live board uses, with the grain as a CSS
   // overlay: the SVG hand filter multiplies noise over every fill and visibly

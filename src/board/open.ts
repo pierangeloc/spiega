@@ -15,32 +15,34 @@ import path from 'node:path';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { SESSION_DIR } from './server.js';
 
-const MAC = {
+const MAC: Record<string, string> = {
   chrome:   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
   brave:    '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
   edge:     '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
   chromium: '/Applications/Chromium.app/Contents/MacOS/Chromium',
 };
 
-const LINUX = {
+const LINUX: Record<string, string[]> = {
   chrome:   ['google-chrome', 'google-chrome-stable'],
   brave:    ['brave-browser', 'brave'],
   chromium: ['chromium', 'chromium-browser'],
   edge:     ['microsoft-edge'],
 };
 
-const WIN = {
+const WIN: Record<string, string> = {
   chrome: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
   edge:   'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
   brave:  'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
 };
 
-const onPath = bin => spawnSync('which', [bin], { stdio: 'ignore' }).status === 0;
+const onPath = (bin: string): boolean => spawnSync('which', [bin], { stdio: 'ignore' }).status === 0;
 
 const ORDER = ['chrome', 'brave', 'chromium', 'edge'];
 
+export type Found = { name: string, cmd: string };
+
 /* Find a Chromium-family browser that can do app mode, or null. */
-export function findChromium(preferred = null) {
+export function findChromium(preferred: string | null = null): Found | null {
   const order = preferred ? [preferred, ...ORDER.filter(n => n !== preferred)] : ORDER;
   for (const name of order) {
     if (process.platform === 'darwin') {
@@ -54,9 +56,18 @@ export function findChromium(preferred = null) {
   return null;
 }
 
+/* `size` and `pos` are `WxH` and `X,Y`, as they come off the command line. */
+export type OpenOptions = {
+  app?: boolean,
+  size?: string | number | null,
+  pos?: string | number | null,
+  browser?: string | null,
+};
+export type Opened = { how: string, app: boolean };
+
 /* Open `url` and return how it was opened, so the caller can say so.
    `app: false`, or no Chromium anywhere, falls back to the default browser. */
-export function openBoard(url, { app = true, size = null, pos = null, browser = null } = {}) {
+export function openBoard(url: string, { app = true, size = null, pos = null, browser = null }: OpenOptions = {}): Opened {
   const found = app ? findChromium(browser) : null;
 
   if (found) {
@@ -96,8 +107,8 @@ export function openBoard(url, { app = true, size = null, pos = null, browser = 
    that does not exist — which it reports on stderr, in front of the person. */
 export const BROWSER_APPS = ['Google Chrome', 'Brave Browser', 'Chromium', 'Microsoft Edge'];
 
-export function runningBrowsers(psOutput) {
-  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export function runningBrowsers(psOutput?: string | null): string[] {
+  const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return BROWSER_APPS.filter(app =>
     new RegExp(`/${esc(app)}\\.app/Contents/MacOS/[^/]+$`, 'm').test(psOutput || ''));
 }
@@ -119,9 +130,18 @@ export function runningBrowsers(psOutput) {
 
    The two halves are injected so the decision can be tested without a browser
    or a window server; see test/smoke.mjs. */
-export function showBoard(url, name, { app = true, size = null, pos = null, browser = null,
+export type Focused = { ok: boolean, how: string };
+export type ShowOptions = OpenOptions & {
+  focus?: (name: string, url: string) => Focused,
+  open?: (url: string, opts: OpenOptions) => Opened,
+  opened?: (name: string) => number,
+  note?: (name: string) => void,
+};
+export type Shown = (Focused & { raised: true }) | (Opened & { raised: false });
+
+export function showBoard(url: string, name: string, { app = true, size = null, pos = null, browser = null,
                                        focus = focusBoard, open = openBoard,
-                                       opened = openedAt, note = noteOpened } = {}) {
+                                       opened = openedAt, note = noteOpened }: ShowOptions = {}): Shown {
   if (name) {
     const r = focus(name, url);
     if (r.ok) return { ...r, raised: true };
@@ -142,14 +162,23 @@ export function showBoard(url, name, { app = true, size = null, pos = null, brow
    waiting is one call reporting "opening", and the cost of not waiting is a
    duplicate window that looks like a second board. */
 const OPENING_MS = 10_000;
-const windowsFile = () => path.join(SESSION_DIR, 'windows.json');
-const readOpened = () => { try { return JSON.parse(fs.readFileSync(windowsFile(), 'utf8')); } catch { return {}; } };
+const windowsFile = (): string => path.join(SESSION_DIR, 'windows.json');
 
-export const openedAt = name => Number(readOpened()[name]) || 0;
+/* Board name to when a window was last opened for it. */
+const readOpened = (): Record<string, unknown> => {
+  const all: Record<string, unknown> = {};
+  try {
+    const read: unknown = JSON.parse(fs.readFileSync(windowsFile(), 'utf8'));
+    if (read !== null && typeof read === 'object') for (const k of Object.keys(read)) all[k] = Reflect.get(read, k);
+  } catch { /* none yet */ }
+  return all;
+};
+
+export const openedAt = (name: string): number => Number(readOpened()[name]) || 0;
 
 /* Across processes, because the repeat caller is often a second `spiega open`
    rather than a second call in one agent. */
-export function noteOpened(name, when = Date.now()) {
+export function noteOpened(name: string, when: number = Date.now()): void {
   try {
     const all = readOpened();
     all[name] = when;
@@ -159,7 +188,7 @@ export function noteOpened(name, when = Date.now()) {
   } catch { /* unwritable state dir: the grace period is a nicety */ }
 }
 
-export function focusBoard(name, url) {
+export function focusBoard(name: string, url: string): Focused {
   if (process.platform !== 'darwin') {
     return { ok: false, how: `no window raising on ${process.platform} yet \u2014 open ${url}` };
   }

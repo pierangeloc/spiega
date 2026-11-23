@@ -4,19 +4,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { Board } from './state.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const page = () => fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
+const page = (): string => fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
 const specifier = /\b(?:from\s*|import\s*\()\s*(['"])(\.{1,2}\/[^'"]+)\1/g;
 
-function modules(source) {
-  const imports = {};
-  const visit = name => {
+function modules(source: string): Record<string, string> {
+  const imports: Record<string, string> = {};
+  const visit = (name: string): void => {
     if (imports[`spiega:${name}`]) return;
     const file = path.join(ROOT, name.slice(1));
     let code = fs.readFileSync(file, 'utf8');
-    const children = [];
-    code = code.replace(specifier, (match, quote, relative) => {
+    const children: string[] = [];
+    code = code.replace(specifier, (match: string, quote: string, relative: string) => {
       const target = path.posix.normalize(path.posix.join(path.posix.dirname(name), relative));
       children.push(target);
       return match.replace(relative, `spiega:${target}`);
@@ -28,9 +29,18 @@ function modules(source) {
   return imports;
 }
 
-const safeJSON = value => JSON.stringify(value).replace(/</g, '\\u003c');
+const safeJSON = (value: unknown): string => JSON.stringify(value).replace(/</g, '\\u003c');
 
-export function exportHTML(board, { chapter = null, viewing = null, active = null } = {}) {
+/* Which part of the board, and which view of it, the file opens on. `viewing`
+   is a chapter's index or one of the page's own tabs; `active` is the lit
+   step, counting from 0. */
+export type ExportOptions = {
+  chapter?: number | null,
+  viewing?: number | 'live' | 'map' | null,
+  active?: number | null,
+};
+
+export function exportHTML(board: Board, { chapter = null, viewing = null, active = null }: ExportOptions = {}): string {
   if (chapter !== null && (!Number.isInteger(chapter) || chapter < 0 || chapter > (board.chapters?.length || 0))) {
     throw new Error('no such chapter');
   }
@@ -48,5 +58,5 @@ export function exportHTML(board, { chapter = null, viewing = null, active = nul
   return html
     .replace('<link rel="icon" type="image/svg+xml" href="/icon.svg">', '')
     .replace('<script type="module">', `<script>window.__SPIEGA_EXPORT__=${safeJSON(config)}</script>\n<script type="importmap">${safeJSON({ imports })}</script>\n<script type="module">`)
-    .replaceAll(/from '([^']*\/src\/[^']+)'/g, (_, spec) => `from 'spiega:${spec}'`);
+    .replaceAll(/from '([^']*\/src\/[^']+)'/g, (_, spec: string) => `from 'spiega:${spec}'`);
 }

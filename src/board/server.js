@@ -79,24 +79,9 @@ const json = (res, code, body) => {
   res.end(s);
 };
 
-/* A board that cannot be drawn has to say so, and one bad board must not stop
-   the others.
-
-   A throw on a render route rejects inside the request handler, and an
-   unhandled rejection takes the process — and every board in it — down. So a
-   render costs its own render: a 500 with the reason, while the rest of the
-   server carries on. The door refuses the malformed ops a model actually
-   writes (see state.js), but state can also arrive from a log written before
-   that, and this is what keeps it a broken picture rather than a dead server. */
-const failedRender = (res, e) => {
-  const message = e && e.message ? e.message : String(e);
-  res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });
-  return res.end(`spiega could not draw this board: ${message}\n`);
-};
-
-/* The same rule for the route a model actually posts to, mid-sentence. Its
-   callers parse the answer, so a failed batch answers in the shape they expect
-   rather than as plain text they would choke on. */
+/* A throw while settling must cost the request, not the process — one process
+   holds every board. Its callers parse the answer, so a failed batch answers in
+   the shape they expect rather than as plain text they would choke on. */
 const failedOp = (res, e) => {
   const message = e && e.message ? e.message : String(e);
   return json(res, 500, { ok: false, error: `spiega could not apply these ops: ${message}` });
@@ -225,8 +210,8 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
   const broadcast = (entry, event, data) => entry.events?.publish(event, data);
   const viewers = entry => entry.events?.viewers ?? 0;
 
-  /* The same settle as POST /settle, for the routes that still need a settled
-     board before they draw it. */
+  /* The same settle as POST /settle, for /replay, which still needs a settled
+     board before it plays one back. */
   const settle = entry => pkg.settle(readEntry(entry));
 
   const readEntry = entry => ({
@@ -246,9 +231,10 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
   /* The Effect HTTP router handles all security checks (loopback host,
      same-origin-or-absent origin, silent OPTIONS, no CORS headers), every read
      route (/icon.svg, /src/*, /, /index.html, /boards GET, /b/:name,
-     /b/:name/, /b/:name/state, /b/:name/whoami, /b/:name/events) and the
-     routes that change a board: POST /b/:name/op, /settle and /close. What it
-     declines is answered below. */
+     /b/:name/, /b/:name/state, /b/:name/whoami, /b/:name/events), the routes
+     that change a board (POST /b/:name/op, /settle and /close) and the ones
+     that draw it into a file (GET /b/:name/export, /snapshot, /snapshot.svg).
+     What it declines is answered below. */
   const { isJsonContentType } = pkg;
   const bridge = pkg.createBoardReadBridge(
     { rootDir: ROOT, port: PORT, defaultBoard: DEFAULT_BOARD, persist, baseUrl: () => app.url },
@@ -342,48 +328,6 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
       const drawable = board.log.filter(e => e.op !== 'focus' && e.op !== 'clear').length;
       if (drawable) broadcast(entry, 'replay', { rev: board.rev });
       return json(res, 200, { ok: !!drawable, ops: drawable, viewers: viewers(entry) });
-    }
-
-    // The board as one standalone file, for pasting into a PR or a doc.
-    if (rest === '/export') {
-      try { settle(entry); } catch (e) { return failedRender(res, e); }
-      const { exportHTML } = await import('./export.js');
-      const scope = url.searchParams.get('scope');
-      const chapter = Number(url.searchParams.get('chapter'));
-      if (scope === 'chapter' && (!Number.isInteger(chapter) || chapter < 0 || chapter > board.chapters.length)) {
-        return json(res, 400, { ok: false, error: 'no such chapter' });
-      }
-      let html;
-      try {
-        html = exportHTML(board, {
-          chapter: scope === 'chapter' ? chapter : null,
-          viewing: scope === 'all' && url.searchParams.has('viewing')
-            ? (['live', 'map'].includes(url.searchParams.get('viewing'))
-              ? url.searchParams.get('viewing') : Number(url.searchParams.get('viewing')))
-            : null,
-          active: url.searchParams.has('step') ? Number(url.searchParams.get('step')) : null,
-        });
-      } catch (e) { return failedRender(res, e); }
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-disposition': 'attachment; filename="spiega-board.html"' });
-      return res.end(html);
-    }
-    if (rest === '/snapshot') {
-      try { settle(entry); } catch (e) { return failedRender(res, e); }
-      const { snapshotHTML } = await import('./snapshot.js');
-      let html;
-      try { html = snapshotHTML(board, { active: url.searchParams.get('step') }); }
-      catch (e) { return failedRender(res, e); }
-      res.writeHead(200, { 'content-type': 'text/html' });
-      return res.end(html);
-    }
-    if (rest === '/snapshot.svg') {
-      try { settle(entry); } catch (e) { return failedRender(res, e); }
-      const { renderSVG } = await import('../render/render.js');
-      let svg;
-      try { svg = renderSVG(board, { margin: 16, active: board.active }).svg; }
-      catch (e) { return failedRender(res, e); }
-      res.writeHead(200, { 'content-type': 'image/svg+xml' });
-      return res.end(svg);
     }
 
     res.writeHead(404); res.end('not found');
