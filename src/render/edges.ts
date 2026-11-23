@@ -10,16 +10,50 @@
 
 import { INK, MUTED, ACCENT, PANEL, PAPER } from './theme.js';
 import { roughLine, roughPoly, roughRect, roughEllipse, stroke, fill, text, arrowHead, hashSeed, lettering, tagLines, pillSize } from './ink.js';
+import type { Pt } from './ink.js';
+import type { Edge } from '@spiega/core';
 import { backEdges, KNEE, EDGE_GAP } from './layout.js';
 
 const GAP = EDGE_GAP;      // breathing room between a box edge and its line
 const FAN = 0.52;          // how much of a side's length the fan may spread over
 
-export const center = b => [b.x + b.w / 2, b.y + b.h / 2];
-export const edgeKey = e => `${e.from}>${e.to}`;
+/* The four sides a line leaves from or arrives at. */
+type Side = 'left' | 'right' | 'top' | 'bottom';
+
+/* A box, as layout hands it over. The optional fields are what a convex glyph
+   adds when its ink is not the box: `inkAt` and `inkSpan` say how far inside a
+   side the outline sits, and `labelBelow` is the strip a queue's words add
+   beneath it. */
+type Box = {
+  x: number, y: number, w: number, h: number,
+  labelBelow?: number, col?: number, row?: number,
+  inkAt?: (side: string, along: number) => { inset: number, slide: number },
+  inkSpan?: (side: string) => { lo: number, hi: number } | null,
+};
+
+/* One routed edge: the spec it came from, the two boxes it leaves and arrives
+   at, the sides it uses on each, and the route planEdges filled in. `ta` and
+   `tb` are where along those sides the line attaches, `pts` the polyline it
+   actually draws, and `lane` the knee offset spreadKnees gave it. */
+type Route = {
+  e: Edge,
+  a: Box, b: Box,
+  sa: Side, sb: Side,
+  key: string,
+  back: boolean,
+  floor: number,
+  via?: Box[],
+  gutterA: number, gutterB: number,
+  ta: number, tb: number,
+  pts: Pt[],
+  lane?: number,
+};
+
+export const center = (b: Box): Pt => [b.x + b.w / 2, b.y + b.h / 2];
+export const edgeKey = (e: { from: string, to: string }): string => `${e.from}>${e.to}`;
 
 /* Which side of its box does this edge leave from / arrive at? */
-function sides(a, b) {
+function sides(a: Box, b: Box): [Side, Side] {
   const ca = center(a), cb = center(b);
   const colA = a.col ?? 0, colB = b.col ?? 0;
   if (colB > colA) return ['right', 'left'];
@@ -32,7 +66,7 @@ function sides(a, b) {
    box.y + box.h ran down through its own label: the closing edge of a cycle
    left the DLQ and struck its name through, which read as `D|Q`. Every other
    side clears the drawing by GAP, and this one has to clear the words too. */
-const bottomOf = box => box.y + box.h + (box.labelBelow || 0);
+const bottomOf = (box: Box): number => box.y + box.h + (box.labelBelow || 0);
 
 /* A point on one side of a box, `t` from -1 (top/left) to 1 (bottom/right).
 
@@ -52,7 +86,7 @@ const bottomOf = box => box.y + box.h + (box.labelBelow || 0);
    collapse onto one point is spread back across the ink, as a fan: each
    station solved on its own picks the same nearest point of a small disc,
    and two arrows become one. */
-function sidePoint(box, side, t = 0) {
+function sidePoint(box: Box, side: Side, t = 0): Pt {
   const [cx, cy] = center(box);
   const hx = box.w / 2, hy = box.h / 2;
   const along = FAN * t;
@@ -76,7 +110,7 @@ const HEAD_SEP = 16;
    the ink's extent on this side, in the order it already has. `t` is rewritten
    so sidePoint's station lands there; the ray then hits, and the inset is the
    ordinary one. A span too short for the separation gets the whole of it. */
-function spreadFan(list, side) {
+function spreadFan(list: { r: Route, end: 'a' | 'b' }[], side: Side): void {
   if (list.length < 2) return;
   const box = list[0].r[list[0].end];
   if (!box.inkSpan) return;
@@ -107,15 +141,15 @@ function spreadFan(list, side) {
 
 /* Spread the edges that share a side evenly across it, ordered so that lines
    never cross each other on the way out. */
-export function planEdges(edges, boxes, lanes = {}) {
-  const groups = {};
+export function planEdges(edges: Edge[], boxes: Record<string, Box>, lanes: Record<string, Box[]> = {}): Route[] {
+  const groups: Record<string, { r: Route, end: 'a' | 'b' }[]> = {};
   /* An edge that closes a loop leaves the row and comes back underneath it,
      because that is what a loop looks like. Routed like any other edge it
      would run right-to-left straight through every box between its ends. */
   const back = backEdges(Object.keys(boxes).map(id => ({ id })), edges);
   const floor = Math.max(0, ...Object.values(boxes).map(bottomOf)) + 46;
 
-  const rec = edges.map(e => {
+  const rec = edges.map((e): Route | null => {
     const a = boxes[e.from], b = boxes[e.to];
     if (!a || !b) return null;
     const isBack = back.has(`${e.from}>${e.to}`);
@@ -127,18 +161,18 @@ export function planEdges(edges, boxes, lanes = {}) {
        wrong two boxes. Such a leg leaves the column instead — out of the
        source's right side, or into the target's left — and travels down the
        gutter beside the column, where there is nothing to cross. */
-    const [sa, sb] = isBack
+    const [sa, sb]: [Side, Side] = isBack
       ? [blockedBelow(a, boxes) ? 'right' : 'bottom', blockedBelow(b, boxes) ? 'left' : 'bottom']
       : sides(a, b);
-    const r = { e, a, b, sa, sb, key: edgeKey(e), back: isBack, floor, via: lanes[edgeKey(e)],
-      gutterA: colEdge(a, boxes, 'right'), gutterB: colEdge(b, boxes, 'left') };
+    const r: Route = { e, a, b, sa, sb, key: edgeKey(e), back: isBack, floor, via: lanes[edgeKey(e)],
+      gutterA: colEdge(a, boxes, 'right'), gutterB: colEdge(b, boxes, 'left'), ta: 0, tb: 0, pts: [] };
     (groups[`${e.from}|${sa}`] ||= []).push({ r, end: 'a' });
     (groups[`${e.to}|${sb}`]   ||= []).push({ r, end: 'b' });
     return r;
-  }).filter(Boolean);
+  }).filter((r): r is Route => r !== null);
 
   for (const [k, list] of Object.entries(groups)) {
-    const side = k.split('|')[1];
+    const side = k.split('|')[1] as Side;
     const axis = side === 'left' || side === 'right' ? 1 : 0;   // spread along y for vertical sides
     list.sort((p, q) => {
       const op = center(p.end === 'a' ? p.r.b : p.r.a)[axis];
@@ -162,9 +196,10 @@ export function planEdges(edges, boxes, lanes = {}) {
      same vertical and read as one line. Each gets a lane of its own. The one
      that leaves (or enters) lowest takes the lane nearest the column: the
      others' horizontal runs pass above it, so nothing crosses on the way out. */
-  for (const [end, side, at] of [['a', 'right', 'gutterA'], ['b', 'left', 'gutterB']]) {
-    const s = end === 'a' ? 'sa' : 'sb', t = end === 'a' ? 'ta' : 'tb';
-    const lane = {};
+  for (const [end, side, at] of [['a', 'right', 'gutterA'], ['b', 'left', 'gutterB']] as const) {
+    const s: 'sa' | 'sb' = end === 'a' ? 'sa' : 'sb';
+    const t: 'ta' | 'tb' = end === 'a' ? 'ta' : 'tb';
+    const lane: Record<number, number> = {};
     for (const r of rec.filter(r => r.back && r[s] === side)
       .sort((p, q) => sidePoint(q[end], side, q[t])[1] - sidePoint(p[end], side, p[t])[1])) {
       const n = lane[r[end].col ?? 0] = (lane[r[end].col ?? 0] ?? -1) + 1;
@@ -199,18 +234,17 @@ export function planEdges(edges, boxes, lanes = {}) {
 const KNEE_LANE = 14;      // between two knees sharing one gutter
 const SAME_KNEE = 6;       // turns within this of each other are the same turn
 
-function spreadKnees(rec) {
-  /** @type {Map<string, any[]>} */
-  const arriving = new Map();
+function spreadKnees(rec: Route[]): void {
+  const arriving = new Map<string, { r: Route, span: [number, number], knee: number }[]>();
   for (const r of rec) {
     if (r.back || r.via?.length || r.e.bend === 'straight') continue;
     if (r.sa !== 'left' && r.sa !== 'right') continue;
     const A = sidePoint(r.a, r.sa, r.ta), B = sidePoint(r.b, r.sb, r.tb);
     if (Math.abs(A[1] - B[1]) < 2) continue;            // level: a straight shot, no turn
-    r.span = [Math.min(A[1], B[1]), Math.max(A[1], B[1])];
-    r.knee = A[0] + (B[0] - A[0]) * KNEE;
-    if (!arriving.has(r.e.to)) arriving.set(r.e.to, []);
-    arriving.get(r.e.to).push(r);
+    const span: [number, number] = [Math.min(A[1], B[1]), Math.max(A[1], B[1])];
+    const knee = A[0] + (B[0] - A[0]) * KNEE;
+    const list = arriving.get(r.e.to);
+    if (list) list.push({ r, span, knee }); else arriving.set(r.e.to, [{ r, span, knee }]);
   }
   /* Only what actually collides. Two edges into one box turn in the same place
      only if they turn at the same x *and* their runs cover some of the same
@@ -223,8 +257,8 @@ function spreadKnees(rec) {
     if (stack.length < 2) continue;
     /* The one with least row to change turns first. Its vertical run is the
        shortest, so it is the one the others can afford to pass in front of. */
-    stack.sort((p, q) => (p.span[1] - p.span[0]) - (q.span[1] - q.span[0]) || (p.key < q.key ? -1 : 1));
-    stack.forEach((r, i) => { r.lane = (i - (stack.length - 1) / 2) * KNEE_LANE; });
+    stack.sort((p, q) => (p.span[1] - p.span[0]) - (q.span[1] - q.span[0]) || (p.r.key < q.r.key ? -1 : 1));
+    stack.forEach((x, i) => { x.r.lane = (i - (stack.length - 1) / 2) * KNEE_LANE; });
   }
 }
 
@@ -232,7 +266,7 @@ function spreadKnees(rec) {
    The leg of a back edge drops (or rises) straight through its column; only a
    box that overlaps it across is in the way. A neighbour elsewhere in the
    column does not block it. */
-function blockedBelow(box, boxes) {
+function blockedBelow(box: Box, boxes: Record<string, Box>): boolean {
   return Object.values(boxes).some(o => o !== box && (o.col ?? 0) === (box.col ?? 0)
     && o.y > box.y && o.x < box.x + box.w && o.x + o.w > box.x);
 }
@@ -242,14 +276,14 @@ function blockedBelow(box, boxes) {
    the column owns. */
 const BACK_GUTTER = 22;
 const BACK_LANE = 12;      // between two back edges sharing one gutter
-function colEdge(box, boxes, side) {
+function colEdge(box: Box, boxes: Record<string, Box>, side: 'left' | 'right'): number {
   const col = Object.values(boxes).filter(o => (o.col ?? 0) === (box.col ?? 0));
   return side === 'right'
     ? Math.max(...col.map(o => o.x + o.w)) + BACK_GUTTER
     : Math.min(...col.map(o => o.x)) - BACK_GUTTER;
 }
 
-function route({ a, b, sa, sb, ta = 0, tb = 0, e, back, floor, gutterA, gutterB, via, lane = 0 }) {
+function route({ a, b, sa, sb, ta = 0, tb = 0, e, back, floor, gutterA, gutterB, via, lane = 0 }: Route): Pt[] {
   const A = sidePoint(a, sa, ta);
   const B = sidePoint(b, sb, tb);
 
@@ -297,11 +331,11 @@ function route({ a, b, sa, sb, ta = 0, tb = 0, e, back, floor, gutterA, gutterB,
   return [A, [A[0], gy], [B[0], gy], B];
 }
 
-const segLen = (p, q) => Math.hypot(q[0] - p[0], q[1] - p[1]);
+const segLen = (p: Pt, q: Pt): number => Math.hypot(q[0] - p[0], q[1] - p[1]);
 
 /* Hang the tag on the longest segment of the route. On a gutter route that is
    almost always the vertical drop, which is empty space by construction. */
-function tagSpot(pts) {
+function tagSpot(pts: Pt[]): { at: Pt, vertical: boolean, len: number } {
   let best = 0, bestLen = -1;
   for (let i = 0; i < pts.length - 1; i++) {
     const l = segLen(pts[i], pts[i + 1]);
@@ -319,10 +353,10 @@ function tagSpot(pts) {
    legibly on top of a line. `label` is a string, or the lines it has already
    been wrapped into; a long tag is two short lines rather than one wide one,
    because the gutter it has to sit in is only so wide. */
-export function pill(cx, cy, label, {
+export function pill(cx: number, cy: number, label: string | string[], {
   size = 10.5, bg = PANEL, fg = INK, border = INK, seed = 1, padX = 9, h = 19,
   weight = 700, spacing = 0.09,
-} = {}) {
+}: { size?: number, bg?: string, fg?: string, border?: string, seed?: number, padX?: number, h?: number, weight?: number, spacing?: number } = {}): string {
   const lines = (Array.isArray(label) ? label : [lettering(label)]);
   const box = pillSize(lines, { size, padX, h });
   const lh = size * 1.2;
@@ -334,7 +368,7 @@ export function pill(cx, cy, label, {
 
 /* The step number and the label travel together as one tag, so they can never
    land on top of each other. */
-function edgeTag(at, step, label, { lit, seed }) {
+function edgeTag(at: Pt, step: number | null, label: string | undefined, { lit, seed }: { lit: boolean, seed: number }): string {
   const lines = tagLines(label, step);
   if (!lines.length) return '';
   return pill(at[0], at[1], lines, {
@@ -351,11 +385,12 @@ function edgeTag(at, step, label, { lit, seed }) {
    since a box is far taller than the line is thick. `away` records which way
    it was lifted, so that if it later has to move again it keeps going the way
    it already went rather than back across the line it belongs to. */
-/**
- * @param {any} r
- * @param {number|null} step
- */
-export function tagBox(r, step) {
+/* What drawEdge and tagBox read off a route: the spec, the two end boxes, the
+   key that names it, and the polyline it drew. Both are called with the full
+   route planEdges returns; floating.js calls tagBox with no more than this. */
+type DrawnRoute = { e: Edge, key: string, a: Box, b: Box, pts: Pt[] };
+
+export function tagBox(r: DrawnRoute, step: number | null): { at: Pt, w: number, h: number, away: number } {
   const { e } = r;
   const spot = tagSpot(r.pts);
   const { w, h } = pillSize(tagLines(e.label, step));
@@ -380,11 +415,7 @@ export function tagBox(r, step) {
    `place` is the anchor render/floating.js settled on, against everything
    else that floats; without one the tag places itself, which is right for a
    lone edge and wrong for anything with neighbours. */
-/**
- * @param {any} r
- * @param {{step?: number|null, state?: string, place?: number[]|null}} [opts]
- */
-export function drawEdge(r, { step = null, state = 'idle', place = null } = {}) {
+export function drawEdge(r: DrawnRoute, { step = null, state = 'idle', place = null }: { step?: number | null, state?: string, place?: Pt | null } = {}): string {
   const { e, pts } = r;
   const seed = hashSeed(r.key) % 100000;
   const lit = state === 'lit', dim = state === 'dim';
@@ -414,9 +445,9 @@ export function drawEdge(r, { step = null, state = 'idle', place = null } = {}) 
 }
 
 /* A dot that rides the line — the packet, when a flow is playing. */
-export function packetAt(pts, t) {
+export function packetAt(pts: Pt[], t: number): Pt {
   let total = 0;
-  const segs = [];
+  const segs: number[] = [];
   for (let i = 0; i < pts.length - 1; i++) {
     const l = segLen(pts[i], pts[i + 1]);
     segs.push(l); total += l;
