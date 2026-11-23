@@ -14,6 +14,8 @@ export const SOFT   = '#ebe6da';
 export const ACCENT = '#ef6a4c';
 export const SHADOW = '#41538f';
 
+export type Body = { l: string, m: string, d: string };
+
 /* Body colours. Each is a flat three-band material: no gradients, ever.
    l = the lit face, m = the thickness band under it, d = deep ink-tinted detail. */
 export const BODIES = {
@@ -29,12 +31,14 @@ export const BODIES = {
      `slate` with the (much heavier) machinery palette. */
   linen:   { l: '#dcd8cf', m: '#c2bdb1', d: '#3d3935' },
   paper:   { l: '#f8f6f0', m: '#e3dfd2', d: '#857d6e' },
-};
-export const BODY_NAMES = Object.keys(BODIES);
+} as const satisfies Record<string, Body>;
+
+export type BodyName = keyof typeof BODIES;
+export const BODY_NAMES: BodyName[] = Object.keys(BODIES) as BodyName[];
 
 /* Body colour carries meaning on a board, so it is assigned by role, not at random.
    An agent that says nothing gets a sensible colour for the kind of thing it drew. */
-export const BODY_FOR_KIND = {
+export const BODY_FOR_KIND: Record<string, BodyName> = {
   client:    'paper',
   external:  'paper',
   gateway:   'mustard',
@@ -57,13 +61,14 @@ export const BODY_FOR_KIND = {
   boundary:  'slate',
 };
 
-export const bodyOf = (name, kind = 'service') =>
-  BODIES[name] || BODIES[BODY_FOR_KIND[kind] || 'cobalt'];
+export const bodyOf = (name?: string | null, kind = 'service'): Body =>
+  (name && Object.hasOwn(BODIES, name) ? BODIES[name as BodyName] : undefined)
+  || BODIES[BODY_FOR_KIND[kind] || 'cobalt'];
 
 export const MONO = `ui-monospace, "SF Mono", Menlo, Consolas, monospace`;
 
 /* mix two hex colours, t = 0 gives a, t = 1 gives b */
-export const mix = (a, b, t) =>
+export const mix = (a: string, b: string, t: number): string =>
   '#' + [1, 3, 5].map(i =>
     Math.round(parseInt(a.substr(i, 2), 16) * (1 - t) + parseInt(b.substr(i, 2), 16) * t)
       .toString(16).padStart(2, '0')).join('');
@@ -73,7 +78,7 @@ export const mix = (a, b, t) =>
    multiply-blended noise layers lay grain and blotting over the result, so
    flat fills read as ink on paper rather than as vector shapes.
    k scales with the viewBox so a big board wobbles as much as a small one. */
-export const handFilter = (k = 1) => `<filter id="hand" x="-4%" y="-4%" width="108%" height="108%" color-interpolation-filters="sRGB">
+export const handFilter = (k = 1): string => `<filter id="hand" x="-4%" y="-4%" width="108%" height="108%" color-interpolation-filters="sRGB">
   <feTurbulence type="fractalNoise" baseFrequency="${(0.03 / k).toFixed(4)}" numOctaves="2" seed="4" result="warp"/>
   <feDisplacementMap in="SourceGraphic" in2="warp" scale="${(1.8 * k).toFixed(2)}" xChannelSelector="R" yChannelSelector="G" result="wob"/>
   <feTurbulence type="fractalNoise" baseFrequency="${(0.9 / k).toFixed(4)}" numOctaves="3" seed="11" result="n1"/>

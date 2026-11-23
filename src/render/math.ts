@@ -30,6 +30,34 @@
 import { text, stroke, roughLine, waver, smooth } from './ink.js';
 import { INK } from './theme.js';
 
+type AccentKind = 'vec' | 'hat' | 'bar';
+
+type MathNode =
+  | { t: 'ch', s: string }
+  | { t: 'op', s: string }
+  | { t: 'fn', s: string }
+  | { t: 'unknown', s: string }
+  | { t: 'spacer', em: number }
+  | { t: 'row', items: MathNode[] }
+  | { t: 'sup', base: MathNode, script: MathNode }
+  | { t: 'sub', base: MathNode, script: MathNode }
+  | { t: 'frac', num: MathNode, den: MathNode }
+  | { t: 'sqrt', body: MathNode }
+  | { t: 'accent', kind: AccentKind, body: MathNode }
+  | { t: 'bold', body: MathNode }
+  | { t: 'text', body: MathNode };
+
+type Metrics = { w: number, a: number, d: number };
+
+export type MathBox = { w: number, a: number, d: number, h: number };
+export type MathPart = { math: string } | { literal: string };
+export type DrawMathOpts = {
+  size?: number,
+  color?: string,
+  anchor?: 'start' | 'middle' | 'end',
+  seed?: number,
+};
+
 /* Advance per character, as a fraction of font size. Measured in the browser
    against ui-monospace/SF Mono/Menlo, for Latin, Greek and math symbols
    alike — a monospace face gives all three the same advance. */
@@ -41,7 +69,7 @@ const SCRIPT = 0.72;        // superscripts and subscripts, relative size
 
 /* What `\rho` and friends turn into. A whiteboard needs the letters and the
    dozen operators that actually come up, not the whole of unicode-math. */
-const SYMBOLS = {
+const SYMBOLS: Record<string, string> = {
   alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', zeta: 'ζ',
   eta: 'η', theta: 'θ', iota: 'ι', kappa: 'κ', lambda: 'λ', mu: 'μ', nu: 'ν',
   xi: 'ξ', pi: 'π', rho: 'ρ', sigma: 'σ', tau: 'τ', upsilon: 'υ', phi: 'φ',
@@ -64,7 +92,7 @@ const SYMBOLS = {
 };
 
 /* Set upright, as LaTeX does: log n, not l times o times g times n. */
-const FUNCTIONS = ['log', 'ln', 'exp', 'sin', 'cos', 'tan', 'min', 'max',
+const FUNCTIONS: readonly string[] = ['log', 'ln', 'exp', 'sin', 'cos', 'tan', 'min', 'max',
   'det', 'dim', 'deg', 'arg', 'gcd', 'lim', 'mod'];
 
 /* LaTeX's spacing macros, in eighteenths of an em as LaTeX counts them. They
@@ -77,7 +105,7 @@ const FUNCTIONS = ['log', 'ln', 'exp', 'sin', 'cos', 'tan', 'min', 'max',
    and silently wrong for these: `v\,dp` set as `v,dp`, putting a comma in the
    middle of a formula. A thin space that does not appear is a blemish; a comma
    nobody wrote changes what the formula says. */
-const SPACERS = { ',': 3 / 18, ':': 4 / 18, ';': 5 / 18, '!': -3 / 18 };
+const SPACERS: Record<string, number> = { ',': 3 / 18, ':': 4 / 18, ';': 5 / 18, '!': -3 / 18 };
 
 /* Spacing is derived, not copied. A space typed in the source is not what a
    reader sees in a formula — LaTeX ignores it and spaces around operators
@@ -87,7 +115,7 @@ const SPACERS = { ',': 3 / 18, ':': 4 / 18, ';': 5 / 18, '!': -3 / 18 };
 const RELATIONS = new Set(['=', '\u2248', '\u2260', '\u2264', '\u2265', '\u2261', '\u221d',
   '\u2192', '\u2190', '\u21d2', '\u2208', '\u2282', '<', '>']);
 const BINARIES = new Set(['+', '\u2212', '-', '\u00d7', '\u00b7', '\u00f7', '\u00b1', '\u2213']);
-const gapFor = node => {
+const gapFor = (node: MathNode): number => {
   if (node.t === 'fn') return 0.2;              // n log n, not nlogn
   if (node.t !== 'op') return 0;
   return RELATIONS.has(node.s) ? 0.34 : BINARIES.has(node.s) ? 0.22 : 0;
@@ -99,11 +127,13 @@ const gapFor = node => {
    run of characters, or one of the four constructions below, and anything it
    does not recognise comes back as literal text rather than as a guess. An
    unrendered `\begin{pmatrix}` on the board is honest; half a matrix is not. */
-function parse(src) {
+function parse(src: string): MathNode {
   let i = 0;
   const s = String(src);
 
-  const group = () => {                     // {...} or a single token
+  const skipSpace = (): void => { while (s[i] === ' ') i++; };
+
+  const group = (): MathNode => {            // {...} or a single token
     skipSpace();
     if (s[i] === '{') {
       i++;
@@ -116,9 +146,7 @@ function parse(src) {
     return { t: 'row', items: ch == null ? [] : [{ t: 'ch', s: ch }] };
   };
 
-  const skipSpace = () => { while (s[i] === ' ') i++; };
-
-  function command() {
+  function command(): MathNode {
     i++;                                     // the backslash
     let name = '';
     while (i < s.length && /[a-zA-Z]/.test(s[i])) name += s[i++];
@@ -151,16 +179,16 @@ function parse(src) {
     return { t: 'unknown', s: '\\' + name };  // shown as written
   }
 
-  function row(stop) {
-    const items = [];
-    const last = () => items[items.length - 1];
+  function row(stop: string | null): MathNode {
+    const items: MathNode[] = [];
+    const last = (): MathNode | undefined => items[items.length - 1];
     while (i < s.length && s[i] !== stop) {
       const c = s[i];
       if (c === '^' || c === '_') {
         i++;
         /* `a_i` must put the i under the a, not under everything typed before
            it. A run is merged characters, so the last one is split off. */
-        let base = items.pop() || { t: 'ch', s: '' };
+        let base: MathNode = items.pop() || { t: 'ch', s: '' };
         if (base.t === 'ch' && base.s.length > 1) {
           items.push({ t: 'ch', s: base.s.slice(0, -1) });
           base = { t: 'ch', s: base.s.slice(-1) };
@@ -176,7 +204,8 @@ function parse(src) {
       if (c === ' ') continue;                 // spacing is derived; see gapFor
       if (RELATIONS.has(c) || BINARIES.has(c)) { items.push({ t: 'op', s: c }); continue; }
       // runs of plain characters stay together, so one <text> covers a word
-      if (last()?.t === 'ch') last().s += c; else items.push({ t: 'ch', s: c });
+      const prev = last();
+      if (prev?.t === 'ch') prev.s += c; else items.push({ t: 'ch', s: c });
     }
     return { t: 'row', items };
   }
@@ -188,7 +217,7 @@ function parse(src) {
 
 /* Every node reports a width, an ascent above the baseline and a descent
    below it. The caller needs the box; layout.js sizes a node from it. */
-function measure(node, size) {
+function measure(node: MathNode, size: number): Metrics {
   const em = size;
   switch (node.t) {
     case 'ch':
@@ -250,9 +279,6 @@ function measure(node, size) {
 
     case 'bold':
       return measure(node.body, em);
-
-    default:
-      return { w: 0, a: 0, d: 0 };
   }
 }
 
@@ -260,9 +286,9 @@ function measure(node, size) {
 
 /* x is the left edge, y the baseline. Returns SVG, and the geometry it used,
    so a caller can place something beside it. */
-function draw(node, x, y, size, color, seed) {
+function draw(node: MathNode, x: number, y: number, size: number, color: string, seed: number): string {
   const em = size;
-  const t = (s, xx, yy, sz) =>
+  const t = (s: string, xx: number, yy: number, sz: number): string =>
     text(xx, yy, s, { size: sz, color, weight: 600, anchor: 'start', spacing: 0 });
 
   switch (node.t) {
@@ -357,19 +383,16 @@ function draw(node, x, y, size, color, seed) {
       const inner = draw(node.body, x, y, em, color, seed);
       return inner.replace(/font-weight="\d+"/g, 'font-weight="800"');
     }
-
-    default:
-      return '';
   }
 }
 
 /* ---------- what the rest of the renderer uses ---------- */
 
 /* Does this string contain any inline mathematics? */
-export const hasMath = s => /\$[^$]+\$/.test(String(s ?? ''));
+export const hasMath = (s?: string | null): boolean => /\$[^$]+\$/.test(String(s ?? ''));
 
 /* Split a string into literal and `$...$` parts, in order. */
-export function splitMath(s) {
+export function splitMath(s?: string | null): MathPart[] {
   return String(s ?? '').split(/(\$[^$]+\$)/).filter(Boolean).map(part =>
     part.startsWith('$') && part.endsWith('$') && part.length > 2
       ? { math: part.slice(1, -1) }
@@ -377,13 +400,13 @@ export function splitMath(s) {
 }
 
 /* The box a formula needs: width, and its height split around the baseline. */
-export function measureMath(src, size = 14) {
+export function measureMath(src: string, size = 14): MathBox {
   const m = measure(parse(src), size);
   return { w: m.w, a: m.a, d: m.d, h: m.a + m.d };
 }
 
 /* Draw one, with `anchor` deciding what x means. Returns a string of SVG. */
-export function drawMath(x, y, src, { size = 14, color = INK, anchor = 'start', seed = 1 } = {}) {
+export function drawMath(x: number, y: number, src: string, { size = 14, color = INK, anchor = 'start', seed = 1 }: DrawMathOpts = {}): string {
   const tree = parse(src);
   const m = measure(tree, size);
   const left = anchor === 'middle' ? x - m.w / 2 : anchor === 'end' ? x - m.w : x;
