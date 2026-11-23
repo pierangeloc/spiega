@@ -165,6 +165,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      effect:
+        specifier: 4.1.5
+        version: 4.1.5
     devDependencies:
       eslint:
         specifier: ^10.15.0
@@ -714,6 +718,9 @@ packages:
     peerDependenciesMeta:
       oxc-resolver:
         optional: true
+
+  effect@4.1.5:
+    resolution: {integrity: sha512-xyR20KhQI0vg2gD8ILUSQRTTESEYJ0JKdP+QD8J37xbwPTqXRxFM/l0+vUVD9fuSvoYruoTqyt33C4FZv1s4TQ==}
 
   empathic@2.1.0:
     resolution: {integrity: sha512-AnfC1ATldl49/cvZdLPDjBfrRNwbDO05aibiOtzQu3qtlbJtomNLhF30HEtn/7iBz50dlMECqATo3fG0LrdEgw==}
@@ -1676,6 +1683,8 @@ snapshots:
   detect-libc@2.1.2: {}
 
   dts-resolver@3.0.0: {}
+
+  effect@4.1.5: {}
 
   empathic@2.1.0: {}
 

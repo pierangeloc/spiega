@@ -70,5 +70,8 @@
   "author": "Pierangelo Cecchetto - TulipLogic",
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "effect": "4.1.5"
   }
 }

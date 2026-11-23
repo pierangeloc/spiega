@@ -130,4 +130,22 @@ export default [
     ],
     rules: nodeSide,
   },
+  {
+    /* The Schema, which is the one thing in a browser-safe package that the
+       browser must not reach — not because it is node-only code, but because
+       `import { Schema } from 'effect'` is a bare specifier, and the page
+       fetches what it imports off disk. The schema union is defined once and
+       read by the server at POST /op and by MCP when it advertises its tools,
+       both of which are node; the page speaks the same domain through type
+       imports, which cost nothing at runtime.
+
+       This is the deliberate naming the config asks for rather than a widened
+       glob, and it is bounded by a test: the walk in smoke.mjs that keeps the
+       page away from dagre keeps it away from here too. When the board is
+       bundled (#153) the bundler resolves `effect` and this block goes. */
+    files: ['packages/core/src/schema/**/*.ts'],
+    // Both spellings off: the TypeScript rule is the one in force for a `.ts`
+    // file, and the core one is what the blocks above it left behind.
+    rules: { ...nodeSide, '@typescript-eslint/no-restricted-imports': 'off' },
+  },
 ];

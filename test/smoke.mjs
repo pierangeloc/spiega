@@ -4752,8 +4752,16 @@ test('every module the board page imports is on disk', () => {
 
 /* Dagre is vendored for `settle`, which orders a finished board once, in the
    server process. A board that is still being drawn must not pay for it, and
-   the page is the one consumer that would pay by fetching it. */
-test('the board page does not reach dagre', () => {
+   the page is the one consumer that would pay by fetching it.
+
+   The op Schema is here for the same reason, differently: it is browser-safe
+   code that a browser cannot *fetch*, because it imports `effect` by name and
+   the page loads its modules off disk unbundled. The server decodes with it at
+   POST /op and MCP advertises its tools from it; the page knows the same ops
+   through type imports, which are erased. That exemption is named in
+   eslint.config.js, and this is the test that bounds it — a module the page
+   reaches may import the Schema's types, never the Schema. */
+test('the board page does not reach dagre, or the Schema', () => {
   const seen = new Set();
   const walk = spec => {
     const file = path.join(ROOT, spec.replace(/^\//, ''));
@@ -4772,10 +4780,13 @@ test('the board page does not reach dagre', () => {
 
   assert.ok(seen.size >= 8, 'the walk should reach the whole renderer, not stop at the first file');
   const reached = [...seen]
-    .filter(file => file.includes('/vendor/') || file.endsWith('/board/settle.js'))
+    .filter(file => file.includes('/vendor/') || file.endsWith('/board/settle.js')
+      || file.includes('/packages/core/src/schema/'))
     .map(file => path.relative(ROOT, file));
   assert.deepEqual(reached, [],
-    'an unsettled board page must not fetch or evaluate dagre:\n  ' + reached.join('\n  '));
+    'the board page must not fetch or evaluate these — dagre is for a finished ' +
+    'board in the server, and the Schema names `effect`, which the page cannot ' +
+    'resolve off disk:\n  ' + reached.join('\n  '));
 });
 
 /* The one way this suite can shrink without anyone noticing. Suites used to be
