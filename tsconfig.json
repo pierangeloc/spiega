@@ -28,6 +28,8 @@
     "src/render/math.ts",
     "src/render/geom.ts",
     "src/render/ink.ts",
-    "src/render/glyphs.ts"
+    "src/render/glyphs.ts",
+    "src/render/edges.ts",
+    "src/render/callout.ts"
   ]
 }

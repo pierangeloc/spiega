@@ -19,6 +19,9 @@
 import { roughLine, stroke, fill, text, waver, smooth, wrapText } from './ink.js';
 import { INK, ACCENT, MUTED } from './theme.js';
 import { wireCuts, toLine } from './geom.js';
+import type { Rect } from './geom.js';
+import type { Pt } from './ink.js';
+import type { Callout } from '@spiega/core';
 
 const LEAD = 52;          // how far the label sits from the point
 const LINE = 15;          // line height of the label
@@ -31,24 +34,41 @@ export const DOT = 4;     // radius of the ball the leader ends in
    diagonal is a unit vector like the rest, so LEAD is the same distance out
    whichever way a label goes. */
 const D = Math.SQRT1_2;
-const DIRS = {
+const DIRS: Record<string, [number, number]> = {
   above: [0, -1], below: [0, 1], left: [-1, 0], right: [1, 0],
   'above-left': [-D, -D], 'above-right': [D, -D], 'below-left': [-D, D], 'below-right': [D, D],
 };
-const ALIASES = {
+const ALIASES: Record<string, string> = {
   n: 'above', s: 'below', e: 'right', w: 'left',
   nw: 'above-left', ne: 'above-right', sw: 'below-left', se: 'below-right',
 };
-export const sideName = s => {
+export const sideName = (s: unknown): string | null => {
   const k = String(s);
   if (Object.hasOwn(DIRS, k)) return k;
   return Object.hasOwn(ALIASES, k) ? ALIASES[k] : null;
 };
 
+/* A box the way edges and targets see it: position and extent, nothing more. */
+type Box = { x: number, y: number, w: number, h: number };
+
+/* An edge route, as far as a callout needs it: its key and the polyline it
+   drew. */
+type Route = { key: string, pts: Pt[] };
+
+/* Where a leader points, and what it points at. */
+type Tip = { x: number, y: number, kind: string };
+
+/* A callout once `place` has worked out where it goes: the words, the box they
+   occupy, and where the leader lands. */
+type Placed = {
+  c: Callout, tip: Tip, side: string, lines: string[],
+  w: number, h: number, cx: number, cy: number, box: Rect,
+};
+
 /* Where the leader points, and from which direction. A node is aimed at the
    middle of one of its sides; an edge at the middle of its longest segment,
    offset from the middle, where its own label already sits. */
-export function target(c, boxes, planned, side) {
+export function target(c: Callout, boxes: Record<string, Box>, planned: Route[], side: string): Tip | null {
   const at = String(c.at || '');
 
   const r = planned.find(p => p.key === at);
@@ -85,7 +105,7 @@ export function target(c, boxes, planned, side) {
    occupies. The words sit so that their nearest point is LEAD from the target,
    on a face or a corner alike. `slide` moves them along a face, so the leader
    comes in on a slant instead of straight. */
-function place(c, boxes, planned, side, slide = 0, lead = LEAD) {
+function place(c: Callout, boxes: Record<string, Box>, planned: Route[], side: string, slide = 0, lead = LEAD): Placed | null {
   const tip = target(c, boxes, planned, side);
   if (!tip) return null;
 
@@ -105,7 +125,7 @@ function place(c, boxes, planned, side, slide = 0, lead = LEAD) {
 
 /* The three points the leader is drawn through: out of the text block nearest
    the point, bowed a little in the middle, and into the point. */
-function leaderPts(p) {
+function leaderPts(p: Placed): Pt[] {
   const { tip, cx, cy, h, side } = p;
   const dir = DIRS[side].map(v => -Math.sign(v));
   const from = [cx + dir[0] * (p.w / 2 + 6), cy + dir[1] * (h / 2 + 6)];
@@ -116,7 +136,7 @@ function leaderPts(p) {
 }
 
 /* Walk a polyline in steps of about `step`, yielding the points on it. */
-function* along(pts, step = 3) {
+function* along(pts: Pt[], step = 3): Generator<Pt> {
   for (let i = 1; i < pts.length; i++) {
     const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
     const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / step));
@@ -138,7 +158,7 @@ const TIP_SKIP = 18;      // the leader ends where a node's own edges begin, so 
    points at, and a node's own edges start a few pixels from its side, so the
    last stretch before the point is not held against it. */
 const LEAD_RUN = 40;
-export function onEdges(p, planned) {
+export function onEdges(p: Placed, planned: Route[]): number {
   const { x, y, w, h } = p.box;
   const words = { x: x - TEXT_PAD, y: y - TEXT_PAD, w: w + TEXT_PAD * 2, h: h + TEXT_PAD * 2 };
   const near = leaderNear(p);
@@ -155,7 +175,7 @@ export function onEdges(p, planned) {
 
 /* The points of the leader that are held to anything: all of it but the last
    stretch into the point, which is where a node's own edges begin. */
-export function leaderNear(p) {
+export function leaderNear(p: Placed): Pt[] {
   return [...along(leaderPts(p), 2)].filter(([px, py]) => Math.hypot(px - p.tip.x, py - p.tip.y) > TIP_SKIP);
 }
 
@@ -184,7 +204,7 @@ const REACH = [LEAD, LEAD * 1.9];
    decided with everything else that floats on the board, in
    render/floating.js. An empty list means the callout points at nothing that
    is drawn. */
-export function calloutCandidates(c, boxes, planned) {
+export function calloutCandidates(c: Callout, boxes: Record<string, Box>, planned: Route[]): Placed[] {
   const side = sideName(c.side) || 'below';
   const asked = place(c, boxes, planned, side);
   if (!asked) return [];
@@ -209,7 +229,7 @@ export function calloutCandidates(c, boxes, planned) {
    The line wavers like every other line on the board, and it is the accent
    colour: a callout is an aside, and it should be findable without being
    mistaken for part of the structure. */
-export function drawCallout(p, { state = 'idle' } = {}) {
+export function drawCallout(p: Placed, { state = 'idle' }: { state?: string } = {}): string {
   const { tip, lines, cx, cy, h } = p;
   const seed = (p.c.id || '').split('').reduce((a, ch) => a + ch.charCodeAt(0), 7);
 
