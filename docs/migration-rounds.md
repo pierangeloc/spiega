@@ -27,13 +27,24 @@ tsdown + Vitest, the browser rule as lint, the conventions rewritten, and the
 two holes phase 0 left — lint that could not parse TypeScript, and a build
 that did not compile `packages/`.
 
-**Phase 1 is in progress.** Round 1 (#135) and two of Round 2's three tracks
-(#137, #138) have landed: `packages/core/src/schema/` holds the op union and
-the board Schema, and `state.ts`, `script.ts`, `tape.ts`, `map.ts`, `camera.ts`
-and `spec.ts` are all TypeScript. What remains in phase 1 is #139 (dagre from
-npm and `settle`), #140 (old op logs through the Schema), and #136 (real MCP
-tool schemas) — all three now unblocked. The other four workspace packages are
-still stubs, and the renderer in `src/render/` is still JavaScript.
+**Phase 1 is nearly closed.** Round 1 (#135) and all three tracks of Round 2
+(#137, #138, #139) have landed: `packages/core/src/schema/` holds the op union
+and the board Schema, `state.ts`, `script.ts`, `tape.ts`, `map.ts`, `camera.ts`,
+`spec.ts` and `settle.ts` are all strict TypeScript, and `vendor/` is gone
+(`@dagrejs/dagre@3.1.3` comes from npm). What remains in phase 1 is #140 (old op
+logs through the Schema — needs anonymised real op logs from `~/.spiega`) and
+#136 (real MCP tool schemas, `ready-for-human`).
+
+**Phases 2, 3 and 4 have all started:**
+- **Phase 2 (render):** #141 (`theme.ts`, `math.ts`, `geom.ts`) landed; #142
+  (`ink` and `glyphs`) is now unblocked.
+- **Phase 3 (server):** #147 (Effect HTTP read routes, loopback/origin
+  middleware, `SpiegaHome`/`SpiegaConfig`/`BoardStore` services in
+  `packages/server/`) landed; #149 (event stream as a Stream over a PubSub) is
+  now unblocked. #148 (`POST /op` on Effect) waits on #140.
+- **Phase 4 (board app):** #152 (framework-free `Model`, `Msg`, `Cmd`, pure
+  `update`, and fixture store in `packages/board/src/app/`) landed; #153 (React
+  board beside the old one) waits on #145 finishing the render port.
 
 ## The decision the whole of phase 1 rests on
 
@@ -83,20 +94,30 @@ defines, and it established both conventions: `effect` as the package's first
 runtime dependency, and the browser-rule exemption for
 `packages/core/src/schema/`.
 
-### Round 2 — #137 and #138 done; #139 remaining
+### Round 2 — done
 
-| | | status / watch |
+| | | status / notes |
 |---|---|---|
 | #137 | the reducer in TypeScript | **done** (#171) — `src/board/state.ts`, `packages/core/src/schema/board.ts`, and the property suite in `test/reducer.mjs` |
 | #138 | script, tape, map, camera, spec | **done** (#172) — all five ported in place |
-| #139 | dagre from npm, settle ported | **unblocked** — the version question is already answered: `vendor/README.md` pins `@dagrejs/dagre` **3.1.3** with a SHA-256, and the bundle is unmodified, so the `customOrder` hook settle relies on is in the package. The `smoke.mjs` test asserting the page never reaches `vendor/` or `settle.js` gets **updated**, not deleted. `AGENTS.md` still says dagre stays vendored — that sentence is this issue's to rewrite |
+| #139 | dagre from npm, settle ported | **done** (#174) — `@dagrejs/dagre@3.1.3` from npm, `src/board/settle.ts`, `vendor/` deleted |
 
-### Round 3 — unblocked
+### Round 3 — #141, #147, #152 done; #140 and #136 remaining
 
-| | |
-|---|---|
-| #140 | old op logs restore through the Schema. Unblocked now (#135 and #137 are done). One input only a human can supply: **copies of real op logs out of `~/.spiega`, anonymised**, as goldens — collect them before handing this to an agent |
-| #136 | `board_draw` advertises a real schema. Unblocked, and needs four real MCP clients, so it is `ready-for-human` |
+| | | status / watch |
+|---|---|---|
+| #141 | render leaves (`theme`, `math`, `geom`) | **done** (#173) — unblocks #142 |
+| #147 | Effect HTTP server (read routes + security middleware) | **done** (#176) — unblocks #149 |
+| #152 | board app model, messages, pure update, fixture store | **done** (#175) — `packages/board/src/app/` + `test/board-app.mjs` |
+| #140 | old op logs restore through the Schema | **unblocked** — needs anonymised copies of real op logs out of `~/.spiega` as goldens before handing to an agent; unblocks #148 |
+| #136 | `board_draw` advertises a real schema | **unblocked** — `ready-for-human` (needs four real MCP clients) |
+
+### Round 4 — unblocked now
+
+| | | unblocks |
+|---|---|---|
+| #142 | Port `ink` and `glyphs` (Phase 2) | #143 → #144 → #145 → #153 (the render critical path) |
+| #149 | Event stream as a `Stream` over a `PubSub` (Phase 3) | #150 → #158 (and #156) |
 
 ### The human track, startable now
 
@@ -110,7 +131,7 @@ risk in the plan, and it produces the ADR that de-risks #151 long before phase
 The oracle is not the suite alone.
 
 ```sh
-pnpm test          # 12 suites, inside dist/
+pnpm test          # 14 suites, inside dist/
 pnpm run lint      # the browser rule, over the source tree
 pnpm run typecheck # root plus every package, strict
 pnpm run pack      # the tarball npm would publish

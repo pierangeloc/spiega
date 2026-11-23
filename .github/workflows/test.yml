@@ -24,13 +24,12 @@ on:
 
 jobs:
   suite:
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
         node: [24, 26]
-    name: ${{ matrix.os }} · node ${{ matrix.node }}
+    name: ubuntu-latest · node ${{ matrix.node }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -41,6 +40,23 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # The suite runs against dist/, which `pnpm test` builds first: what is
       # asserted is the package people install, not the tree it came from.
+      - run: pnpm test
+
+  # macOS runner queues stall PRs (and occasionally time out before a step
+  # starts), while Linux already checks both Node 24 and 26 on every PR. Run
+  # macOS on pushes to main so it stays verified without gating every PR.
+  suite-macos:
+    if: github.event_name == 'push'
+    runs-on: macos-latest
+    name: macos-latest · node 26
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - run: pnpm test
 
   artefact:
