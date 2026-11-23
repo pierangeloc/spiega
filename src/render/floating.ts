@@ -1,4 +1,3 @@
-// @ts-check
 /* ============================================================
    spiega floating — one placement pass over everything that floats.
 
@@ -47,29 +46,28 @@ import { tagBox } from './edges.js';
 import { cuts, wireCuts, toSegment, toLine } from './geom.js';
 import { calloutCandidates, onEdges, leaderNear, target, TEXT_PAD, DOT } from './callout.js';
 import { tabSize } from './ink.js';
+import type { Box } from './layout.js';
+import type { Callout, Edge } from '@spiega/core';
 
-/** @typedef {{x: number, y: number, w: number, h: number}} Rect */
-/** @typedef {import('./layout.js').Box} Box */
-/** @typedef {import('../board/state.js').Edge} Edge */
-/** @typedef {import('../board/state.js').Callout} Callout */
+type Rect = { x: number, y: number, w: number, h: number };
 /* An edge as planEdges routed it: the fields this pass reads. */
-/** @typedef {{e: Edge, key: string, a: Box, b: Box, pts: number[][]}} Route */
+type Route = { e: Edge, key: string, a: Box, b: Box, pts: number[][] };
 /* A callout as callout.js places it: the box its words take, where the leader
    lands, and what drawCallout needs to draw it there. */
-/** @typedef {{
- *   c: Callout, tip: {x: number, y: number, kind: string}, side: string,
- *   lines: string[], w: number, h: number, cx: number, cy: number, box: Rect
- * }} CalloutPlace */
+type CalloutPlace = {
+  c: Callout, tip: { x: number, y: number, kind: string }, side: string,
+  lines: string[], w: number, h: number, cx: number, cy: number, box: Rect,
+};
 /* A boundary, and the rectangles it is drawn as: one when one tells the
    truth, several when it cannot be one true rectangle. Each rectangle carries
    its own tab, so each is placed on its own, sized for the name that piece
    carries: a split boundary's pieces are numbered, which is wider than the
    name alone. */
-/** @typedef {{id: string, label?: string, names?: (string|undefined)[], tint?: string, shapes: Box[]}} Boundary */
-/** @typedef {{rect: Rect, what: string, float?: boolean, weight?: number}} Solid */
-/** @typedef {{key: string, pts: number[][]}} Wire */
-/** @typedef {{solids: Solid[], wires: Wire[]}} Obstacles */
-/** @typedef {{key: string, at: number[], w: number, h: number}} PlacedTag */
+type Boundary = { id: string, label?: string, names?: (string | undefined)[], tint?: string, shapes: Box[] };
+type Solid = { rect: Rect, what: string, float?: boolean, weight?: number };
+type Wire = { key: string, pts: number[][] };
+type Obstacles = { solids: Solid[], wires: Wire[] };
+type PlacedTag = { key: string, at: number[], w: number, h: number };
 
 const SOLID = 1000;       // a word on a word, or a pill under a box
 const ARROW = 200;        // a pill over an arrowhead: the line is still there, which way it goes is not
@@ -82,14 +80,8 @@ const NEAR = 8;           // another line within this much of as near as its own
 const SLIDE = 6;          // how far along its wall a boundary's tab moves at a time
 
 /* Everything fixed that floating text must keep off. */
-/**
- * @param {Record<string, Box>} boxes
- * @param {Route[]} planned
- * @returns {Obstacles}
- */
-export function obstacles(boxes, planned) {
-  /** @type {Solid[]} */
-  const solids = Object.entries(boxes).map(([id, b]) => ({
+export function obstacles(boxes: Record<string, Box>, planned: Route[]): Obstacles {
+  const solids: Solid[] = Object.entries(boxes).map(([id, b]) => ({
     what: id, rect: { x: b.x, y: b.y, w: b.w, h: b.h + (b.labelBelow || 0) },
   }));
   for (const r of planned) {
@@ -109,26 +101,18 @@ export function obstacles(boxes, planned) {
   return { solids, wires: planned.map(r => ({ key: r.key, pts: r.pts })) };
 }
 
-/**
- * @param {Rect} a
- * @param {Rect} b
- * @returns {number} the area they share
- */
-const shared = (a, b) =>
+/** @returns the area they share */
+const shared = (a: Rect, b: Rect): number =>
   Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x)) *
   Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
 
 /* How far a rectangle stands from a polyline: nothing if the line passes
    through it, otherwise the nearest an end of a stretch comes to the box or a
    corner of the box comes to a stretch. */
-/**
- * @param {Rect} r
- * @param {number[][]} pts
- */
-function standOff(r, pts) {
+function standOff(r: Rect, pts: number[][]): number {
   const corners = [[r.x, r.y], [r.x + r.w, r.y], [r.x, r.y + r.h], [r.x + r.w, r.y + r.h]];
-  /** @param {number[]} p */
-  const toRect = p => Math.hypot(Math.max(r.x - p[0], 0, p[0] - r.x - r.w), Math.max(r.y - p[1], 0, p[1] - r.y - r.h));
+  const toRect = (p: number[]) =>
+    Math.hypot(Math.max(r.x - p[0], 0, p[0] - r.x - r.w), Math.max(r.y - p[1], 0, p[1] - r.y - r.h));
   let d = Infinity;
   for (let i = 1; i < pts.length; i++) {
     if (cuts(pts[i - 1], pts[i], r)) return 0;
@@ -137,17 +121,12 @@ function standOff(r, pts) {
   return d;
 }
 
-/** @param {Rect} r @param {number} by @returns {Rect} */
-const grow = (r, by) => ({ x: r.x - by, y: r.y - by, w: r.w + by * 2, h: r.h + by * 2 });
+const grow = (r: Rect, by: number): Rect => ({ x: r.x - by, y: r.y - by, w: r.w + by * 2, h: r.h + by * 2 });
 
 /* What a solid costs: a great deal for touching it at all, and a little more
    the more of the label it covers, so when every place is bad the one that
    hides least wins. */
-/**
- * @param {Rect} r
- * @param {Solid[]} solids
- */
-function solidCost(r, solids) {
+function solidCost(r: Rect, solids: Solid[]): number {
   let c = 0;
   for (const s of solids) {
     const a = shared(r, s.rect);
@@ -167,26 +146,19 @@ function solidCost(r, solids) {
    its own route, longest first, at its middle and either side of it. Then just
    beside its line. Last, stepped up and down from where it wanted to be, which
    is what the old pass did for everything. */
-/**
- * @param {Route} r
- * @param {{at: number[], w: number, h: number, away: number}} ideal
- * @returns {number[][]}
- */
-function tagSpots(r, ideal) {
+function tagSpots(r: Route, ideal: { at: number[], w: number, h: number, away: number }): number[][] {
   const pts = r.pts;
-  /** @type {number[][]} */
-  const out = [ideal.at];
+  const out: number[][] = [ideal.at];
   const segs = pts.slice(1).map((q, i) => ({ p: pts[i], q, i, len: Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]) }));
-  /** @param {{p: number[], q: number[]}} s @param {number} t */
-  const on = (s, t) => [s.p[0] + (s.q[0] - s.p[0]) * t, s.p[1] + (s.q[1] - s.p[1]) * t];
+  const on = (s: { p: number[], q: number[] }, t: number) =>
+    [s.p[0] + (s.q[0] - s.p[0]) * t, s.p[1] + (s.q[1] - s.p[1]) * t];
   const last = segs[segs.length - 1];
   if (last) out.push(on(last, 0.5));
   const byLength = [...segs].sort((a, b) => (b.len - a.len) || (a.i - b.i));
   /* Flush against either end as well as at fractions of the way: a run that
      is barely longer than the pill has exactly one place where the pill clears
      both the box at one end and the corridor at the other. */
-  /** @param {{p: number[], q: number[], len: number}} s @returns {number[]} */
-  const flush = s => {
+  const flush = (s: { p: number[], q: number[], len: number }): number[] => {
     const half = Math.abs(s.q[0] - s.p[0]) >= Math.abs(s.q[1] - s.p[1]) ? ideal.w / 2 : ideal.h / 2;
     return s.len > half * 2 ? [(half + 2) / s.len, 1 - (half + 2) / s.len] : [];
   };
@@ -216,12 +188,7 @@ function tagSpots(r, ideal) {
    half of another's — and then both names ride the same line. That is still
    better than one name on top of the other: both are readable, and which
    rectangle is which is the question #77 asks. */
-/**
- * @param {Box} shape
- * @param {{at: number[], w: number, h: number}} ideal
- * @returns {number[][]}
- */
-function tabSpots(shape, ideal) {
+function tabSpots(shape: Box, ideal: { at: number[], w: number, h: number }): number[][] {
   const { w } = ideal;
   const out = [ideal.at];
   const left = shape.x + 4;
@@ -234,12 +201,7 @@ function tabSpots(shape, ideal) {
 /* The first spot that costs nothing, else the cheapest, earlier winning a tie.
    `costOf` is told the best so far, so it can stop adding as soon as it is
    past it. */
-/**
- * @param {number[][]} spots
- * @param {(at: number[], low: number) => number} costOf
- * @returns {number[]}
- */
-function cheapest(spots, costOf) {
+function cheapest(spots: number[][], costOf: (at: number[], low: number) => number): number[] {
   let best = spots[0], low = Infinity;
   for (const at of spots) {
     const c = costOf(at, low);
@@ -253,17 +215,13 @@ function cheapest(spots, costOf) {
    rides on an edge's tag, since the tag is as wide as the number and the words
    together. Returns where every tag sits, where every boundary's tab sits, and
    every callout placement in the shape drawCallout takes. */
-/**
- * @param {{
- *   planned: Route[],
- *   boxes: Record<string, Box>,
- *   callouts?: Callout[],
- *   boundaries?: Boundary[],
- *   stepFor?: (r: Route) => number|null,
- * }} args
- * @returns {{tags: Map<string, PlacedTag>, tabs: Map<string, PlacedTag>, callouts: CalloutPlace[]}}
- */
-export function planFloating({ planned, boxes, callouts = [], boundaries = [], stepFor = () => null }) {
+export function planFloating({ planned, boxes, callouts = [], boundaries = [], stepFor = () => null }: {
+  planned: Route[],
+  boxes: Record<string, Box>,
+  callouts?: Callout[],
+  boundaries?: Boundary[],
+  stepFor?: (r: Route) => number | null,
+}): { tags: Map<string, PlacedTag>, tabs: Map<string, PlacedTag>, callouts: CalloutPlace[] } {
   const obs = obstacles(boxes, planned);
   /* A callout on an edge lands its ball on the line at a point fixed by the
      route, whichever side its words go, so that point is known before any tag
@@ -280,15 +238,13 @@ export function planFloating({ planned, boxes, callouts = [], boundaries = [], s
      wall until it is clear. It is placed before anything else floats: the name
      of an enclosure is structure, and a label riding an edge gives way to it
      rather than the other way round. */
-  /** @type {Map<string, PlacedTag>} */
-  const tabs = new Map();
+  const tabs = new Map<string, PlacedTag>();
   for (const b of boundaries) {
     for (const [i, shape] of b.shapes.entries()) {
       const key = `${b.id}#${i}`;
       const { w, h } = tabSize(b.names?.[i] ?? b.label);
       const ideal = { at: [shape.x + 16 + w / 2, shape.y], w, h };
-      /** @param {number[]} at @returns {Rect} */
-      const rect = at => ({ x: at[0] - w / 2, y: at[1] - h / 2, w, h });
+      const rect = (at: number[]): Rect => ({ x: at[0] - w / 2, y: at[1] - h / 2, w, h });
       const at = cheapest(tabSpots(shape, ideal), (at, low) => {
         const box = rect(at);
         let c = solidCost(grow(box, PAD / 2), obs.solids);
@@ -309,12 +265,10 @@ export function planFloating({ planned, boxes, callouts = [], boundaries = [], s
     .map(r => ({ r, ideal: tagBox(r, stepFor(r)) }))
     .sort((p, q) => (p.ideal.at[0] - q.ideal.at[0]) || (p.ideal.at[1] - q.ideal.at[1]));
 
-  /** @type {Map<string, PlacedTag>} */
-  const tags = new Map();
+  const tags = new Map<string, PlacedTag>();
   for (const { r, ideal } of items) {
     const { w, h } = ideal;
-    /** @param {number[]} at @returns {Rect} */
-    const rect = at => ({ x: at[0] - w / 2, y: at[1] - h / 2, w, h });
+    const rect = (at: number[]): Rect => ({ x: at[0] - w / 2, y: at[1] - h / 2, w, h });
     const at = cheapest(tagSpots(r, ideal), (at, low) => {
       const box = rect(at);
       let c = solidCost(grow(box, PAD / 2), obs.solids);
@@ -347,11 +301,9 @@ export function planFloating({ planned, boxes, callouts = [], boundaries = [], s
     obs.solids.push({ what: `tag ${r.key}`, rect: grow(rect(at), PAD / 2), float: true });
   }
 
-  /** @type {CalloutPlace[]} */
-  const calls = [];
+  const calls: CalloutPlace[] = [];
   for (const c of callouts || []) {
-    /** @type {CalloutPlace[]} */
-    const options = calloutCandidates(c, boxes, planned);
+    const options: CalloutPlace[] = calloutCandidates(c, boxes, planned);
     if (!options.length) continue;
     let best = options[0], low = Infinity;
     for (const p of options) {

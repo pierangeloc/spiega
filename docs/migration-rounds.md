@@ -36,13 +36,16 @@ npm). What remains in phase 1 is #136 (real MCP tool schemas,
 `ready-for-human`).
 
 **Phases 2, 3 and 4 have all started:**
-- **Phase 2 (render):** #141 (`theme.ts`, `math.ts`, `geom.ts`) and #142
-  (`ink.ts`, `glyphs.ts`) landed; #143 (`edges`, `callout`) is now unblocked.
+- **Phase 2 (render):** #141 (`theme.ts`, `math.ts`, `geom.ts`), #142
+  (`ink.ts`, `glyphs.ts`), #143 (`edges.ts`, `callout.ts`) and #144
+  (`layout.ts`, `floating.ts`) landed. One issue left in the phase: #145
+  (`render`, `audit`, and closing `packages/render`), unblocked now.
 - **Phase 3 (server):** #147 (Effect HTTP read routes, loopback/origin
   middleware, `SpiegaHome`/`SpiegaConfig`/`BoardStore` services in
-  `packages/server/`) and #149 (the event stream as a `Stream` over a bounded
-  `PubSub`) landed; #148 (`POST /op` on Effect) and #150 (snapshot, export and
-  the board window) are now unblocked.
+  `packages/server/`), #149 (the event stream as a `Stream` over a bounded
+  `PubSub`) and #148 (`POST /op`, `/settle` and `/close` on the Effect router,
+  the log flushed by a fiber off the request path) landed; #150 (snapshot,
+  export and the board window) is unblocked and is the last of the phase.
 - **Phase 4 (board app):** #152 (framework-free `Model`, `Msg`, `Cmd`, pure
   `update`, and fixture store in `packages/board/src/app/`) landed; #153 (React
   board beside the old one) waits on #145 finishing the render port.
@@ -120,31 +123,79 @@ runtime dependency, and the browser-rule exemption for
 | #142 | Port `ink` and `glyphs` (Phase 2) | **done** (#179) — all 22 `docs/shapes/*.svg` plus the gallery, example and regression sets byte-identical; unblocks #143 → #144 → #145 → #153 |
 | #149 | Event stream as a `Stream` over a `PubSub` (Phase 3) | **done** (#178) — `packages/server/src/events.ts`, `PubSub.sliding(16)`, Node `pipeline` backpressure, heartbeat on a `TestClock`; unblocks #150 → #158 (and #156) |
 
-### Round 5 — unblocked now
+### Round 5 — done
+
+| | | status / unblocks |
+|---|---|---|
+| #143 | Port `edges` and `callout` (Phase 2) | **done** (#181) — unblocks #144 |
+| #148 | `POST /op` on Effect, still off the hot path (Phase 3) | **done** (#180) — draw, settle and close on the Effect router; `Queue` + flush fiber in `packages/server/src/oplog.ts`; p99 budget held |
+
+#150 was pulled from this round and held: it collides with #148 on
+`src/board/server.js`, and the `POST /op` diff is the one whose benchmark has
+to be read against a clean `main`. That collision is now resolved.
+
+The round also turned up #182, which is not a migration issue and matters more
+than either: the harness was not reading every suite's exit code, so some of
+them could fail silently. Two suites were — one of them `restore.mjs`, which
+had been broken for every pre-#74 log on disk since #177, through a review and
+a green CI run. **Every round before Round 6 was judged on a signal that could
+not fail.** The behavioural claims in the table above are worth a skim when
+there is a quiet moment; the pictures and the type checks were never affected.
+
+### Round 6 — done
+
+| | | status / unblocks |
+|---|---|---|
+| #144 | Port `layout` and `floating` (Phase 2) | **done** (#183) — every gallery, example, regression and shape SVG byte-identical; unblocks #145 |
+
+One issue, run alone: with #150 held there was no second track that did not
+collide with it, and a port gated on byte-identical pictures needs no help.
+
+### Round 7 — unblocked now
 
 | | | unblocks |
 |---|---|---|
-| #143 | Port `edges` and `callout` (Phase 2) | #144 → #145 → #153 (the render critical path) |
-| #148 | `POST /op` on Effect, still off the hot path (Phase 3) | **in review** — draw, settle and close on the Effect router; `Queue` + flush fiber in `packages/server/src/oplog.ts`; the rest of phase 3 — watch the p99 budget |
-| #150 | Snapshot, export and the board window on Effect (Phase 3) | #158 |
+| #145 | Port `render` and `audit`, and close the render package (Phase 2) | #153, and with it the whole of phase 4 |
+| #150 | Snapshot, export and the board window on Effect (Phase 3) | #158 → #159 → #160 |
 
-#148 and #150 both touch `src/board/server.js`; #143 does not touch either. If
-all three run at once, land #148 before #150 — the `POST /op` diff is the one
-whose benchmark has to be read against a clean `main`.
+They do not touch each other's files: #145 is `src/render/`, #150 is
+`src/board/server.js` and the snapshot, export and open paths beside it. Run
+them in parallel.
+
+**#145 ends phase 2** and is the last thing standing between the board and
+React: #153 is blocked on it, and #154, #155, #156 and #157 behind that. It is
+also the widest render diff of the migration — `render.js` is what every
+picture comes out of — so the byte-identity gate does the whole job again.
+
+**#150 wants eyes, not just a suite.** Two of its four acceptance criteria
+cannot be self-verified by whoever writes it:
+
+- `spiega open` gets a chromeless window **on macOS and Linux** — two
+  platforms, and CI only runs one of them (macOS is push-only here).
+- a snapshot opens from the filesystem **with no server running**, drawing,
+  transcript and steps intact.
+
+A snapshot that opens empty is the exact failure `AGENTS.md` opens with, and it
+passes every test in the suite. Decide before dispatch who looks: either the
+brief says render it and look and attaches what it saw, or the work stops at
+the PR and a human opens the window and the file.
 
 ### The human track, startable now
 
-**#146, the MCP spike.** Effect's MCP module versus the official SDK wrapped,
-decided on cold start. It is gated on nothing, it is the one unstable-module
-risk in the plan, and it produces the ADR that de-risks #151 long before phase
-3 arrives. The best use of your own hands while agents port the core.
+**#146, the MCP spike**, and **#136** (`board_draw` advertises a real schema,
+which needs four real MCP clients). #151 waits on both.
+
+**#146** is Effect's MCP module versus the official SDK wrapped, decided on
+cold start. It is gated on nothing, it is the one unstable-module risk in the
+plan, and it produces the ADR that de-risks #151 long before phase 3 arrives.
+The best use of your own hands while agents port the core.
 
 ## What to check before calling any of these done
 
 The oracle is not the suite alone.
 
 ```sh
-pnpm test          # 14 suites, inside dist/
+pnpm test          # 16 suites, inside dist/
 pnpm run lint      # the browser rule, over the source tree
 pnpm run typecheck # root plus every package, strict
 pnpm run pack      # the tarball npm would publish
@@ -163,6 +214,9 @@ And, per round:
 - **The browser, which the suite barely sees.** A green run does not mean a
   working board. Anything reachable from the page gets looked at, in a browser,
   at a narrow width too.
+- **That the suite ran at all.** Since #182 the harness reads every suite's
+  exit code, so a failure is a failure. Before it, two of them were failing
+  into a green run. Read the count: 16 passed, not "no output".
 
 ## Two things this queue keeps getting right by accident
 

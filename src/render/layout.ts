@@ -1,4 +1,3 @@
-// @ts-check
 /* ============================================================
    spiega layout — where things land on the board.
 
@@ -21,42 +20,43 @@
 /* A node's slot on the board. `placed` is this map, keyed by node id, and
    assign() mutates it in place — passing the same one across renders pins the
    layout, which is exactly the trap the comment below assign() warns about. */
-/** @typedef {{col: number, row: number}} Placement */
-/** @typedef {Record<string, Placement>} Placed */
+export type Placement = { col: number, row: number };
+export type Placed = Record<string, Placement>;
 
 /* The fields layout actually reads. A Board's Node carries more (drawing hints),
    and structural typing lets it through without layout knowing about them. */
-/**
- * @typedef {Object} LayoutNode
- * @property {string} id
- * @property {string} [label]
- * @property {string} [sub]
- * @property {string} [kind]
- * @property {number} [col]
- * @property {number} [row]
- * @property {string} [place]
- * @property {number} [w]
- * @property {number} [h]
- * @property {string[]} [lines]
- */
+export type LayoutNode = {
+  id: string,
+  label?: string,
+  sub?: string,
+  kind?: string,
+  col?: number,
+  row?: number,
+  place?: string,
+  w?: number,
+  h?: number,
+  lines?: string[],
+};
 
-/** @typedef {{from: string, to: string, label?: string, step?: number|null, bend?: string, via?: Placement[]}} LayoutEdge */
+export type LayoutEdge = {
+  from: string, to: string, label?: string, step?: number | null, bend?: string, via?: Placement[],
+};
 
-/** @typedef {{members?: string[]}} LayoutBoundary */
+export type LayoutBoundary = { members?: string[] };
 
-/** @typedef {{w: number, h: number, labelBelow?: number}} Size */
+type Size = { w: number, h: number, labelBelow?: number };
 
 /* `inkAt` is how far the glyph's ink sits inside one side at a station
    along it, and how far to slide along the side when that station's ray
    misses the ink. Layout does not draw, so it does not set this; render
    asks the glyph and hangs the answer on the box, because an edge only
    ever sees a box. Absent means the ink is the box. */
-/** @typedef {{
- *   x: number, y: number, w: number, h: number,
- *   labelBelow?: number, col?: number, row?: number,
- *   inkAt?: (side: string, along: number) => { inset: number, slide: number },
- *   inkSpan?: (side: string) => { lo: number, hi: number } | null
- * }} Box */
+export type Box = {
+  x: number, y: number, w: number, h: number,
+  labelBelow?: number, col?: number, row?: number,
+  inkAt?: (side: string, along: number) => { inset: number, slide: number },
+  inkSpan?: (side: string) => { lo: number, hi: number } | null,
+};
 
 /* COL_GAP is the least a gutter is ever given. What a gutter actually gets is
    decided per boundary by gutterFor(), from the tags that have to sit in it. */
@@ -83,8 +83,7 @@ import { wrapText, NOTE_LINES, nodeText, tagLines, pillSize } from './ink.js';
 import { measureMath } from './math.js';
 import { inkAt, inkSpan } from './glyphs.js';
 
-/** @type {Record<string, (n: LayoutNode, tw: number) => Size>} */
-const SIZES = {
+const SIZES: Record<string, (n: LayoutNode, tw: number) => Size> = {
   service:   (n, tw) => ({ w: Math.max(156, tw + 52), h: 70 }),
   gateway:   (n, tw) => ({ w: Math.max(166, tw + 72), h: 70 }),
   compute:   (n, tw) => ({ w: Math.max(156, tw + 52), h: 78 }),
@@ -114,22 +113,13 @@ const SIZES = {
   },
 };
 
-/**
- * @param {string} [s]
- * @param {number} [size]
- * @returns {number}
- */
-const textWidth = (s, size = 13.5) => String(s || '').length * size * 0.66;
+const textWidth = (s?: string, size = 13.5): number => String(s || '').length * size * 0.66;
 
 /* These three set their own text, so the wrap that keeps a box the width of the
    thing it names does not apply to them. */
 const OWN_TEXT = new Set(['note', 'formula', 'blob']);
 
-/**
- * @param {LayoutNode} n
- * @returns {{w: number, h: number, labelBelow: number}}
- */
-export function sizeOf(n) {
+export function sizeOf(n: LayoutNode): { w: number, h: number, labelBelow: number } {
   const fn = SIZES[n.kind || ''] || SIZES.service;
   if (OWN_TEXT.has(n.kind || '')) {
     const s = fn(n, Math.max(textWidth(n.label), textWidth(n.sub, 10)));
@@ -155,11 +145,7 @@ export function sizeOf(n) {
    is sized for that side, and the other falls out, with a little air so the
    pill does not touch the box it stops short of. Sizing it to the tag's own
    width instead leaves the pill's far end under the next column's boxes. */
-/**
- * @param {number} tagW
- * @returns {number}
- */
-export function gutterFor(tagW) {
+export function gutterFor(tagW: number): number {
   const hang = KNEE + (1 - KNEE) / 2;
   const span = (tagW / 2 + TAG_AIR - EDGE_GAP) / (1 - hang);
   return Math.max(COL_GAP, Math.ceil(span + EDGE_GAP * 2));
@@ -188,22 +174,13 @@ export function gutterFor(tagW) {
    column computed *from the feedback edge* — so the junction landed after the
    sensor, at the far right, and the loop read as a straight line with a long
    arrow home. */
-/**
- * @param {LayoutNode[]} [nodes]
- * @param {LayoutEdge[]} [edges]
- * @returns {Set<string>}
- */
-export function backEdges(nodes, edges) {
-  /** @type {Record<string, LayoutEdge[]>} */
-  const out = {};
+export function backEdges(nodes?: LayoutNode[], edges?: LayoutEdge[]): Set<string> {
+  const out: Record<string, LayoutEdge[]> = {};
   for (const e of edges || []) (out[e.from] ||= []).push(e);
-  /** @type {Record<string, number|undefined>} */
-  const state = {};                       // undefined | 1 visiting | 2 done
-  /** @type {Set<string>} */
-  const back = new Set();
+  const state: Record<string, number | undefined> = {};   // undefined | 1 visiting | 2 done
+  const back = new Set<string>();
 
-  /** @param {string} id */
-  const visit = id => {
+  const visit = (id: string): void => {
     state[id] = 1;
     for (const e of out[id] || []) {
       if (state[e.to] === 1) back.add(`${e.from}>${e.to}`);   // reaches the stack
@@ -215,17 +192,11 @@ export function backEdges(nodes, edges) {
   return back;
 }
 
-/**
- * @param {{nodes: LayoutNode[], edges?: LayoutEdge[]}} spec
- * @param {Placed} [placed]
- * @returns {Placed}
- */
-export function assign(spec, placed = {}) {
+export function assign(spec: { nodes: LayoutNode[], edges?: LayoutEdge[] }, placed: Placed = {}): Placed {
   const pinned = new Set(Object.keys(placed));
-  const byId = Object.fromEntries(spec.nodes.map(n => [n.id, n]));
+  const byId: Record<string, LayoutNode> = Object.fromEntries(spec.nodes.map(n => [n.id, n]));
   const back = backEdges(spec.nodes, spec.edges);
-  /** @type {Record<string, string[]>} */
-  const incoming = {};
+  const incoming: Record<string, string[]> = {};
   // a back edge says nothing about which column its target belongs in
   for (const e of spec.edges || []) {
     if (back.has(`${e.from}>${e.to}`)) continue;
@@ -233,12 +204,7 @@ export function assign(spec, placed = {}) {
   }
 
   // Explicit placement wins, then "right of X" / "below X", then the flow.
-  /**
-   * @param {LayoutNode} n
-   * @param {Set<string>} [guard]
-   * @returns {Placement}
-   */
-  const resolve = (n, guard = new Set()) => {
+  const resolve = (n: LayoutNode, guard = new Set<string>()): Placement => {
     if (placed[n.id]) return placed[n.id];
     if (guard.has(n.id)) return (placed[n.id] = { col: 0, row: nextRow(0) });
     guard.add(n.id);
@@ -266,12 +232,10 @@ export function assign(spec, placed = {}) {
     return (placed[n.id] = { col, row: nextRow(col) });
   };
 
-  /** @type {Record<string, Set<number>>} */
-  const used = {};
+  const used: Record<string, Set<number>> = {};
   for (const p of Object.values(placed)) (used[p.col] ||= new Set()).add(p.row);
   for (const e of spec.edges || []) for (const p of e.via || []) (used[p.col] ||= new Set()).add(p.row);
-  /** @param {number} col @returns {number} */
-  function nextRow(col) {
+  function nextRow(col: number): number {
     const set = (used[col] ||= new Set());
     let r = 0;
     while (set.has(r)) r++;
@@ -279,8 +243,7 @@ export function assign(spec, placed = {}) {
     return r;
   }
   // keep `used` honest for explicitly placed nodes too
-  /** @param {Placement} p */
-  const claim = p => (used[p.col] ||= new Set()).add(p.row);
+  const claim = (p: Placement) => (used[p.col] ||= new Set()).add(p.row);
 
   for (const n of spec.nodes) claim(resolve(n));
 
@@ -304,15 +267,13 @@ export function assign(spec, placed = {}) {
 /* Turn column/row assignments into pixel boxes. */
 /* `stepFor` says which step number rides on an edge's tag, since the tag is as
    wide as the number and the words together. Layout has no flow of its own. */
-/**
- * @param {{nodes: LayoutNode[], edges?: LayoutEdge[], boundaries?: LayoutBoundary[]}} spec
- * @param {Placed} placed
- * @param {(e: LayoutEdge) => number|null|undefined} [stepFor]
- * @returns {{boxes: Record<string, Box>, lanes: Record<string, Box[]>, width: number, height: number}}
- */
-export function layout(spec, placed, stepFor = e => e.step) {
-  /** @type {Record<string, {n: LayoutNode, p: Placement, s: {w: number, h: number, labelBelow: number}}[]>} */
-  const cols = {};
+export function layout(
+  spec: { nodes: LayoutNode[], edges?: LayoutEdge[], boundaries?: LayoutBoundary[] },
+  placed: Placed,
+  stepFor: (e: LayoutEdge) => number | null | undefined = e => e.step,
+): { boxes: Record<string, Box>, lanes: Record<string, Box[]>, width: number, height: number } {
+  type Slot = { n: LayoutNode, p: Placement, s: { w: number, h: number, labelBelow: number } };
+  const cols: Record<string, Slot[]> = {};
   for (const n of spec.nodes) {
     const p = placed[n.id];
     if (!p) continue;
@@ -324,8 +285,7 @@ export function layout(spec, placed, stepFor = e => e.step) {
      Keep those slots in the same separation pass as boxes so a boundary that
      moves a neighbour cannot move it onto a lane. Nothing enters this path
      on the incremental board. */
-  /** @type {Record<string, string[]>} */
-  const laneIds = {};
+  const laneIds: Record<string, string[]> = {};
   const ids = new Set(spec.nodes.map(n => n.id));
   const back = backEdges(spec.nodes, spec.edges);
   for (const e of spec.edges || []) {
@@ -343,10 +303,8 @@ export function layout(spec, placed, stepFor = e => e.step) {
   }
 
   const colKeys = Object.keys(cols).map(Number).sort((a, b) => a - b);
-  /** @type {Record<string, number>} */
-  const colW = {};
-  /** @type {Record<string, number>} */
-  const colH = {};
+  const colW: Record<string, number> = {};
+  const colH: Record<string, number> = {};
   for (const c of colKeys) {
     colW[c] = Math.max(...cols[c].map(e => e.s.w));
     cols[c].sort((a, b) => a.p.row - b.p.row);
@@ -359,8 +317,7 @@ export function layout(spec, placed, stepFor = e => e.step) {
      out. Done after columns are assigned and before anything is placed: there
      is no placing a tag into a gap it cannot fit. A loop's return runs along
      the floor and never enters a gutter, so it asks for nothing. */
-  /** @type {number[]} */
-  const crossing = colKeys.map(() => 0);
+  const crossing: number[] = colKeys.map(() => 0);
   for (const e of spec.edges || []) {
     if (back.has(`${e.from}>${e.to}`)) continue;
     const a = placed[e.from], b = placed[e.to];
@@ -375,8 +332,7 @@ export function layout(spec, placed, stepFor = e => e.step) {
   }
   const gap = crossing.map(w => (w ? gutterFor(w) : COL_GAP));
 
-  /** @type {Record<string, Box>} */
-  const boxes = {};
+  const boxes: Record<string, Box> = {};
   let x = PAD;
   colKeys.forEach((c, i) => {
     let y = PAD + (tallest - colH[c]) / 2;
@@ -386,8 +342,7 @@ export function layout(spec, placed, stepFor = e => e.step) {
          has no outline worth asking about and the function answers nothing
          that would move a line. Hung on the box here, not painted on later,
          so every caller of layout hands edges the same answer. */
-      /** @type {Box} */
-      const box = {
+      const box: Box = {
         x: Math.round(x + (colW[c] - e.s.w) / 2),
         y: Math.round(y),
         w: e.s.w, h: e.s.h, labelBelow: e.s.labelBelow, col: c, row: e.p.row,
@@ -419,8 +374,7 @@ export function layout(spec, placed, stepFor = e => e.step) {
       height = Math.round(bottom + PAD);
     }
   }
-  /** @type {Record<string, Box[]>} */
-  const lanes = {};
+  const lanes: Record<string, Box[]> = {};
   for (const [key, ids] of Object.entries(laneIds)) {
     lanes[key] = ids.map(id => {
       const box = boxes[id], col = box.col ?? 0;
@@ -435,13 +389,7 @@ export function layout(spec, placed, stepFor = e => e.step) {
 }
 
 /* A boundary is the bounding box of its members, loosened. */
-/**
- * @param {string[]} members
- * @param {Record<string, Box>} boxes
- * @param {number} [pad]
- * @returns {Box|null}
- */
-export function boundaryBox(members, boxes, pad = BOUNDARY_PAD) {
+export function boundaryBox(members: string[], boxes: Record<string, Box>, pad = BOUNDARY_PAD): Box | null {
   const bs = members.map(id => boxes[id]).filter(Boolean);
   if (!bs.length) return null;
   const x0 = Math.min(...bs.map(b => b.x)) - pad;
@@ -455,12 +403,7 @@ export function boundaryBox(members, boxes, pad = BOUNDARY_PAD) {
    it. A dashed enclosure is an assertion — everything in here is one thing —
    so a box in there that was never named is the board saying something false,
    and clearly. The tab is part of the enclosure, and is checked with it. */
-/**
- * @param {string[]} members
- * @param {Record<string, Box>} boxes
- * @returns {string[]}
- */
-export function intruders(members, boxes) {
+export function intruders(members: string[], boxes: Record<string, Box>): string[] {
   const r = boundaryBox(members, boxes);
   if (!r) return [];
   const mine = new Set(members);
@@ -482,19 +425,13 @@ export function intruders(members, boxes) {
    two pieces merge only while the box around both still holds nothing else. A
    member that is left alone is drawn alone — the board says less rather than
    something it does not mean. */
-/**
- * @param {string[]} members
- * @param {Record<string, Box>} boxes
- * @returns {Box[]}
- */
-export function boundaryShapes(members, boxes) {
+export function boundaryShapes(members: string[], boxes: Record<string, Box>): Box[] {
   const whole = boundaryBox(members, boxes);
   if (!whole) return [];
   if (!intruders(members, boxes).length) return [whole];
 
-  /** @type {string[][]} */
-  let pieces = members.filter(id => boxes[id]).map(id => [id]);
-  const clean = (/** @type {string[]} */ ids) => !intruders(ids, boxes).length;
+  let pieces: string[][] = members.filter(id => boxes[id]).map(id => [id]);
+  const clean = (ids: string[]) => !intruders(ids, boxes).length;
   for (let merged = true; merged;) {
     merged = false;
     for (let i = 0; i < pieces.length && !merged; i++)
@@ -505,7 +442,10 @@ export function boundaryShapes(members, boxes) {
         merged = true;
       }
   }
-  return pieces.map(ids => /** @type {Box} */ (boundaryBox(ids, boxes)));
+  /* Every piece holds at least one box — they are built from the members that
+     have one — so nothing is dropped here; the filter is how that is said
+     without asserting it. */
+  return pieces.map(ids => boundaryBox(ids, boxes)).filter((r): r is Box => r !== null);
 }
 
 /* What each piece of a boundary calls itself on its card.
@@ -521,11 +461,10 @@ export function boundaryShapes(members, boxes) {
    would read as an edge. A boundary that is one rectangle keeps its name as
    written. */
 /**
- * @param {string|undefined} label
- * @param {Box[]} shapes what boundaryShapes returned
- * @returns {(string|undefined)[]} one name per shape, in the same order
+ * @param shapes what boundaryShapes returned
+ * @returns one name per shape, in the same order
  */
-export function pieceNames(label, shapes) {
+export function pieceNames(label: string | undefined, shapes: Box[]): (string | undefined)[] {
   if (shapes.length < 2) return shapes.map(() => label);
   const reading = shapes.map((_, i) => i)
     .sort((i, j) => (shapes[i].y - shapes[j].y) || (shapes[i].x - shapes[j].x) || (i - j));
@@ -550,34 +489,31 @@ export function pieceNames(label, shapes) {
    exactly two enclosures that want opposite things. A group that cannot be
    satisfied is given up whole (boundaryShapes draws it as pieces); returning
    null means nothing could be placed at all. */
-/**
- * @param {string[][]} groups
- * @param {Record<string, Box>} boxes
- * @returns {Record<string, number>|null}
- */
-function separate(groups, boxes) {
+function separate(groups: string[][], boxes: Record<string, Box>): Record<string, number> | null {
   const ids = Object.keys(boxes);
-  /** @param {string} id */
-  const span = id => boxes[id].h + (boxes[id].labelBelow || 0);
+  const span = (id: string) => boxes[id].h + (boxes[id].labelBelow || 0);
 
-  /** @typedef {Map<string, Map<string, number>>} Graph */
-  /** @type {Graph} */
-  const graph = new Map(ids.map(id => [id, new Map()]));
-  /** @param {string} from @param {string} to @returns {boolean} */
-  const reaches = (from, to) => {
+  const graph = new Map<string, Map<string, number>>(ids.map(id => [id, new Map()]));
+  /* Every id is seeded above, and nothing below asks for one that was not.
+     Saying it this way rather than asserting the lookup keeps the assumption
+     where it can be read. */
+  const edgesOf = (id: string): Map<string, number> => {
+    let edges = graph.get(id);
+    if (!edges) graph.set(id, edges = new Map());
+    return edges;
+  };
+  const reaches = (from: string, to: string): boolean => {
     const seen = new Set([from]);
     const todo = [from];
-    while (todo.length) {
-      const at = /** @type {string} */ (todo.pop());
+    for (let at = todo.pop(); at !== undefined; at = todo.pop()) {
       if (at === to) return true;
       for (const next of graph.get(at)?.keys() || [])
         if (!seen.has(next)) { seen.add(next); todo.push(next); }
     }
     return false;
   };
-  /** @param {string} above @param {string} below @param {number} by @returns {() => void} */
-  const stack = (above, below, by) => {
-    const edges = /** @type {Map<string, number>} */ (graph.get(above));
+  const stack = (above: string, below: string, by: number): (() => void) => {
+    const edges = edgesOf(above);
     const before = edges.get(below);
     edges.set(below, Math.max(by, before ?? 0));
     return () => { if (before === undefined) edges.delete(below); else edges.set(below, before); };
@@ -587,12 +523,12 @@ function separate(groups, boxes) {
      have: where it already is. Inside the rectangle, a box in a member's own
      column keeps its order against that member, and any other goes to whichever
      half it is nearer, below if it cannot tell. */
-  /** @type {{g: number, id: string, mine: string[], prefer: boolean}[]} */
-  const asks = [];
+  const asks: { g: number, id: string, mine: string[], prefer: boolean }[] = [];
   groups.forEach((members, g) => {
     const mine = members.filter(id => boxes[id]);
     if (!mine.length) return;
-    const rect = /** @type {Box} */ (boundaryBox(mine, boxes));
+    const rect = boundaryBox(mine, boxes);
+    if (!rect) return;
     for (const id of ids) {
       const b = boxes[id];
       if (mine.includes(id) || !(b.x < rect.x + rect.w && b.x + b.w > rect.x)) continue;
@@ -612,11 +548,9 @@ function separate(groups, boxes) {
      The search is capped, because a board with a dozen overlapping groups could
      otherwise be asked to try every combination; running out is just failure,
      and failure is what gives a group up. */
-  /** @type {Set<number>} */
-  let given = new Set();
+  let given = new Set<number>();
   let budget = 0;
-  /** @param {number} k @returns {boolean} */
-  const settle = k => {
+  const settle = (k: number): boolean => {
     if (k === asks.length) return true;
     const { g, id, mine, prefer } = asks[k];
     if (given.has(g)) return settle(k + 1);
@@ -641,12 +575,11 @@ function separate(groups, boxes) {
   /* Order within each column: the plain row order, except where a constraint
      above says otherwise. A box is taken as soon as nothing still waiting must
      come before it, lowest row first. */
-  /** @type {Record<number, string[]>} */
-  const byCol = {};
+  const byCol: Record<number, string[]> = {};
   for (const id of ids) (byCol[boxes[id].col ?? 0] ||= []).push(id);
   for (const col of Object.values(byCol)) {
     const waiting = col.sort((p, q) => (boxes[p].row ?? 0) - (boxes[q].row ?? 0));
-    const order = [];
+    const order: string[] = [];
     while (waiting.length) {
       const k = waiting.findIndex(id => !waiting.some(other => other !== id && reaches(other, id)));
       order.push(...waiting.splice(Math.max(k, 0), 1));
@@ -658,14 +591,11 @@ function separate(groups, boxes) {
      against each other by constraints that were each fine alone. */
   const indegree = new Map(ids.map(id => [id, 0]));
   for (const tos of graph.values()) for (const to of tos.keys()) indegree.set(to, (indegree.get(to) || 0) + 1);
-  /** @type {Record<string, number>} */
-  const y = Object.fromEntries(ids.map(id => [id, PAD]));
+  const y: Record<string, number> = Object.fromEntries(ids.map(id => [id, PAD]));
   const ready = ids.filter(id => !indegree.get(id));
-  /** @type {string[]} */
-  const order = [];
+  const order: string[] = [];
   let done = 0;
-  while (ready.length) {
-    const id = /** @type {string} */ (ready.shift());
+  for (let id = ready.shift(); id !== undefined; id = ready.shift()) {
     done++;
     order.push(id);
     for (const [to, by] of graph.get(id) || []) {
@@ -698,8 +628,7 @@ function separate(groups, boxes) {
   let bottom = PAD;
   for (const id of ids) bottom = Math.max(bottom, y[id] + span(id));
 
-  /** @type {Record<string, number>} */
-  const latest = Object.fromEntries(ids.map(id => [id, bottom - span(id)]));
+  const latest: Record<string, number> = Object.fromEntries(ids.map(id => [id, bottom - span(id)]));
   for (let i = order.length - 1; i >= 0; i--) {
     const id = order[i];
     for (const [to, by] of graph.get(id) || [])
