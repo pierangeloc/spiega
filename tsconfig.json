@@ -24,6 +24,8 @@
     "src/render/render.js",
     "src/render/layout.js",
     "src/render/floating.js",
-    "src/render/geom.js"
+    "src/render/theme.ts",
+    "src/render/math.ts",
+    "src/render/geom.ts"
   ]
 }
