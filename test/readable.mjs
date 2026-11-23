@@ -1,7 +1,7 @@
 /* ============================================================
    Is the picture readable? The suite's end of the audit.
 
-   The measurement itself moved to src/render/audit.js when #56 made it
+   The measurement itself moved to src/render/audit.ts when #56 made it
    something the agent is told and not only something the suite asserts. It is
    the same code and the same wording; what lives here is the part that is only
    ever wanted from a terminal: load a spec off disk, render it, print what the
