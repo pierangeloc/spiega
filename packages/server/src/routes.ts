@@ -1,10 +1,11 @@
 /* ============================================================
    The board server's read routes on Effect's HttpRouter.
 
-   Every route here is read-only (board state, identity, board list, index,
-   and static assets). Paths, status codes, headers and response shapes match
-   src/board/server.js byte for byte so the board page, CLI and MCP clients
-   keep working unchanged.
+   The read routes (board state, identity, board list, index, event stream and
+   static assets) and the write routes (draw, settle, close). Paths, status
+   codes, headers and response shapes match what src/board/server.js answered
+   byte for byte so the board page, CLI and MCP clients keep working
+   unchanged.
    ============================================================ */
 
 import fs from 'node:fs/promises';
@@ -12,8 +13,12 @@ import path from 'node:path';
 import { Effect, Layer } from 'effect';
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http';
 import { SpiegaConfig, type SpiegaConfigShape } from './config.js';
-import { SecurityMiddleware } from './security.js';
-import { BoardStore } from './store.js';
+import {
+  ApplyFailed, BoardNotFound, InvalidJson, NotJson, messageOf, reply,
+} from './errors.js';
+import { draw, settle } from './ops.js';
+import { SecurityMiddleware, isJsonContentType } from './security.js';
+import { BoardStore, type BoardEntry } from './store.js';
 
 export const MIME: Readonly<Record<string, string>> = {
   '.html': 'text/html',
@@ -238,5 +243,105 @@ export const ReadRoutes = HttpRouter.use((router) =>
   }),
 );
 
+/* The most a body may be before it is refused as unreadable. */
+const MAX_BODY = 4e6;
+
+const entryOf = (store: BoardStore['Service'], name: string): Effect.Effect<BoardEntry, BoardNotFound> => {
+  const entry = store.get(name);
+  return entry ? Effect.succeed(entry) : Effect.fail(new BoardNotFound({ name }));
+};
+
+/* After the board is found, so a request for a board that is gone hears "gone"
+   whatever it was carrying. */
+const requireJson: Effect.Effect<void, NotJson, HttpServerRequest.HttpServerRequest> = Effect.gen(
+  function* () {
+    const req = yield* HttpServerRequest.HttpServerRequest;
+    if (!isJsonContentType(req.headers['content-type'])) return yield* new NotJson();
+  },
+);
+
+const jsonBody: Effect.Effect<unknown, InvalidJson, HttpServerRequest.HttpServerRequest> = Effect.gen(
+  function* () {
+    const req = yield* HttpServerRequest.HttpServerRequest;
+    const text = yield* req.text.pipe(Effect.mapError((e) => new InvalidJson({ message: messageOf(e) })));
+    if (text.length > MAX_BODY) return yield* new InvalidJson({ message: 'body too large' });
+    return yield* Effect.try({
+      try: (): unknown => JSON.parse(text),
+      catch: (e) => new InvalidJson({ message: messageOf(e) }),
+    });
+  },
+);
+
+/* Draw, settle and close. Nothing here awaits a write: `draw` and `settle` apply
+   the ops to the board and hand them to the log's queue, which is flushed by a
+   fiber of its own (see oplog.ts). Close is the one route that waits on the
+   file, and it is not on the critical path of anyone talking: it is a board
+   being let go, and its last tick of ops goes with it. */
+export const WriteRoutes = HttpRouter.use((router) =>
+  Effect.gen(function* () {
+    const store = yield* BoardStore;
+    const answer = <R>(
+      route: Effect.Effect<HttpServerResponse.HttpServerResponse, BoardNotFound | NotJson | InvalidJson | ApplyFailed, R>,
+    ) => route.pipe(Effect.catch((e) => Effect.succeed(reply(e))));
+
+    yield* router.add(
+      'POST',
+      '/b/:name/op',
+      answer(Effect.gen(function* () {
+        const params = yield* HttpRouter.params;
+        const entry = yield* entryOf(store, params.name ?? '');
+        yield* requireJson;
+        const body = yield* jsonBody;
+        /* applyOps refuses what it can see is wrong; this is for what it
+           cannot, so a malformed batch still costs one request rather than the
+           process. */
+        const drawn = yield* Effect.try({
+          try: () => draw(entry, body),
+          catch: (e) => new ApplyFailed({ message: messageOf(e) }),
+        });
+        /* After the broadcast, so the pane has already moved and the
+           millisecond is spent on the caller's own reply rather than on the
+           drawing appearing. */
+        const audit = drawn.wantsAudit
+          ? { audit: yield* Effect.promise(() => store.audit(drawn.surface)) }
+          : {};
+        return HttpServerResponse.jsonUnsafe({ ...drawn.reply, ...audit }, { status: drawn.status });
+      })),
+    );
+
+    yield* router.add(
+      'POST',
+      '/b/:name/settle',
+      answer(Effect.gen(function* () {
+        const params = yield* HttpRouter.params;
+        const entry = yield* entryOf(store, params.name ?? '');
+        yield* requireJson;
+        yield* Effect.try({
+          try: () => settle(entry),
+          catch: (e) => new ApplyFailed({ message: messageOf(e) }),
+        });
+        return HttpServerResponse.jsonUnsafe({ ok: true, board: entry.board }, { status: 200 });
+      })),
+    );
+
+    /* Let this board go, and leave the other seven drawing. One process holds
+       all of them, so stopping one is a map deletion, not a kill. */
+    yield* router.add(
+      'POST',
+      '/b/:name/close',
+      answer(Effect.gen(function* () {
+        const params = yield* HttpRouter.params;
+        const name = params.name ?? '';
+        yield* entryOf(store, name);
+        const left = yield* Effect.promise(() => store.close(name));
+        return HttpServerResponse.jsonUnsafe({ ok: true, name, left }, { status: 200 });
+      })),
+    );
+  }),
+);
+
 /* Complete read-only Effect HTTP app with security middleware installed globally. */
 export const ReadApp = Layer.mergeAll(SecurityMiddleware, ReadRoutes);
+
+/* The read routes and the write routes together: what the board server runs. */
+export const BoardApp = Layer.mergeAll(SecurityMiddleware, ReadRoutes, WriteRoutes);

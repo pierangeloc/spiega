@@ -23,37 +23,31 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { emptyBoard, applyOps, boardOps } from './state.js';
-import { settleOp, applySettlingOps } from './settle.js';
-import { restoreBoard, createLog, boardLogFile } from './log.js';
+import { emptyBoard, boardOps } from './state.js';
+import { restoreBoard, openLogFile, boardLogFile } from './log.js';
 import { home } from '../home.js';
 
-/* The op Schema, from the typed domain, loaded when a board starts serving
-   rather than when this module is imported.
+/* The Effect server: the routes, the op log's writer and the op Schema that
+   screens what an agent posts.
  *
  * Reached by path rather than by package name because this artefact has no
  * resolution of its own — every module in it finds its neighbours by walking
- * up from its own file — and imported here, in the server, rather than in
+ * up from its own file — and loaded here, in the server, rather than in
  * state.js, because the board page loads state.js off disk and could not fetch
  * `effect`. See eslint.config.js.
  *
- * Lazily, because of who else imports this file. The MCP server wants
- * `resolveBoard` and `claimSession` from it and never listens on a socket:
- * loading the Schema eagerly put 70 ms of Effect into the start-up of a
- * process that posts its ops over HTTP to somebody else's board and never
- * decodes one. Started at `listen`, so a board that is serving has it long
- * before the first op arrives.
+ * On first use, and by `require`, which reads an ES module synchronously: a
+ * board is held the moment it is asked for, and holding one opens its log,
+ * which is made here. Lazily, because of who else imports this file. The MCP
+ * server wants `resolveBoard` and `claimSession` from it and never listens on
+ * a socket: loading Effect eagerly put 70 ms into the start-up of a process
+ * that posts its ops over HTTP to somebody else's board and never decodes one.
  */
-let schema = null;
-const loadSchema = () => (schema ??= import('../../packages/core/src/schema/op.js'));
-
-/* The Effect HTTP server and security middleware, loaded lazily when a server
-   is created rather than when this module is imported — for the same cold-start
-   reason as `loadSchema` above: the MCP server imports `resolveBoard` and
-   `claimSession` from here and never binds a socket. */
+const require = createRequire(import.meta.url);
 let serverPkg = null;
-const loadServerPkg = () => (serverPkg ??= import('../../packages/server/src/index.js'));
+const loadServerPkg = () => (serverPkg ??= require('../../packages/server/src/index.js'));
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
@@ -108,32 +102,6 @@ const failedOp = (res, e) => {
   return json(res, 500, { ok: false, error: `spiega could not apply these ops: ${message}` });
 };
 
-/* The batch, split into what can be drawn and why the rest cannot.
-
-   A refused op is dropped rather than passed on: every one of these would have
-   been refused by the reducer too, or — the three the Schema is stricter about
-   — would have been accepted and drawn nothing. What it must not do is take
-   the rest of the batch down with it. Half an explanation on the board beats
-   none, and the reply names what is missing.
-
-   Anything that is not an op at all goes through untouched, for the reducer to
-   refuse: `applyOps` promises never to throw on input, and it says that one
-   well already. */
-const screen = (ops, reasonFor) => {
-  const list = Array.isArray(ops) ? ops : [ops];
-  const kept = [];
-  const errors = [];
-  for (const op of list) {
-    const why = reasonFor(op);
-    if (why) errors.push(why);
-    else kept.push(op);
-  }
-  /* Always a list, even where one op came in: a single op refused would
-     otherwise leave `undefined` in its place, and the reducer would answer a
-     question nobody asked by refusing that too. */
-  return { ops: kept, errors };
-};
-
 const readBody = req => new Promise((resolve, reject) => {
   let b = '';
   req.on('data', c => { b += c; if (b.length > 4e6) reject(new Error('body too large')); });
@@ -142,6 +110,8 @@ const readBody = req => new Promise((resolve, reject) => {
 });
 
 export function createServer({ board = null, name = DEFAULT_BOARD, persist = false, debounce = 100 } = {}) {
+  const pkg = loadServerPkg();
+
   /* name -> { name, board, events, log }. Nothing else in the process is per
      board: the renderer, the port and the HTTP server are shared. Tests and
      one-off renders stay in memory; `startBoard` turns persistence on. */
@@ -167,9 +137,14 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     boards.set(nm, entry);
     if (persist && !loaded.unreadable) {
       try {
-        entry.log = createLog(boardFile(nm), {
-          lines: loaded.lines, tail: loaded.tail, debounce,
+        entry.log = pkg.createOpLog(openLogFile(boardFile(nm), {
+          lines: loaded.lines, tail: loaded.tail,
           snapshot: () => boardOps(entry.board),
+        }), {
+          debounce,
+          /* A write that stops working says so on the board, not only here: the
+             log's own warning goes to a terminal nobody is reading. */
+          onStatus: () => broadcast(entry, 'saving', saving(entry)),
         });
       } catch (e) {
         // An unwritable state directory must not stop the board being drawn on.
@@ -207,11 +182,18 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
      problem: it looks exactly like one that is. The lock is taken when the
      board is first held, so this does not change under us — a second server
      never becomes the owner while the first is alive. `memory` is not a
-     warning: tests and one-off renders are meant to be in memory. */
+     warning: tests and one-off renders are meant to be in memory.
+
+     `write-failed` is the one that can start part-way through: the file was
+     ours and the lock held, and then a write stopped working. The log keeps
+     the ops and tries again, so it clears itself when the disk does. */
   const saving = entry => {
     if (!persist) return { saving: false, why: 'memory' };
     if (!entry.log) return { saving: false, why: 'unwritable', file: boardFile(entry.name) };
     if (!entry.log.owner) return { saving: false, why: 'other-server', file: entry.log.file };
+    if (entry.log.failure !== null) {
+      return { saving: false, why: 'write-failed', file: entry.log.file, error: entry.log.failure };
+    }
     return { saving: true, file: entry.log.file };
   };
 
@@ -227,13 +209,15 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
   const broadcast = (entry, event, data) => entry.events?.publish(event, data);
   const viewers = entry => entry.events?.viewers ?? 0;
 
-  const settle = entry => {
-    if (entry.board.settled || !entry.board.nodes.length) return;
-    const { fresh, errors, applied } = applyOps(entry.board, settleOp(entry.board));
-    if (errors.length) throw new Error(errors.join('; '));
-    entry.log?.push(applied);
-    broadcast(entry, 'patch', { board: entry.board, fresh });
-  };
+  /* The same settle as POST /settle, for the routes that still need a settled
+     board before they draw it. */
+  const settle = entry => pkg.settle(readEntry(entry));
+
+  const readEntry = entry => ({
+    name: entry.name, board: entry.board, viewers: viewers(entry),
+    get events() { return entry.events ??= pkg.createBoardEvents(); },
+    get log() { return entry.log; },
+  });
 
   const first = hold(name, board);
 
@@ -244,40 +228,39 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
   const baseOf = req => app.url || `http://${req.headers.host || `127.0.0.1:${PORT}`}`;
 
   /* The Effect HTTP router handles all security checks (loopback host,
-     same-origin-or-absent origin, silent OPTIONS, no CORS headers) and every
-     read route (/icon.svg, /src/*, /, /index.html, /boards GET,
-     /b/:name, /b/:name/, /b/:name/state, /b/:name/whoami, /b/:name/events). Started eagerly
-     when a server is created so it is ready before the first request lands,
-     while staying out of the import graph of MCP processes that never listen. */
-  const effectServer = loadServerPkg().then(pkg => {
-    const readEntry = entry => ({
-      name: entry.name, board: entry.board, viewers: viewers(entry),
-      get events() { return entry.events ??= pkg.createBoardEvents(); },
-    });
-    const bridge = pkg.createBoardReadBridge(
-      { rootDir: ROOT, port: PORT, defaultBoard: DEFAULT_BOARD, persist, baseUrl: () => app.url },
-      {
-        get: nm => {
-          const e = boards.get(nm);
-          return e ? readEntry(e) : undefined;
-        },
-        reopen: (nm, boardUrl) => {
-          const e = reopen(nm, boardUrl);
-          return e ? readEntry(e) : undefined;
-        },
-        listOpen: () => [...boards.values()].map(readEntry),
-        listSaved: () => persist ? savedBoards().filter(s => !boards.has(s.name)) : [],
-        saving: nm => {
-          const e = boards.get(nm);
-          return e ? saving(e) : { saving: false, why: 'memory' };
-        },
+     same-origin-or-absent origin, silent OPTIONS, no CORS headers), every read
+     route (/icon.svg, /src/*, /, /index.html, /boards GET, /b/:name,
+     /b/:name/, /b/:name/state, /b/:name/whoami, /b/:name/events) and the
+     routes that change a board: POST /b/:name/op, /settle and /close. What it
+     declines is answered below. */
+  const { isJsonContentType } = pkg;
+  const bridge = pkg.createBoardReadBridge(
+    { rootDir: ROOT, port: PORT, defaultBoard: DEFAULT_BOARD, persist, baseUrl: () => app.url },
+    {
+      get: nm => {
+        const e = boards.get(nm);
+        return e ? readEntry(e) : undefined;
       },
-    );
-    return { bridge, isJsonContentType: pkg.isJsonContentType };
-  });
+      reopen: (nm, boardUrl) => {
+        const e = reopen(nm, boardUrl);
+        return e ? readEntry(e) : undefined;
+      },
+      listOpen: () => [...boards.values()].map(readEntry),
+      listSaved: () => persist ? savedBoards().filter(s => !boards.has(s.name)) : [],
+      saving: nm => {
+        const e = boards.get(nm);
+        return e ? saving(e) : { saving: false, why: 'memory' };
+      },
+      close: async nm => {
+        await drop(nm);
+        unregisterBoard(nm);
+        return boards.size;
+      },
+      audit: auditBoard,
+    },
+  );
 
   const server = http.createServer(async (req, res) => {
-    const { bridge, isJsonContentType } = await effectServer;
     if (await bridge.handle(req, res)) return;
 
     const url = new URL(req.url, 'http://x');
@@ -335,56 +318,6 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     }
     const board = entry.board;
 
-    if (rest === '/op' && req.method === 'POST') {
-      if (!isJsonContentType(req.headers['content-type'])) {
-        return json(res, 415, { ok: false, error: 'expected content-type: application/json' });
-      }
-      let ops;
-      try { ops = JSON.parse(await readBody(req)); }
-      catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + e.message }); }
-      /* Decoded against the op Schema before the reducer sees any of it, so a
-         field that is wrong comes back named — `edge: Missing key at ["to"]`,
-         not `not an op`. The agent is mid-sentence and gets one reply; it has
-         to be able to fix the op from what the reply says.
-
-         The ops that pass go on untouched rather than decoded: node and edge
-         spread whatever they carry onto the board, the renderer reads fields
-         the Schema does not name, and decoding would quietly strip them. */
-      const screened = screen(ops && ops.ops ? ops.ops : ops, (await loadSchema()).reasonFor);
-      let result;
-      /* applyOps refuses what it can see is wrong; this is for what it cannot,
-         so a malformed batch still costs one request rather than the process.
-         The body itself can be `null`, so even reading `ops.ops` is in here. */
-      try { result = applySettlingOps(board, screened.ops); }
-      catch (e) { return failedOp(res, e); }
-      const { fresh, warnings, applied } = result;
-      const errors = [...screened.errors, ...result.errors];
-      /* No file I/O and no await here: the ops go into the log writer's buffer
-         and the flush happens on its own timer. This route is on the critical
-         path of somebody talking. */
-      if (applied.length) entry.log?.push(applied);
-      /* Which chapters moved, for the windows whose reader is somewhere else:
-         a tab that changed quietly behind someone is the thing chapters are
-         meant to prevent. */
-      const amended = applied.filter(o => o.op === 'amend').map(o => o.chapter);
-      broadcast(entry, 'patch', { board, fresh, amended });
-      /* A warning is not a refusal: the op landed, and the status says so.
-         It rides back on the same response because the agent that drew the
-         box is listening to exactly one thing, and only until its next turn. */
-      /* An amendment was aimed at a chapter, so that is the chapter the reply
-         is about: counting the one being drawn on would answer a question
-         nobody asked, in the same breath as the answer to the one they did. */
-      const aimed = amended.length ? surfaceOf(board, amended[amended.length - 1]) : null;
-      return json(res, errors.length ? 207 : 200, {
-        ok: !errors.length, errors, warnings, rev: board.rev,
-        nodes: board.nodes.length, edges: board.edges.length, steps: board.flow.length,
-        viewers: viewers(entry),
-        ...(aimed ? { amended: { chapter: amended[amended.length - 1], title: aimed.title ?? board.chapter,
-          nodes: aimed.nodes.length, edges: aimed.edges.length, steps: aimed.flow.length } } : {}),
-        ...(ops && ops.audit ? { audit: await auditBoard(aimed || board) } : {}),
-      });
-    }
-
     /* Play the session back, on request from the CLI or the agent. The log is
        already here, so re-running an explanation costs nothing and the model
        never has to think the drawing out a second time. */
@@ -393,24 +326,6 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
       const drawable = board.log.filter(e => e.op !== 'focus' && e.op !== 'clear').length;
       if (drawable) broadcast(entry, 'replay', { rev: board.rev });
       return json(res, 200, { ok: !!drawable, ops: drawable, viewers: viewers(entry) });
-    }
-
-    // Narration begins in the browser, but the handover belongs in the same
-    // server log as an agent's explicit settle, not just in that one window.
-    if (rest === '/settle' && req.method === 'POST') {
-      if (!isJsonContentType(req.headers['content-type'])) {
-        return json(res, 415, { ok: false, error: 'expected content-type: application/json' });
-      }
-      try { settle(entry); } catch (e) { return failedOp(res, e); }
-      return json(res, 200, { ok: true, board });
-    }
-
-    /* Let this board go, and leave the other seven drawing. One process holds
-       all of them, so stopping one is a map deletion, not a kill. */
-    if (rest === '/close' && req.method === 'POST') {
-      await drop(nm);
-      unregisterBoard(nm);
-      return json(res, 200, { ok: true, name: nm, left: boards.size });
     }
 
     // The board as one standalone file, for pasting into a PR or a doc.
@@ -463,7 +378,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
       e.events?.close();
       e.log?.close();
     }
-    void effectServer.then(({ bridge }) => bridge.dispose()).catch(() => {});
+    void bridge.dispose().catch(() => {});
   });
 
   const app = {
@@ -488,10 +403,6 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
    A board that cannot be rendered says nothing here. The ops landed, the
    status says so, and an explanation does not stop because the measurement
    of it failed. */
-/* The chapter a number names, counting from one as the strip does. The last
-   number is the chapter being drawn on, which lives on the board itself. */
-const surfaceOf = (board, n) => board.chapters[Number(n) - 1] || null;
-
 async function auditBoard(board) {
   try {
     const { renderSVG } = await import('../render/render.js');
@@ -832,12 +743,6 @@ export function boardName() {
    port, in its own process, reachable by exactly the same url shape, so no
    client has to know which it is talking to. */
 export async function listen(app, { port = PORT, solo = false, tries = 20 } = {}) {
-  /* Not awaited: this is the one process that will decode ops, and it has from
-     here until an agent's first op to be ready — which is a human opening a
-     window. Nothing waits for it, and POST /op awaits the same promise, so a
-     first op that somehow beats the import still gets screened. */
-  loadSchema();
-
   const bind = n => new Promise((resolve, reject) => {
     const s = app.server;
     const onErr = e => {

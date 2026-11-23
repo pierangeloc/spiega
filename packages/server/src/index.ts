@@ -39,15 +39,20 @@ export {
   type SavingStatus,
 } from './store.js';
 
-export { MIME, ReadApp, ReadRoutes } from './routes.js';
+export { BoardApp, MIME, ReadApp, ReadRoutes, WriteRoutes } from './routes.js';
+export { ApplyFailed, BoardNotFound, InvalidJson, LogWriteError, NotJson } from './errors.js';
+export { createOpLog, makeOpLog, type LogFile, type OpLog, type OpLogHandle, type OpLogOptions } from './oplog.js';
+export { draw, settle, type Drawn } from './ops.js';
 export { createBoardEvents, type BoardEvents } from './events.js';
 
 export {
   createBoardReadBridge,
   createReadBridge,
+  createBoardWebHandler,
   createReadNodeServer,
   createReadWebHandler,
   isReadRoute,
+  isWriteRoute,
   type ReadAppServices,
   type ReadBridge,
   type WebHandlerHandle,

@@ -1,0 +1,75 @@
+/* ============================================================
+   What can go wrong on the write routes, and the response each one has always
+   been.
+
+   Each failure is a tagged error so the route can say once, in one place,
+   which status and which body a client gets — the old server answered these
+   inline, and its clients parse the answers, so the shapes below are not
+   ours to improve. `reply` is that mapping.
+   ============================================================ */
+
+import { Data } from 'effect';
+import { HttpServerResponse } from 'effect/http';
+import { EXPECTED_JSON_ERROR } from './security.js';
+
+export class BoardNotFound extends Data.TaggedError('BoardNotFound')<{
+  readonly name: string;
+}> {}
+
+export class NotJson extends Data.TaggedError('NotJson') {}
+
+/* The body was not JSON, or was not allowed to be read at all. */
+export class InvalidJson extends Data.TaggedError('InvalidJson')<{
+  readonly message: string;
+}> {}
+
+/* A throw out of the reducer, the settle pass, or the log handing-off.
+   `applyOps` refuses everything it can see is wrong, so what reaches here is
+   what it could not — and costs one request rather than the process. */
+export class ApplyFailed extends Data.TaggedError('ApplyFailed')<{
+  readonly message: string;
+}> {}
+
+/* The log could not be written. Never a response: the ops are already on the
+   board and the agent is mid-sentence, so this one is raised on the board
+   itself (see oplog.ts) and never in reply to the request that happened to
+   precede the flush. */
+export class LogWriteError extends Data.TaggedError('LogWriteError')<{
+  readonly file: string;
+  readonly message: string;
+}> {}
+
+export const messageOf = (e: unknown): string => {
+  const message = e !== null && typeof e === 'object' && 'message' in e ? e.message : undefined;
+  return message ? String(message) : String(e);
+};
+
+type RouteError = BoardNotFound | NotJson | InvalidJson | ApplyFailed;
+
+export const reply = (e: RouteError): HttpServerResponse.HttpServerResponse => {
+  switch (e._tag) {
+    case 'BoardNotFound':
+      // "Gone", not "broken": it is what sends a client off to start a board.
+      return HttpServerResponse.jsonUnsafe(
+        { ok: false, error: `no board named "${e.name}"` },
+        { status: 404 },
+      );
+    case 'NotJson':
+      return HttpServerResponse.jsonUnsafe(
+        { ok: false, error: EXPECTED_JSON_ERROR },
+        { status: 415 },
+      );
+    case 'InvalidJson':
+      return HttpServerResponse.jsonUnsafe(
+        { ok: false, error: `invalid JSON: ${e.message}` },
+        { status: 400 },
+      );
+    case 'ApplyFailed':
+      // Its callers parse the answer, so a failed batch answers in the shape
+      // they expect rather than as plain text they would choke on.
+      return HttpServerResponse.jsonUnsafe(
+        { ok: false, error: `spiega could not apply these ops: ${e.message}` },
+        { status: 500 },
+      );
+  }
+};

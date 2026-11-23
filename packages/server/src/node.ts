@@ -4,23 +4,25 @@
    Uses Effect 4's built-in `HttpRouter.toWebHandler` over Node's `node:http`
    without adding any runtime dependency beyond `effect`.
 
-   Two entry points:
-   - `createReadWebHandler`: pure Fetch Request -> Response handler for direct
-     in-process Effect testing without binding a socket.
+   Entry points:
+   - `createReadWebHandler` / `createBoardWebHandler`: pure Fetch Request ->
+     Response handlers for direct in-process Effect testing without binding a
+     socket, over the read routes alone and over the read and write routes.
    - `createReadBridge`: `handle(req, res): Promise<boolean>` used by
-     `src/board/server.js` so every security check and every read route runs
-     through Effect's HttpRouter while write routes (#148) stay
-     untouched and off the hot path.
+     `src/board/server.js` so every security check, every read route and the
+     write routes (draw, settle, close) run through Effect's HttpRouter. What
+     it declines is for the legacy handler, until #150 moves it.
    - `createReadNodeServer`: a standalone `node:http.Server` serving only the
      Effect read app, for HTTP-level tests (including raw Host headers).
    ============================================================ */
 
 import http from 'node:http';
+import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { Layer } from 'effect';
 import { FindMyWay, HttpRouter } from 'effect/http';
 import { SpiegaConfig, type SpiegaConfigShape } from './config.js';
-import { ReadApp } from './routes.js';
+import { BoardApp, ReadApp } from './routes.js';
 import { isLoopbackHost, isSameOrAbsentOrigin } from './security.js';
 import { BoardStore, type BoardStoreShape } from './store.js';
 
@@ -39,10 +41,18 @@ export const createReadWebHandler = (
     routerConfig: FindMyWay.strictConfig,
   });
 
-/* Which requests belong to the Effect read router today.
-   Write routes (/boards POST, /b/:name/op, /settle, /close),
-   and render/mutation routes (/replay, /export, /snapshot, /snapshot.svg)
-   return false so src/board/server.js handles them until #148 lands. */
+export const createBoardWebHandler = (
+  services: Layer.Layer<ReadAppServices>,
+): WebHandlerHandle =>
+  HttpRouter.toWebHandler(BoardApp.pipe(Layer.provide(services)), {
+    disableLogger: true,
+    routerConfig: FindMyWay.strictConfig,
+  });
+
+/* Which requests belong to the Effect read router.
+   Creating a board (/boards POST) and the render routes (/replay, /export,
+   /snapshot, /snapshot.svg) return false so src/board/server.js handles them
+   until #150 moves them. */
 export const isReadRoute = (method: string, pathname: string): boolean => {
   if (method !== 'GET') return false;
   if (
@@ -62,11 +72,22 @@ export const isReadRoute = (method: string, pathname: string): boolean => {
   return rest === undefined || rest === '/' || rest === '/state' || rest === '/whoami' || rest === '/events';
 };
 
-/* Convert a Node IncomingMessage (headers + method + url, no body needed for
-   security rejections, OPTIONS, or GET read routes) into a Web Request.
+/* The routes that change a board: draw, settle and close. POST only; anything
+   else at those paths is somebody else's 404, as it always was. */
+export const isWriteRoute = (method: string, pathname: string): boolean => {
+  if (method !== 'POST') return false;
+  const m = /^\/b\/([^/]+)(\/.*)?$/.exec(pathname);
+  const rest = m?.[2];
+  return rest === '/op' || rest === '/settle' || rest === '/close';
+};
+
+/* Convert a Node IncomingMessage (headers + method + url) into a Web Request.
+   Security rejections, OPTIONS and GET routes need no body; the write routes
+   carry the client's JSON, streamed in rather than read here, so the route
+   that parses it is the one that says what is wrong with it.
    Explicitly copies the raw `host` and `origin` headers so DNS-rebinding and
    cross-origin checks see the exact values sent on the wire. */
-const toWebRequest = (req: http.IncomingMessage, signal: AbortSignal): Request => {
+const toWebRequest = (req: http.IncomingMessage, signal: AbortSignal, withBody = false): Request => {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
     if (value === undefined) continue;
@@ -81,6 +102,7 @@ const toWebRequest = (req: http.IncomingMessage, signal: AbortSignal): Request =
     method: req.method || 'GET',
     headers,
     signal,
+    ...(withBody ? { body: Readable.toWeb(req) as ReadableStream, duplex: 'half' } : {}),
   });
 };
 
@@ -113,13 +135,14 @@ const serveWebRequest = async (
   req: http.IncomingMessage,
   res: http.ServerResponse,
   standalone = false,
+  withBody = false,
 ): Promise<void> => {
   const abort = new AbortController();
   const onClose = () => abort.abort();
   res.once('close', onClose);
   if (res.destroyed) onClose();
   try {
-    const response = await web.handler(toWebRequest(req, abort.signal));
+    const response = await web.handler(toWebRequest(req, abort.signal, withBody));
     if (standalone && response.status === 404 && response.headers.get('content-type') === null) {
       res.writeHead(404);
       res.end('not found');
@@ -142,7 +165,7 @@ export interface ReadBridge {
 export const createReadBridge = (
   services: Layer.Layer<ReadAppServices>,
 ): ReadBridge => {
-  const web = createReadWebHandler(services);
+  const web = createBoardWebHandler(services);
 
   const handle = async (
     req: http.IncomingMessage,
@@ -153,17 +176,19 @@ export const createReadBridge = (
     const origin = req.headers.origin;
     const pathname = new URL(req.url || '/', 'http://127.0.0.1').pathname;
 
-    // Security rejections, OPTIONS preflights, and all read routes are handled
-    // by the Effect HttpRouter + SecurityMiddleware.
+    // Security rejections, OPTIONS preflights, and the read and write routes
+    // are handled by the Effect HttpRouter + SecurityMiddleware.
+    const writes = isWriteRoute(method, pathname);
     const mustHandle =
       !isLoopbackHost(host) ||
       !isSameOrAbsentOrigin(origin, host) ||
       method === 'OPTIONS' ||
-      isReadRoute(method, pathname);
+      isReadRoute(method, pathname) ||
+      writes;
 
     if (!mustHandle) return false;
 
-    await serveWebRequest(web, req, res);
+    await serveWebRequest(web, req, res, false, writes);
     return true;
   };
 
