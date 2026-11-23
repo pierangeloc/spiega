@@ -244,13 +244,16 @@ for anything similar.
 
 ## Conventions
 
-- **The published package has no dependencies, and never gains one lightly.**
-  The build does — that is what a dev dependency is for — but what npm installs
-  is already built, and `npx spiega` on a machine with nothing on it is the
-  point of the thing. A runtime dependency is a decision, not a convenience.
-  Dagre is the standing exception and stays vendored in `vendor/` as a
-  checked-in ESM bundle: it orders a finished board once, at `settle`. The live
-  layout and the ink stay ours.
+- **A runtime dependency is a decision, not a convenience.** `npx spiega` on a
+  machine with nothing on it is the point of the thing, and every dependency is
+  something that has to arrive before a board can be drawn. The package has
+  exactly one: `effect`, pinned, because the ops are defined once as a Schema
+  and the server decodes against it at `POST /op` — a dependency the migration
+  took deliberately (ADR 0001, #135) and the only one with that standing. The
+  build has as many dev dependencies as it needs; that is what they are for.
+  Dagre is not one of them and is not installed: it stays vendored in `vendor/`
+  as a checked-in ESM bundle, and orders a finished board once, at `settle`.
+  The live layout and the ink stay ours.
 - The op log is append-only. Restore is `applyOps` over the lines read back,
   so there is no second representation to keep in step.
 - Below `LOG_CAP`, never compact: compaction loses the interleaving between

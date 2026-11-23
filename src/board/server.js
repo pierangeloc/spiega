@@ -29,6 +29,25 @@ import { settleOp, applySettlingOps } from './settle.js';
 import { restoreBoard, createLog, boardLogFile } from './log.js';
 import { home } from '../home.js';
 
+/* The op Schema, from the typed domain, loaded when a board starts serving
+   rather than when this module is imported.
+ *
+ * Reached by path rather than by package name because this artefact has no
+ * resolution of its own — every module in it finds its neighbours by walking
+ * up from its own file — and imported here, in the server, rather than in
+ * state.js, because the board page loads state.js off disk and could not fetch
+ * `effect`. See eslint.config.js.
+ *
+ * Lazily, because of who else imports this file. The MCP server wants
+ * `resolveBoard` and `claimSession` from it and never listens on a socket:
+ * loading the Schema eagerly put 70 ms of Effect into the start-up of a
+ * process that posts its ops over HTTP to somebody else's board and never
+ * decodes one. Started at `listen`, so a board that is serving has it long
+ * before the first op arrives.
+ */
+let schema = null;
+const loadSchema = () => (schema ??= import('../../packages/core/src/schema/op.js'));
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
 export const SESSION_DIR = path.join(home(), '.spiega');
@@ -82,6 +101,32 @@ const failedRender = (res, e) => {
 const failedOp = (res, e) => {
   const message = e && e.message ? e.message : String(e);
   return json(res, 500, { ok: false, error: `spiega could not apply these ops: ${message}` });
+};
+
+/* The batch, split into what can be drawn and why the rest cannot.
+
+   A refused op is dropped rather than passed on: every one of these would have
+   been refused by the reducer too, or — the three the Schema is stricter about
+   — would have been accepted and drawn nothing. What it must not do is take
+   the rest of the batch down with it. Half an explanation on the board beats
+   none, and the reply names what is missing.
+
+   Anything that is not an op at all goes through untouched, for the reducer to
+   refuse: `applyOps` promises never to throw on input, and it says that one
+   well already. */
+const screen = (ops, reasonFor) => {
+  const list = Array.isArray(ops) ? ops : [ops];
+  const kept = [];
+  const errors = [];
+  for (const op of list) {
+    const why = reasonFor(op);
+    if (why) errors.push(why);
+    else kept.push(op);
+  }
+  /* Always a list, even where one op came in: a single op refused would
+     otherwise leave `undefined` in its place, and the reducer would answer a
+     question nobody asked by refusing that too. */
+  return { ops: kept, errors };
 };
 
 const readBody = req => new Promise((resolve, reject) => {
@@ -377,13 +422,23 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
       let ops;
       try { ops = JSON.parse(await readBody(req)); }
       catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + e.message }); }
+      /* Decoded against the op Schema before the reducer sees any of it, so a
+         field that is wrong comes back named — `edge: Missing key at ["to"]`,
+         not `not an op`. The agent is mid-sentence and gets one reply; it has
+         to be able to fix the op from what the reply says.
+
+         The ops that pass go on untouched rather than decoded: node and edge
+         spread whatever they carry onto the board, the renderer reads fields
+         the Schema does not name, and decoding would quietly strip them. */
+      const screened = screen(ops && ops.ops ? ops.ops : ops, (await loadSchema()).reasonFor);
       let result;
       /* applyOps refuses what it can see is wrong; this is for what it cannot,
          so a malformed batch still costs one request rather than the process.
          The body itself can be `null`, so even reading `ops.ops` is in here. */
-      try { result = applySettlingOps(board, ops && ops.ops ? ops.ops : ops); }
+      try { result = applySettlingOps(board, screened.ops); }
       catch (e) { return failedOp(res, e); }
-      const { fresh, errors, warnings, applied } = result;
+      const { fresh, warnings, applied } = result;
+      const errors = [...screened.errors, ...result.errors];
       /* No file I/O and no await here: the ops go into the log writer's buffer
          and the flush happens on its own timer. This route is on the critical
          path of somebody talking. */
@@ -889,6 +944,12 @@ export function boardName() {
    port, in its own process, reachable by exactly the same url shape, so no
    client has to know which it is talking to. */
 export async function listen(app, { port = PORT, solo = false, tries = 20 } = {}) {
+  /* Not awaited: this is the one process that will decode ops, and it has from
+     here until an agent's first op to be ready — which is a human opening a
+     window. Nothing waits for it, and POST /op awaits the same promise, so a
+     first op that somehow beats the import still gets screened. */
+  loadSchema();
+
   const bind = n => new Promise((resolve, reject) => {
     const s = app.server;
     const onErr = e => {
