@@ -14,13 +14,43 @@
    ============================================================ */
 
 import { settleOp } from './board/settle.js';
+import type { Boundary, Callout, Edge, FlowStep, Node, Op } from './board/state.js';
 
-/**
- * @param {any} spec a board as a single object
- * @returns {any[]} the ops that draw it, in drawing order
- */
-export function specToOps(spec) {
-  const ops = [];
+export type SpecGroup = { id: string, label?: string | null };
+export type SpecTranscriptEntry = string | { text?: string, step?: number | string | null, edge?: string };
+
+/** A whole board as a single JSON object (examples/, test/boards/, `spiega render`). */
+export type BoardSpec = {
+  title?: string,
+  nodes?: Node[],
+  edges?: Edge[],
+  boundaries?: Boundary[],
+  callouts?: Callout[],
+  groups?: SpecGroup[],
+  flow?: FlowStep[],
+  transcript?: SpecTranscriptEntry[],
+  focus?: number | string | null,
+  settle?: boolean,
+};
+
+export type SpecMeasure = {
+  parts: {
+    title: number,
+    nodes: number,
+    notes: number,
+    edges: number,
+    boundaries: number,
+    callouts: number,
+    steps: number,
+    said: number,
+  },
+  ops: number,
+  asFile: number,
+};
+
+/** The ops that draw a board spec, in drawing order. */
+export function specToOps(spec: BoardSpec): Op[] {
+  const ops: Op[] = [];
   if (spec.title) ops.push({ op: 'title', text: spec.title });
   for (const n of spec.nodes || []) ops.push({ op: 'node', ...n });
   for (const e of spec.edges || []) ops.push({ op: 'edge', ...e });
@@ -56,8 +86,7 @@ export function specToOps(spec) {
    Notes are counted apart from boxes because a note is writing in the margin,
    not a thing in the system, and a tally that says "nine boxes" when one of
    them is a sentence is a tally nobody can check against the picture. */
-/** @param {any} spec */
-export function measure(spec) {
+export function measure(spec: BoardSpec): SpecMeasure {
   const nodes = spec.nodes || [];
   const parts = {
     title: spec.title ? 1 : 0,

@@ -1,4 +1,3 @@
-// @ts-check
 /* ============================================================
    What the narrator reads, and where it is up to.
 
@@ -28,9 +27,7 @@
 
 import { lineStates } from './script.js';
 import { boardMap } from './map.js';
-
-/** @typedef {import('./state.js').Board} Board */
-/** @typedef {import('./state.js').Chapter} Chapter */
+import type { Board, Chapter } from './state.js';
 
 /**
  * One thing the narrator speaks.
@@ -39,44 +36,41 @@ import { boardMap } from './map.js';
  * absent for the outline, which belongs to no chapter — it is the board talking
  * about all of them. `card` is the chapter's number on the map, which is how
  * the page finds the card to light.
- *
- * @typedef {Object} Section
- * @property {'outline'|'line'} kind
- * @property {'lede'|'title'|'line'} [part]  which piece of a map card an outline section is
- * @property {number|null} [chapter]
- * @property {number} [card]
- * @property {number} [line]    index into that chapter's transcript
- * @property {string} text
- * @property {number|null} [step]
  */
+export type Section = {
+  kind: 'outline' | 'line',
+  /** Which piece of a map card an outline section is. */
+  part?: 'lede' | 'title' | 'line',
+  chapter?: number | null,
+  card?: number,
+  /** Index into that chapter's transcript. */
+  line?: number,
+  text: string,
+  step?: number | null,
+};
+
+export type RailMark = 'heard' | 'now' | 'ahead' | null;
 
 /* The words as the board prints them. The rail and the map card run a line
    through a small markdown pass before showing it, and what is spoken has to be
    what is shown or the lit word drifts off the spoken one; this is the same
    pass with the tags left out. */
-/** @param {string} s */
-export const plain = s => String(s ?? '')
+export const plain = (s: string): string => String(s ?? '')
   .replace(/`([^`]+)`/g, '$1')
   .replace(/\*\*([^*]+)\*\*/g, '$1');
 
 /* The map's heading, and the first thing the outline says. One function for
    both, so the sentence that is read is the sentence that is lit. */
-/**
- * @param {string|undefined} title
- * @param {number} count
- */
-export const ledeText = (title, count) =>
+export const ledeText = (title: string | undefined, count: number): string =>
   title ? `${title} — ${count} chapters` : `${count} chapters`;
 
 /* One chapter's script as sections, in the order it was said. */
-/**
- * @param {Chapter|Board} surface
- * @param {number|null} chapter
- * @param {number} [card]
- * @returns {Section[]}
- */
-export function chapterSections(surface, chapter, card) {
-  const states = lineStates(/** @type {Board} */ (/** @type {unknown} */ (surface)));
+export function chapterSections(
+  surface: Chapter | Board,
+  chapter: number | null,
+  card?: number,
+): Section[] {
+  const states = lineStates(surface);
   return (surface?.transcript || []).map((e, i) => ({
     kind: 'line', chapter, card, line: i, text: plain(e.text), step: states[i]?.step ?? null,
   }));
@@ -86,8 +80,8 @@ export function chapterSections(surface, chapter, card) {
    chapter to tell apart. With one, an outline would announce a table of
    contents of a single entry, and the map has nothing to say that the chapter
    does not. */
-/** @param {Board|null|undefined} board */
-export const worthAnOutline = board => boardMap(board).cards.length >= 2;
+export const worthAnOutline = (board: Board | null | undefined): boolean =>
+  boardMap(board).cards.length >= 2;
 
 /* The 30,000-foot view, then the dive.
 
@@ -95,20 +89,15 @@ export const worthAnOutline = board => boardMap(board).cards.length >= 2;
    script in order. A chapter nobody said anything in contributes nothing to
    the dive — there is no line for the board to open it on — but it is still in
    the outline, where it belongs, with only its name. */
-/**
- * @param {Board} board
- * @returns {Section[]}
- */
-export function wholeTape(board) {
+export function wholeTape(board: Board): Section[] {
   const { cards } = boardMap(board);
-  /** @type {Section[]} */
-  const tape = [{ kind: 'outline', part: 'lede', text: ledeText(board.title, cards.length) }];
+  const tape: Section[] = [{ kind: 'outline', part: 'lede', text: ledeText(board.title, cards.length) }];
   for (const c of cards) {
     tape.push({ kind: 'outline', part: 'title', card: c.n, text: c.title });
     if (c.line) tape.push({ kind: 'outline', part: 'line', card: c.n, text: plain(c.line) });
   }
   for (const c of cards) {
-    const surface = c.live ? board : board.chapters[/** @type {number} */ (c.i)];
+    const surface: Chapter | Board = c.live || c.i === null ? board : board.chapters[c.i];
     tape.push(...chapterSections(surface, c.i, c.n));
   }
   return tape;
@@ -117,12 +106,14 @@ export function wholeTape(board) {
 /* Which tape to hand the narrator. `whole` is what the reader asked for by
    pressing play on the map; it is honoured only when there is a board's worth
    to read. `surface` is the chapter being looked at, for the other case. */
-/**
- * @param {Board|null|undefined} board
- * @param {{whole: boolean, surface: Chapter|Board|null|undefined, viewing: number|null}} want
- * @returns {Section[]}
- */
-export function tapeOf(board, { whole, surface, viewing }) {
+export function tapeOf(
+  board: Board | null | undefined,
+  { whole, surface, viewing }: {
+    whole: boolean,
+    surface: Chapter | Board | null | undefined,
+    viewing: number | null,
+  },
+): Section[] {
   if (whole && board && worthAnOutline(board)) return wholeTape(board);
   return surface ? chapterSections(surface, viewing) : [];
 }
@@ -131,12 +122,7 @@ export function tapeOf(board, { whole, surface, viewing }) {
    or -1 when that line is not on this tape. The rail knows its rows by their
    place in one chapter's transcript; the narrator knows sections by their place
    in the whole tape, and a click has to be turned from one into the other. */
-/**
- * @param {Section[]} tape
- * @param {number|null} chapter
- * @param {number} line
- */
-export const locate = (tape, chapter, line) =>
+export const locate = (tape: Section[], chapter: number | null, line: number): number =>
   tape.findIndex(s => s.kind === 'line' && s.chapter === chapter && s.line === line);
 
 /* How each row of the rail stands against the playhead, for the rows of one
@@ -148,16 +134,13 @@ export const locate = (tape, chapter, line) =>
 
    Null for every row before the tape has started: marks that said "all of this
    is ahead" would be noise on a board nobody has pressed play on. */
-/**
- * @param {Section[]} tape
- * @param {number} index  the section being read, or -1
- * @param {number|null} chapter
- * @param {number} rows
- * @returns {(('heard'|'now'|'ahead')|null)[]}
- */
-export function railMarks(tape, index, chapter, rows) {
-  /** @type {(('heard'|'now'|'ahead')|null)[]} */
-  const marks = [];
+export function railMarks(
+  tape: Section[],
+  index: number,
+  chapter: number | null,
+  rows: number,
+): RailMark[] {
+  const marks: RailMark[] = [];
   for (let line = 0; line < rows; line++) {
     const at = locate(tape, chapter, line);
     marks.push(index < 0 || at < 0 ? null : at < index ? 'heard' : at === index ? 'now' : 'ahead');
@@ -169,13 +152,11 @@ export function railMarks(tape, index, chapter, rows) {
    anything from 0.5 to 2.5; these are the ones worth stopping on, and each
    press is a restart of the sentence, so a slider that sweeps through forty
    values would restart it forty times. */
-export const RATES = [0.75, 1, 1.25, 1.5, 2];
+export const RATES = [0.75, 1, 1.25, 1.5, 2] as const;
 
 /* The next speed on the dial. A rate that is not on it — `[` and `]` step by a
    tenth — moves to the next one above, and the top wraps to the bottom. */
-/** @param {number} rate */
-export const nextRate = rate =>
+export const nextRate = (rate: number): number =>
   RATES.find(r => r > rate + 1e-9) ?? RATES[0];
 
-/** @param {number} rate */
-export const rateLabel = rate => `${Number(rate.toFixed(2))}×`;
+export const rateLabel = (rate: number): string => `${Number(rate.toFixed(2))}×`;
