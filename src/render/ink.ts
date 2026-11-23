@@ -12,9 +12,13 @@
 
 import { INK } from './theme.js';
 
+/* A point. `number[]` rather than a tuple so a literal `[x, y]` arrives typed
+   without ceremony, and destructuring `const [x, y] = p` still reads as a pair. */
+export type Pt = number[];
+
 /* ---------- seeded noise ---------- */
 
-export function hashSeed(str) {
+export function hashSeed(str: string | number): number {
   let h = 2166136261;
   for (let i = 0; i < String(str).length; i++) {
     h ^= String(str).charCodeAt(i);
@@ -23,7 +27,7 @@ export function hashSeed(str) {
   return h >>> 0;
 }
 
-export function rng(seed) {
+export function rng(seed: string | number): () => number {
   let a = typeof seed === 'number' ? seed >>> 0 : hashSeed(seed);
   return () => {
     a = (a + 0x6D2B79F5) >>> 0;
@@ -33,14 +37,14 @@ export function rng(seed) {
   };
 }
 
-const f = v => (Math.round(v * 100) / 100);
+const f = (v: number) => (Math.round(v * 100) / 100);
 
 /* ---------- path building ---------- */
 
 /* A polyline drawn as quadratics through the midpoints of each segment.
    This is what keeps a jittered point list from looking like a seismograph:
    the pen curves between wobbles instead of cornering on every one. */
-export function smooth(pts, close = false) {
+export function smooth(pts: Pt[], close = false): string {
   if (pts.length < 2) return '';
   const p = close ? [...pts, pts[0], pts[1]] : pts;
   let d = `M${f(p[0][0])} ${f(p[0][1])}`;
@@ -59,9 +63,10 @@ export function smooth(pts, close = false) {
 /* Walk a polyline, dropping a point every `step` units and nudging each one off
    the true line. `amp` is how far the hand strays; `drift` is a slow wander on
    top of it, which is what makes a long line bow gently rather than buzz. */
-export function waver(pts, { seed = 1, amp = 1.1, step = 26, drift = 0.6 } = {}) {
+export type WaverOpts = { seed?: number; amp?: number; step?: number; drift?: number };
+export function waver(pts: Pt[], { seed = 1, amp = 1.1, step = 26, drift = 0.6 }: WaverOpts = {}): Pt[] {
   const r = rng(seed);
-  const out = [];
+  const out: Pt[] = [];
   let phase = r() * Math.PI * 2;
   for (let i = 0; i < pts.length - 1; i++) {
     const [x0, y0] = pts[i], [x1, y1] = pts[i + 1];
@@ -83,22 +88,23 @@ export function waver(pts, { seed = 1, amp = 1.1, step = 26, drift = 0.6 } = {})
 
 /* ---------- shapes, as path data ---------- */
 
-export function roughLine(a, b, opts = {}) {
+export function roughLine(a: Pt, b: Pt, opts: WaverOpts = {}): string {
   return smooth(waver([a, b], opts));
 }
 
-export function roughPoly(pts, { close = true, ...opts } = {}) {
+export function roughPoly(pts: Pt[], { close = true, ...opts }: WaverOpts & { close?: boolean } = {}): string {
   return smooth(waver(close ? [...pts, pts[0]] : pts, opts), false);
 }
 
 /* A rounded rectangle whose corners are sampled as arcs before wavering, so the
    wobble rides over the rounding instead of fighting it. */
-export function roundedPts(x, y, w, h, r = 10, seg = 4) {
+export function roundedPts(x: number, y: number, w: number, h: number, r = 10, seg = 4): Pt[] {
   r = Math.max(0, Math.min(r, Math.min(w, h) / 2));
-  const arc = (cx, cy, a0, a1) => Array.from({ length: seg + 1 }, (_, i) => {
-    const a = (a0 + (a1 - a0) * i / seg) * Math.PI / 180;
-    return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
-  });
+  const arc = (cx: number, cy: number, a0: number, a1: number): Pt[] =>
+    Array.from({ length: seg + 1 }, (_, i): Pt => {
+      const a = (a0 + (a1 - a0) * i / seg) * Math.PI / 180;
+      return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+    });
   return [
     ...arc(x + w - r, y + r, -90, 0),
     ...arc(x + w - r, y + h - r, 0, 90),
@@ -107,14 +113,14 @@ export function roundedPts(x, y, w, h, r = 10, seg = 4) {
   ];
 }
 
-export function roughRect(x, y, w, h, r = 10, opts = {}) {
+export function roughRect(x: number, y: number, w: number, h: number, r = 10, opts: WaverOpts = {}): string {
   const pts = roundedPts(x, y, w, h, r);
   return smooth(waver([...pts, pts[0]], { step: 22, ...opts }), false) + 'Z';
 }
 
-export function roughEllipse(cx, cy, rx, ry, opts = {}) {
+export function roughEllipse(cx: number, cy: number, rx: number, ry: number, opts: WaverOpts = {}): string {
   const n = 20;
-  const pts = Array.from({ length: n + 1 }, (_, i) => {
+  const pts: Pt[] = Array.from({ length: n + 1 }, (_, i): Pt => {
     const a = i / n * Math.PI * 2;
     return [cx + rx * Math.cos(a), cy + ry * Math.sin(a)];
   });
@@ -122,9 +128,9 @@ export function roughEllipse(cx, cy, rx, ry, opts = {}) {
 }
 
 /* Half an ellipse — the lip and the belly of a cylinder. */
-export function roughArc(cx, cy, rx, ry, a0, a1, opts = {}) {
+export function roughArc(cx: number, cy: number, rx: number, ry: number, a0: number, a1: number, opts: WaverOpts = {}): string {
   const n = 14;
-  const pts = Array.from({ length: n + 1 }, (_, i) => {
+  const pts: Pt[] = Array.from({ length: n + 1 }, (_, i): Pt => {
     const a = (a0 + (a1 - a0) * i / n) * Math.PI / 180;
     return [cx + rx * Math.cos(a), cy + ry * Math.sin(a)];
   });
@@ -133,18 +139,12 @@ export function roughArc(cx, cy, rx, ry, a0, a1, opts = {}) {
 
 /* ---------- emitting SVG ---------- */
 
-const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const esc = (s: string): string => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /* Strokes carry class="s" so the board client can find them and draw them on,
    one after another, with stroke-dashoffset. */
-/**
- * @param {string} d
- * @param {{
- *   w?: number, color?: string, dash?: string|null,
- *   opacity?: number, cls?: string, extra?: string
- * }} [opts]
- */
-export function stroke(d, { w = 1.6, color = INK, dash = null, opacity = 1, cls = 's', extra = '' } = {}) {
+type StrokeOpts = { w?: number, color?: string, dash?: string | null, opacity?: number, cls?: string, extra?: string };
+export function stroke(d: string, { w = 1.6, color = INK, dash = null, opacity = 1, cls = 's', extra = '' }: StrokeOpts = {}): string {
   if (!d) return '';
   return `<path class="${cls}" d="${d}" fill="none" stroke="${color}" stroke-width="${w}"` +
     ` stroke-linejoin="round" stroke-linecap="round"` +
@@ -152,7 +152,7 @@ export function stroke(d, { w = 1.6, color = INK, dash = null, opacity = 1, cls 
     (opacity !== 1 ? ` opacity="${opacity}"` : '') + ` ${extra}/>`;
 }
 
-export function fill(d, color, { opacity = 1, extra = '' } = {}) {
+export function fill(d: string, color: string, { opacity = 1, extra = '' }: { opacity?: number, extra?: string } = {}): string {
   if (!d) return '';
   return `<path class="f" d="${d}" fill="${color}"` +
     (opacity !== 1 ? ` opacity="${opacity}"` : '') + ` ${extra}/>`;
@@ -178,15 +178,19 @@ export function fill(d, color, { opacity = 1, extra = '' } = {}) {
    around it, which is someone writing "latency < 5ms", not a type. */
 const CODEY = /[a-z][A-Z]|_|\w\.\w|::|\(\)|\w[<>]|[<>]\w/;
 
-export const lettering = s => String(s)
+export const lettering = (s: string): string => String(s)
   .split(/(\s+)/)
   .map(w => (CODEY.test(w) ? w : w.toUpperCase()))
   .join('');
 
-export function text(x, y, s, {
+type TextOpts = {
+  size?: number, color?: string, weight?: number, anchor?: string, spacing?: number,
+  upper?: boolean, family?: string | null, opacity?: number, cls?: string,
+};
+export function text(x: number, y: number, s: string, {
   size = 13, color = INK, weight = 700, anchor = 'middle', spacing = 0.04,
   upper = false, family = null, opacity = 1, cls = 't',
-} = {}) {
+}: TextOpts = {}): string {
   const body = upper ? lettering(s) : String(s);
   return `<text class="${cls}" x="${f(x)}" y="${f(y)}" fill="${color}" font-size="${size}"` +
     ` font-weight="${weight}" text-anchor="${anchor}" letter-spacing="${spacing}em"` +
@@ -195,9 +199,9 @@ export function text(x, y, s, {
 }
 
 /* An arrowhead drawn as two strokes meeting at the tip, like a pen would. */
-export function arrowHead(tip, dirRad, { size = 11, w = 1.8, color = INK, seed = 1, spread = 0.42 } = {}) {
+export function arrowHead(tip: Pt, dirRad: number, { size = 11, w = 1.8, color = INK, seed = 1, spread = 0.42 }: { size?: number, w?: number, color?: string, seed?: number, spread?: number } = {}): string {
   const [tx, ty] = tip;
-  const wing = a => [tx - size * Math.cos(dirRad + a), ty - size * Math.sin(dirRad + a)];
+  const wing = (a: number): Pt => [tx - size * Math.cos(dirRad + a), ty - size * Math.sin(dirRad + a)];
   const o = { seed, amp: 0.5, step: 7 };
   return stroke(roughLine(wing(spread), tip, o), { w, color }) +
     stroke(roughLine(wing(-spread), tip, { ...o, seed: seed + 1 }), { w, color });
@@ -229,8 +233,8 @@ export const NOTE_LINES = 12;
    as a sentence trailing off rather than as a note with its end missing, and
    there was nowhere on the board to point at and say "the rest was here". A
    line that is nothing but `…` is unmistakably not writing. */
-export function wrapText(s, max = 24, maxLines = 5) {
-  const out = [];
+export function wrapText(s: string | null | undefined, max = 24, maxLines = 5): string[] {
+  const out: string[] = [];
   for (const para of String(s ?? '').split('\n')) {
     let line = '';
     for (const word of para.split(/\s+/).filter(Boolean)) {
@@ -265,12 +269,7 @@ export const NODE_SUB_LH = 12;
    title line and one sub line that every box is already tall enough for. The
    glyphs draw from these lines and layout sizes the box from the same ones, so
    the two cannot disagree about how tall the text is. */
-/**
- * @param {string} [label]
- * @param {string} [sub]
- * @returns {{title: string[], sub: string[], extra: number}}
- */
-export function nodeText(label, sub) {
+export function nodeText(label?: string, sub?: string): { title: string[], sub: string[], extra: number } {
   const title = label ? wrapText(label, NODE_TITLE_CHARS, NODE_TEXT_LINES) : [];
   const subs = sub ? wrapText(sub, NODE_SUB_CHARS, NODE_TEXT_LINES) : [];
   const extra = Math.max(0, title.length - 1) * NODE_TITLE_LH + Math.max(0, subs.length - 1) * NODE_SUB_LH;
@@ -290,11 +289,8 @@ export const TAG_H = 19;
    well — "3 create order" on the edge that is already step 3 — and the board
    then draws "3 3 create order". The badge is the board's, so the one in the
    words goes, but only when it is the same number: "2 retries" on step 5 is
-   about retries, not about which step this is.
-
-   @param {string} [label]
-   @param {number|null} [step] */
-function stripStep(label, step) {
+   about retries, not about which step this is. */
+function stripStep(label: string | undefined, step: number | null): string {
   const text = label ? String(label) : '';
   if (step == null || !text) return text;
   const m = text.match(/^\s*(?:step\s*)?(\d+)\s*[.):\-–—]?(?:\s+(.+))?$/i);
@@ -303,24 +299,14 @@ function stripStep(label, step) {
 
 /* The lines a tag is lettered in. The step number rides on the first line so
    it can never be separated from the words it numbers. */
-/**
- * @param {string} [label]
- * @param {number|null} [step]
- * @returns {string[]}
- */
-export function tagLines(label, step = null) {
+export function tagLines(label?: string, step: number | null = null): string[] {
   const words = [step != null ? String(step) : '', stripStep(label, step)].filter(Boolean).join(' ');
   if (!words) return [];
   return wrapText(lettering(words), TAG_CHARS, TAG_LINES);
 }
 
 /* How wide a pill is, and how tall, for these lines. */
-/**
- * @param {string[]} lines
- * @param {{size?: number, padX?: number, h?: number}} [o]
- * @returns {{w: number, h: number}}
- */
-export function pillSize(lines, { size = TAG_SIZE, padX = TAG_PAD_X, h = TAG_H } = {}) {
+export function pillSize(lines: string[], { size = TAG_SIZE, padX = TAG_PAD_X, h = TAG_H }: { size?: number, padX?: number, h?: number } = {}): { w: number, h: number } {
   const longest = Math.max(0, ...lines.map(l => l.length));
   return { w: longest * size * 0.62 + padX * 2, h: h + Math.max(0, lines.length - 1) * size * 1.2 };
 }
@@ -330,11 +316,7 @@ export function pillSize(lines, { size = TAG_SIZE, padX = TAG_PAD_X, h = TAG_H }
    placement that has to leave room for it cannot drift apart. */
 export const TAB_H = 22;
 
-/**
- * @param {string} [label]
- * @returns {{w: number, h: number}}
- */
-export function tabSize(label) {
+export function tabSize(label?: string): { w: number, h: number } {
   return { w: lettering(String(label || '')).length * 7.4 + 20, h: TAB_H };
 }
 

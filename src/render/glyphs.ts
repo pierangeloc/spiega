@@ -7,24 +7,37 @@
    ============================================================ */
 
 import { INK, MUTED, SHADOW, ACCENT, bodyOf, mix } from './theme.js';
+import type { Body } from './theme.js';
 import {
   roughRect, roughLine, roughEllipse, roughArc, roughPoly, roundedPts,
   stroke, fill, text, hashSeed, rng, wrapText, NOTE_LINES, lettering,
   nodeText, NODE_TITLE_LH, NODE_SUB_LH, tabSize, waver, round2 } from './ink.js';
+import type { Pt } from './ink.js';
 import { measureMath, drawMath } from './math.js';
 
 const SH_DX = 5, SH_DY = 6;          // the cast shadow sits down and to the left-ish
 const R = 12;                         // default corner radius
 
+/* What a glyph reads off a node. Layout hands a reduced node (no body colour,
+   no count), render hands the full board node; both need no more than this. */
+type NodeLike = {
+  id?: string, kind?: string, label?: string, sub?: string, body?: string,
+  slots?: number, depth?: number, replicas?: number, lines?: string[],
+};
+
+type Box = { x: number, y: number, w: number, h: number };
+
+type GlyphFn = (box: Box, n: NodeLike, m: Body, seed: number, side: string) => string;
+
 /* The shadow is flat cobalt, never a blur: a blurred shadow is a screen effect,
    a flat offset one is what you get when you ink a shape twice on paper. */
-const castShadow = (d, dx = SH_DX, dy = SH_DY) =>
+const castShadow = (d: string, dx = SH_DX, dy = SH_DY): string =>
   `<g class="shadow" transform="translate(${dx} ${dy})">${fill(d, SHADOW, { opacity: 0.17 })}</g>`;
 
 /* A title and a sub, each wrapped (see nodeText), the block centred on `cy`. A
    title of one line over a sub of one line lands exactly where it always did;
    every extra line moves the block up by half a line so it grows both ways. */
-const labelBlock = (cx, cy, title, subtitle, { titleSize = 13.5, color = INK } = {}) => {
+const labelBlock = (cx: number, cy: number, title: string | undefined, subtitle: string | undefined, { titleSize = 13.5, color = INK }: { titleSize?: number, color?: string } = {}): string => {
   if (!title) return '';
   const t = nodeText(title, subtitle);
   const top = cy + (subtitle ? -3 : 4.5) - t.extra / 2;
@@ -44,14 +57,14 @@ const labelBlock = (cx, cy, title, subtitle, { titleSize = 13.5, color = INK } =
    cloud has no corners to begin with. A shape that means "not that other
    shape" needs them sharp, so the edges are the same seeded wobble and the
    turns are turns. */
-const sharpPoly = (pts, opts = {}) => {
+const sharpPoly = (pts: Pt[], opts: { seed?: number, amp?: number, step?: number } = {}): string => {
   const p = waver([...pts, pts[0]], { step: 22, ...opts });
   return 'M' + p.map(([x, y]) => `${round2(x)} ${round2(y)}`).join('L') + 'Z';
 };
 
 /* The band along the bottom edge that gives a flat shape its thickness.
    It is the one place a second tone of the body colour appears. */
-const thicknessBand = (x, y, w, h, m, seed, r = R) => {
+const thicknessBand = (x: number, y: number, w: number, h: number, m: string, seed: number, r = R): string => {
   const t = Math.min(9, h * 0.22);
   const d = roughRect(x, y + h - t, w, t, Math.min(r, t), { seed: seed + 41, amp: 0.7 });
   return fill(d, m);
@@ -59,7 +72,7 @@ const thicknessBand = (x, y, w, h, m, seed, r = R) => {
 
 /* ---------- the glyphs ---------- */
 
-function gService(box, n, m, seed) {
+function gService(box: Box, n: NodeLike, m: Body, seed: number): string {
   const { x, y, w, h } = box;
   const body = roughRect(x, y, w, h, R, { seed, amp: 1.0 });
   return castShadow(body) + fill(body, m.l) + thicknessBand(x, y, w, h, m.m, seed) +
@@ -72,7 +85,7 @@ function gService(box, n, m, seed) {
 /* A pentagon: the leading edge comes to a point at the side's midpoint, so
    a line that arrives anywhere else on that side meets air unless it knows
    the slant. */
-function gatewayPts(box) {
+function gatewayPts(box: Box): Pt[] {
   const { x, y, w, h } = box;
   const c = 14;
   return [
@@ -80,7 +93,7 @@ function gatewayPts(box) {
   ];
 }
 
-function gGateway(box, n, m, seed) {
+function gGateway(box: Box, n: NodeLike, m: Body, seed: number): string {
   const { x, y, w, h } = box;
   const c = 14;
   const pts = gatewayPts(box);
@@ -92,7 +105,7 @@ function gGateway(box, n, m, seed) {
     labelBlock(x + c / 2 + w / 2, y + h / 2, n.label, n.sub);
 }
 
-function gDatastore(box, n, m, seed) {
+function gDatastore(box: Box, n: NodeLike, m: Body, seed: number): string {
   const { x, y, w, h } = box;
   const ry = Math.min(14, h * 0.2), cx = x + w / 2;
   const topY = y + ry, botY = y + h - ry;
@@ -112,7 +125,7 @@ function gDatastore(box, n, m, seed) {
 
 /* A queue's words sit under the slots, not in them, so it is the strip below
    that grows when they wrap. */
-function queueLabel(cx, bottom, n) {
+function queueLabel(cx: number, bottom: number, n: NodeLike): string {
   const t = nodeText(n.label, n.sub);
   const title = t.title.length ? t.title : [''];
   return title.map((ln, i) =>
@@ -124,7 +137,7 @@ function queueLabel(cx, bottom, n) {
 
 /* A queue shows its slots, and fills a few of them, so depth is visible at a
    glance. The filled count is cosmetic unless the spec sets n.depth. */
-function gQueue(box, n, m, seed) {
+function gQueue(box: Box, n: NodeLike, m: Body, seed: number): string {
   const { x, y, w, h } = box;
   const body = roughRect(x, y, w, h, 6, { seed, amp: 0.9 });
   const slots = Math.max(3, Math.min(8, n.slots || 5));
@@ -147,7 +160,7 @@ function gQueue(box, n, m, seed) {
 
 /* A cache is inked twice — the doubled outline is the visual shorthand for
    "this is a copy of something that lives elsewhere". */
-function gCache(box, n, m, seed) {
+function gCache(box: Box, n: NodeLike, m: Body, seed: number): string {
   const { x, y, w, h } = box;
   const body = roughRect(x, y, w, h, R, { seed, amp: 1.0 });
   const ghost = roughRect(x + 4, y + 4, w - 8, h - 8, R - 3, { seed: seed + 11, amp: 0.9 });
@@ -159,7 +172,7 @@ function gCache(box, n, m, seed) {
 
 /* A client is a screen on a stand: the one glyph that should read as "a person
    is on the other side of this". */
-function gClient(box, n, m, seed) {
+function gClient(box: Box, n: NodeLike, m: Body, seed: number): string {
   const { x, y, w, h } = box;
   const sh = h - 14;
   const body = roughRect(x, y, w, sh, 8, { seed, amp: 1.0 });
@@ -178,29 +191,30 @@ function gClient(box, n, m, seed) {
 /* The union outline of a row of overlapping circles sitting on a baseline.
    Tangent lobes meet in a cusp and read as a mountain range; only circles that
    genuinely overlap, with the buried arcs dropped, look like a cloud. */
-function cloudPts(x0, x1, base, h) {
+type Circle = { x: number, y: number, r: number };
+function cloudPts(x0: number, x1: number, base: number, h: number): Pt[] {
   const fr = [0.5, 0.82, 0.68, 0.44];
   const rs = fr.map(v => v * h * 0.62);
   const first = rs[0], last = rs[rs.length - 1];
   const inner = Math.max(1, (x1 - x0) - first - last);
-  const cs = rs.map((r, i) => ({ x: x0 + first + (inner * i) / (rs.length - 1), y: base, r }));
+  const cs: Circle[] = rs.map((r, i) => ({ x: x0 + first + (inner * i) / (rs.length - 1), y: base, r }));
 
   // the upper intersection of two circles, as an angle on each
-  const meet = (A, B) => {
+  const meet = (A: Circle, B: Circle): [number, number] | null => {
     const dx = B.x - A.x, dy = B.y - A.y, d = Math.hypot(dx, dy);
     if (d >= A.r + B.r || d <= Math.abs(A.r - B.r)) return null;   // no overlap: give up
     const a = (A.r * A.r - B.r * B.r + d * d) / (2 * d);
     const k = Math.sqrt(Math.max(0, A.r * A.r - a * a));
     const px = A.x + (a * dx) / d - (k * -dy) / d;
     const py = A.y + (a * dy) / d - (k * dx) / d;      // the one above the baseline
-    const ang = (C) => {
+    const ang = (C: Circle): number => {
       let t = (Math.atan2(py - C.y, px - C.x) * 180) / Math.PI;
       return t < 0 ? t + 360 : t;
     };
     return [ang(A), ang(B)];
   };
 
-  const pts = [[cs[0].x - cs[0].r, base]];
+  const pts: Pt[] = [[cs[0].x - cs[0].r, base]];
   let start = 180;
   for (let i = 0; i < cs.length; i++) {
     let end = 360;
@@ -221,7 +235,7 @@ function cloudPts(x0, x1, base, h) {
   return pts;
 }
 
-function gExternal(box, n, m, seed) {
+function gExternal(box: Box, n: NodeLike, m: Body, seed: number): string {
   const { x, y, w, h } = box;
   const base = y + h - 6;
   const pts = cloudPts(x + 4, x + w - 4, base, h);
@@ -231,7 +245,7 @@ function gExternal(box, n, m, seed) {
 }
 
 /* Compute: a stack of identical things. Replica count is the point. */
-function gCompute(box, n, m, seed) {
+function gCompute(box: Box, n: NodeLike, m: Body, seed: number): string {
   const { x, y, w, h } = box;
   const copies = Math.max(1, Math.min(4, n.replicas || 3));
   const step = 6, bh = h - step * (copies - 1);
@@ -248,7 +262,7 @@ function gCompute(box, n, m, seed) {
 
 /* A note is the agent's own handwriting on the board: a keyword, an aside, a
    number worth remembering. Tilted, because nobody sticks one on straight. */
-function gNote(box, n, m, seed) {
+function gNote(box: Box, n: NodeLike, m: Body, seed: number): string {
   const { x, y, w, h } = box;
   const tilt = ((hashSeed(n.id || n.label || 'note') % 200) / 100 - 1) * 1.6;
   const body = roughRect(0, 0, w, h, 3, { seed, amp: 1.2 });
@@ -270,7 +284,7 @@ function gNote(box, n, m, seed) {
    on the board, like a note, but set rather than wrapped. The only furniture
    is a hand-drawn rule beneath it, which is what someone does when they want
    the formula to be the thing you look at. */
-function gFormula(box, n, m, seed) {
+function gFormula(box: Box, n: NodeLike, m: Body, seed: number): string {
   const { x, y, w, h } = box;
   const src = n.label || '';
   const size = 17;
@@ -304,7 +318,7 @@ function gFormula(box, n, m, seed) {
 /* A notch is a bite taken out of the corner: the edge comes in, turns, and
    goes back out. The point sits deeper than the straight cut across the same
    corner would, so the bite is a notch and not a chamfer. */
-function notchPts(x, y, w, h, side, d) {
+function notchPts(x: number, y: number, w: number, h: number, side: string, d: number): Pt[] {
   return side === 'left'
     ? [[x + d, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y + d],
       [x + d * 0.42, y + d * 0.74]]
@@ -312,7 +326,7 @@ function notchPts(x, y, w, h, side, d) {
       [x + w, y + h], [x, y + h]];
 }
 
-function gField(box, n, m, seed, side) {
+function gField(box: Box, n: NodeLike, m: Body, seed: number, side: string): string {
   const { x, y, w, h } = box;
   /* Deep enough to read as a notch from across a room, shallow enough that
      the card is still a card. */
@@ -347,23 +361,23 @@ function gField(box, n, m, seed, side) {
    meets the box where a line arrives at a side's midpoint. Off that point the
    outline curves back inside the box; inkInset asks for these same points so
    a fanned line can follow the curve instead of stopping at the box. */
-function blobPts(box, seed) {
+function blobPts(box: Box, seed: number): Pt[] {
   const { x, y, w, h } = box;
   const cx = x + w / 2, cy = y + h / 2, r = rng(seed);
-  const raw = Array.from({ length: 10 }, (_, i) => {
+  const raw: Pt[] = Array.from({ length: 10 }, (_, i): Pt => {
     const a = (i / 10) * Math.PI * 2;
     const kx = 0.93 + r() * 0.07, ky = 0.78 + r() * 0.22;
     return [Math.cos(a) * kx, Math.sin(a) * ky];
   });
   const rx0 = Math.min(...raw.map(p => p[0])), rx1 = Math.max(...raw.map(p => p[0]));
   const ry0 = Math.min(...raw.map(p => p[1])), ry1 = Math.max(...raw.map(p => p[1]));
-  return raw.map(([rx, ry]) => [
+  return raw.map(([rx, ry]): Pt => [
     cx + (rx < 0 ? rx / -rx0 : rx / rx1) * w * 0.5,
     cy + (ry < 0 ? ry / -ry0 : ry / ry1) * h * 0.5,
   ]);
 }
 
-function gBlob(box, n, m, seed) {
+function gBlob(box: Box, n: NodeLike, m: Body, seed: number): string {
   const { x, y, w, h } = box;
   const cx = x + w / 2, cy = y + h / 2;
   const pts = blobPts(box, seed);
@@ -402,7 +416,11 @@ function gBlob(box, n, m, seed) {
 /* The bowl, its lip and its base, as the points both the drawing and the
    inset are taken from. The belly is narrower than the box, the rim narrower
    still, so an edge aimed at the box stops in the margin beside the bowl. */
-function vesselGeom(box) {
+type VesselGeom = {
+  cx: number, top: number, bottom: number, rimRX: number, bellyRX: number,
+  baseRX: number, bellyY: number, lipRy: number, body: Pt[], base: Pt[],
+};
+function vesselGeom(box: Box): VesselGeom {
   const { x, y, w, h } = box;
   const cx = x + w / 2;
   const top = y + 13, bottom = y + h - 7;
@@ -424,7 +442,7 @@ function vesselGeom(box) {
   };
 }
 
-function gVessel(box, n, m, seed) {
+function gVessel(box: Box, n: NodeLike, m: Body, seed: number): string {
   const { y, h } = box;
   const g = vesselGeom(box);
   const { cx, top, bottom, rimRX, baseRX, lipRy } = g;
@@ -445,13 +463,13 @@ function gVessel(box, n, m, seed) {
 /* The orb, not the specks. The specks are a couple of pixels and say
    "particle"; the body an edge should meet is the circle, which sits in the
    upper part of a box sized for its label. */
-function particleOrb(box) {
+function particleOrb(box: Box): { cx: number, cy: number, rx: number, ry: number } {
   const { x, y, w, h } = box;
   const r = Math.min(15, h * 0.22);
   return { cx: x + w / 2, cy: y + Math.min(20, h * 0.27), rx: r, ry: r * 0.94 };
 }
 
-function gParticle(box, n, m, seed) {
+function gParticle(box: Box, n: NodeLike, m: Body, seed: number): string {
   const { y, h } = box;
   const { cx, cy, rx, ry } = particleOrb(box);
   const r = rx;
@@ -472,13 +490,13 @@ function gParticle(box, n, m, seed) {
    carries what it gives. Rays stay off the bottom so the label has a clear
    line to sit on. */
 /* The disc. The rays are strokes thrown off it; an edge meets the body. */
-function sourceDisc(box) {
+function sourceDisc(box: Box): { cx: number, cy: number, rx: number, ry: number } {
   const { x, y, w, h } = box;
   const r = Math.min(13, h * 0.19);
   return { cx: x + w / 2, cy: y + 21, rx: r, ry: r * 0.95 };
 }
 
-function gSource(box, n, m, seed) {
+function gSource(box: Box, n: NodeLike, m: Body, seed: number): string {
   const { y, h } = box;
   const { cx, cy, rx, ry } = sourceDisc(box);
   const r = rx;
@@ -496,7 +514,7 @@ function gSource(box, n, m, seed) {
     labelBlock(cx, y + h - 20, n.label, n.sub);
 }
 
-const GLYPHS = {
+const GLYPHS: Record<string, GlyphFn> = {
   service: gService, gateway: gGateway, datastore: gDatastore, queue: gQueue,
   cache: gCache, client: gClient, external: gExternal, compute: gCompute, note: gNote,
   formula: gFormula, field: gField, blob: gBlob, vessel: gVessel, particle: gParticle,
@@ -505,12 +523,12 @@ const GLYPHS = {
 
 export const KINDS = Object.keys(GLYPHS);
 
-const glyphSeed = n => hashSeed(n.id || n.label || 'n') % 100000;
+const glyphSeed = (n: NodeLike): number => hashSeed(n.id || n.label || 'n') % 100000;
 
 /* `side` is the field glyph's notch side: which way the value runs. It is
    decided by the caller, which is the only place that knows the edges. */
-export function drawNode(n, box, side = 'right') {
-  const kind = GLYPHS[n.kind] ? n.kind : 'service';
+export function drawNode(n: NodeLike, box: Box, side = 'right'): string {
+  const kind = (n.kind && GLYPHS[n.kind]) ? n.kind : 'service';
   const m = bodyOf(n.body, kind);
   return GLYPHS[kind](box, n, m, glyphSeed(n), side);
 }
@@ -527,10 +545,10 @@ export function drawNode(n, box, side = 'right') {
    stop in the margin while its neighbour landed on the circle. A rectangle
    is not listed, and answers nothing, which is why a board without one of
    these glyphs does not move. */
-function polyHits(pts, horiz, at) {
+function polyHits(pts: Pt[], horiz: boolean, at: number): number[] {
   const closed = pts.length > 1 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]
     ? pts : [...pts, pts[0]];
-  const hits = [];
+  const hits: number[] = [];
   for (let i = 0; i < closed.length - 1; i++) {
     const a = closed[i], b = closed[i + 1];
     const a0 = horiz ? a[1] : a[0], b0 = horiz ? b[1] : b[0];
@@ -543,7 +561,9 @@ function polyHits(pts, horiz, at) {
   return hits;
 }
 
-function ellipseHits(e, side, at) {
+type Ellipse = { cx: number, cy: number, rx: number, ry: number };
+
+function ellipseHits(e: Ellipse, side: string, at: number): number[] {
   if (side === 'left' || side === 'right') {
     const n = (at - e.cy) / e.ry;
     if (n * n > 1) return [];
@@ -558,24 +578,26 @@ function ellipseHits(e, side, at) {
 
 /* The outlines an edge should stop short of. An ellipse is named so the hit
    is solved rather than sampled; everything else is a closed polyline. */
-function outlinesOf(node, box) {
+type Outline = Pt[] | Ellipse;
+
+function outlinesOf(node: NodeLike, box: Box): Outline[] | null {
   const { x, y, w, h } = box;
   switch (node.kind) {
     case 'blob': return [blobPts(box, glyphSeed(node))];
     case 'vessel': {
       const g = vesselGeom(box);
-      return [g.body, g.base, { ellipse: true, cx: g.cx, cy: g.top, rx: g.rimRX, ry: g.lipRy }];
+      return [g.body, g.base, { cx: g.cx, cy: g.top, rx: g.rimRX, ry: g.lipRy }];
     }
-    case 'particle': return [{ ellipse: true, ...particleOrb(box) }];
-    case 'source': return [{ ellipse: true, ...sourceDisc(box) }];
+    case 'particle': return [particleOrb(box)];
+    case 'source': return [sourceDisc(box)];
     case 'gateway': return [gatewayPts(box)];
     case 'external': return [cloudPts(x + 4, x + w - 4, y + h - 6, h)];
     default: return null;
   }
 }
 
-function ellipseSamples(e, n = 64) {
-  return Array.from({ length: n }, (_, i) => {
+function ellipseSamples(e: Ellipse, n = 64): Pt[] {
+  return Array.from({ length: n }, (_, i): Pt => {
     const a = (i / n) * Math.PI * 2;
     return [e.cx + e.rx * Math.cos(a), e.cy + e.ry * Math.sin(a)];
   });
@@ -584,9 +606,9 @@ function ellipseSamples(e, n = 64) {
 /* Vertices alone miss the nearest point when it sits mid-edge. A step of a
    few pixels is closer than the hand's wobble, which is the tolerance the
    arrival is already allowed. */
-function walk(pts) {
+function walk(pts: Pt[]): Pt[] {
   const closed = pts.length > 1 ? [...pts, pts[0]] : pts;
-  const out = [];
+  const out: Pt[] = [];
   for (let i = 0; i < closed.length - 1; i++) {
     const a = closed[i], b = closed[i + 1];
     const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 4));
@@ -601,13 +623,14 @@ function walk(pts) {
 /* The extent of the ink along a side, in board coordinates. A fan that has
    collapsed is laid back out across this, so two arrows into a small disc
    stay two. Null for a rectangle: there is no ink inside the box to spread over. */
-export function inkSpan(node, box, side) {
+export function inkSpan(node: NodeLike, box: Box, side: string): { lo: number, hi: number } | null {
   const shapes = outlinesOf(node, box);
   if (!shapes) return null;
   const horiz = side === 'left' || side === 'right';
   let lo = Infinity, hi = -Infinity;
   for (const s of shapes) {
-    for (const p of s.ellipse ? ellipseSamples(s, 48) : walk(s)) {
+    const samples = Array.isArray(s) ? walk(s) : ellipseSamples(s, 48);
+    for (const p of samples) {
       const c = horiz ? p[1] : p[0];
       if (c < lo) lo = c;
       if (c > hi) hi = c;
@@ -616,14 +639,14 @@ export function inkSpan(node, box, side) {
   return lo === Infinity ? null : { lo, hi };
 }
 
-export function inkAt(node, box, side, along) {
+export function inkAt(node: NodeLike, box: Box, side: string, along: number): { inset: number, slide: number } {
   const none = { inset: 0, slide: 0 };
   const shapes = outlinesOf(node, box);
   if (!shapes) return none;
   const horiz = side === 'left' || side === 'right';
   const { x, y, w, h } = box;
   const at = horiz ? y + h / 2 * (1 + along) : x + w / 2 * (1 + along);
-  const hits = shapes.flatMap(s => s.ellipse ? ellipseHits(s, side, at) : polyHits(s, horiz, at));
+  const hits = shapes.flatMap(s => Array.isArray(s) ? polyHits(s, horiz, at) : ellipseHits(s, side, at));
   const edge = side === 'left' ? x : side === 'right' ? x + w : side === 'top' ? y : y + h;
   if (hits.length) {
     const ink = side === 'left' || side === 'top' ? Math.min(...hits) : Math.max(...hits);
@@ -633,12 +656,13 @@ export function inkAt(node, box, side, along) {
   /* The ray misses. The nearest ink is where this arrow can still arrive
      without crossing the glyph to get there: GAP short of that point, on
      the side we came in on. */
-  const station = horiz
+  const station: Pt = horiz
     ? [side === 'left' ? x : x + w, at]
     : [at, side === 'top' ? y : y + h];
-  let best = null, bestD = Infinity;
+  let best: Pt | null = null, bestD = Infinity;
   for (const s of shapes) {
-    for (const p of s.ellipse ? ellipseSamples(s) : walk(s)) {
+    const samples = Array.isArray(s) ? walk(s) : ellipseSamples(s);
+    for (const p of samples) {
       const d = (p[0] - station[0]) ** 2 + (p[1] - station[1]) ** 2;
       if (d < bestD) { bestD = d; best = p; }
     }
@@ -654,11 +678,7 @@ export function inkAt(node, box, side, along) {
 
 /* A boundary is drawn under everything it contains: a loose dashed enclosure,
    for a VPC, a bounded context, a trust zone. */
-/**
- * @param {{id?: string, label?: string, tint?: string}} b
- * @param {import('./layout.js').Box} box
- */
-export function drawBoundary(b, box) {
+export function drawBoundary(b: { id?: string, label?: string, tint?: string }, box: Box): string {
   const { x, y, w, h } = box;
   const seed = hashSeed(b.id || b.label || 'b') % 100000;
   const d = roughRect(x, y, w, h, 16, { seed, amp: 1.4, step: 34 });
@@ -681,14 +701,12 @@ export function drawBoundary(b, box) {
    dashed wall drawn over a card strikes the name through it, which is the
    same failure as a card drawn over a card, and two enclosures that share a
    wall are exactly where it happens. */
-/**
- * @param {{id?: string, label?: string, tint?: string}} b
- * @param {import('./layout.js').Box} box
- * @param {{x: number, y: number, w: number, h: number}|null} [tab]
- * @param {string} [name] what the card says, when it is not the boundary's own
- *   label: a piece of a split boundary says which piece it is
- */
-export function drawBoundaryCard(b, box, tab = null, name = b.label) {
+export function drawBoundaryCard(
+  b: { id?: string, label?: string, tint?: string },
+  box: Box,
+  tab: { x: number, y: number, w: number, h: number } | null = null,
+  name: string | undefined = b.label,
+): string {
   const { x, y } = box;
   const seed = hashSeed(b.id || b.label || 'b') % 100000;
   const lab = lettering(name || '');

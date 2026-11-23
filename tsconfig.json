@@ -26,6 +26,8 @@
     "src/render/floating.js",
     "src/render/theme.ts",
     "src/render/math.ts",
-    "src/render/geom.ts"
+    "src/render/geom.ts",
+    "src/render/ink.ts",
+    "src/render/glyphs.ts"
   ]
 }
