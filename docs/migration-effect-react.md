@@ -1,5 +1,9 @@
 # Migration plan: TypeScript + Effect + React
 
+> What to pick up next, in what order, and what each one costs:
+> [migration-rounds.md](migration-rounds.md). This page is the design; that one
+> is the queue.
+
 **Status:** proposal. No code has changed yet.
 **Decision taken:** the "no dependencies, no build step" convention in `AGENTS.md` is dropped. Users still get a zero-setup `npx spiega`, because npm ships a built `dist/`. Contributors run `pnpm install`.
 **Decision taken:** pnpm workspaces; Vite + Vitest for the board; tsdown or tsup for the node packages; **Node as the only runtime**. Bun is something a contributor may reach for ad hoc — `bun install` and `bunx vite` work — but CI and the published artefact never depend on it.
