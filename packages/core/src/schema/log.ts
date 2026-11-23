@@ -88,13 +88,16 @@ export class LogError extends Error {
 /** The ops of a log, upgraded to the current shape and checked against the Schema. */
 export const decodeLog = (board: string, ops: ReadonlyArray<Raw>): Op[] => {
   const out: Op[] = [];
-  for (const [i, raw] of ops.entries()) {
+  for (const [i, raw] of (ops as ReadonlyArray<unknown>).entries()) {
+    // `reasonFor` leaves a value with no string `op` to the reducer, whose
+    // errors a restore throws away — so here it would draw nothing, silently.
+    if (!isRaw(raw)) throw new LogError(board, i, ops.length, 'it is not an object');
+    if (typeof raw.op !== 'string') throw new LogError(board, i, ops.length, 'missing a string "op" field');
     const op = upgrade(raw);
     const why = reasonFor(op);
     if (why) throw new LogError(board, i, ops.length, why);
     // The Schema validates and the original object goes on, because extra
-    // fields survive (see op.ts). `reasonFor` is silent about a value with no
-    // string `op`, which the reducer refuses in its own words — pass it on.
+    // fields survive (see op.ts).
     out.push(op as unknown as Op);
   }
   return out;

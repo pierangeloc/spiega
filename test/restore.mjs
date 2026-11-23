@@ -94,6 +94,23 @@ test('a log that cannot be read names the board and the reason, not a stack', ()
   });
 });
 
+test('an entry that is not an op at all is refused, whatever it is', () => {
+  for (const bad of [{ version: 2 }, { type: 'node' }, { op: 3 }, null, 'text', 7, ['node']]) {
+    assert.throws(() => decodeLog('b', [{ op: 'node', id: 'a' }, bad]), e => {
+      assert.ok(e instanceof LogError, `${JSON.stringify(bad)} raised a LogError`);
+      assert.match(e.message, /board "b"/);
+      assert.match(e.message, /op 2 of 2/);
+      return true;
+    });
+  }
+});
+
+test('a log line with no string "op" names the board and what is missing', () => {
+  for (const bad of [{ version: 2 }, { op: 123 }]) {
+    assert.throws(() => decodeLog('b', [bad]), /board "b".*missing a string "op" field/);
+  }
+});
+
 test('a field of the wrong shape is refused with its path', () => {
   assert.throws(() => decodeLog('b', [{ op: 'edge', from: 'a' }]), /board "b".*edge:/);
 });
