@@ -62,12 +62,12 @@ for (const f of fixtures) {
 
 test('a null sub is upgraded, and an op already current is left as it was', () => {
   const old = { op: 'node', id: 'a', label: 'A', sub: null };
-  const [fixed] = decodeLog('t', [old]);
+  const [fixed] = decodeLog('t', [old]).ops;
   assert.ok(!('sub' in fixed));
   assert.equal(old.sub, null, 'the input is not mutated');
   const now = { op: 'node', id: 'a', label: 'A', sub: 'b', extra: 1 };
-  assert.equal(decodeLog('t', [now])[0], now, 'the same object, extra fields and all');
-  const [amended] = decodeLog('t', [{ op: 'amend', chapter: 1, ops: [old] }]);
+  assert.equal(decodeLog('t', [now]).ops[0], now, 'the same object, extra fields and all');
+  const [amended] = decodeLog('t', [{ op: 'amend', chapter: 1, ops: [old] }]).ops;
   assert.ok(!('sub' in amended.ops[0]), 'amendments are upgraded too');
 });
 
@@ -111,8 +111,45 @@ test('a log line with no string "op" names the board and what is missing', () =>
   }
 });
 
-test('a field of the wrong shape is refused with its path', () => {
-  assert.throws(() => decodeLog('b', [{ op: 'edge', from: 'a' }]), /board "b".*edge:/);
+/* The difference the whole of decodeLog's judgement turns on, and the reason
+   #74's test exists: a kind nothing here knows is a log from the future and
+   stops the restore; a kind this build does know, written through a door that
+   was not yet guarded, loses its own line and nothing else. Collapsing the two
+   threw away whole explanations to save one line of them. */
+test('a field of the wrong shape loses its line, with its path, and nothing else', () => {
+  const { ops, refused } = decodeLog('b', [
+    { op: 'node', id: 'a', label: 'A' },
+    { op: 'edge', from: 'a' },
+    { op: 'node', id: 'b', label: 'B' },
+  ]);
+  assert.deepEqual(ops.map(o => o.id), ['a', 'b'], 'the ops around it still land');
+  assert.equal(refused.length, 1);
+  assert.equal(refused[0].index, 1, 'where it was in the log');
+  assert.match(refused[0].why, /edge:/, 'and which field was wrong');
+});
+
+test('the shapes written before the door was guarded are refused one by one', () => {
+  const { ops, refused } = decodeLog('b', [
+    { op: 'node', id: 'a', label: 'A' },
+    { op: 'boundary', label: 'oops', members: '["a"]' },
+    { op: 'node', id: 'badlines', kind: 'note', label: 'oops', lines: 'a string' },
+    { op: 'say', text: 'after the bad lines' },
+  ]);
+  assert.deepEqual(ops.map(o => o.op), ['node', 'say'], 'the explanation survives both');
+  assert.deepEqual(refused.map(r => r.index), [1, 2]);
+});
+
+test('an unknown kind inside an amendment is still a log from the future', () => {
+  assert.throws(
+    () => decodeLog('b', [{ op: 'amend', chapter: 1, ops: [{ op: 'hologram', id: 'a' }] }]),
+    e => {
+      assert.ok(e instanceof LogError, 'an amendment cannot smuggle one past the door');
+      assert.match(e.message, /unknown op "hologram"/);
+      return true;
+    });
+  const { ops, refused } = decodeLog('b', [{ op: 'amend', chapter: 1, ops: [{ op: 'edge', from: 'a' }] }]);
+  assert.deepEqual(ops, [], 'while a known kind with a bad field inside one is only dropped');
+  assert.deepEqual(refused.map(r => r.index), [0]);
 });
 
 test('a half line and a blank line are still forgiven', () => {

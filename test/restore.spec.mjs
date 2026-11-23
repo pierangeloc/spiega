@@ -1,5 +1,4 @@
-/* Harness only: restore.mjs is the suite and it runs unchanged. This gives it a
-   name of its own in the run. See vitest.config.ts. */
-import { test } from 'vitest';
+/* Harness only: restore.mjs is the suite and it runs unchanged. See harness.mjs. */
+import { suite } from './harness.mjs';
 
-test('restore.mjs', () => import('./restore.mjs'));
+suite('restore.mjs');

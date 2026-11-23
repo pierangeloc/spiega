@@ -119,7 +119,23 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
 
   const load = nm => {
     if (!persist) return { board: emptyBoard(), lines: 0, tail: true };
-    try { return restoreBoard(boardFile(nm)); }
+    try {
+      const loaded = restoreBoard(boardFile(nm));
+      /* Lines this build could not draw are left out rather than taken as the
+         whole log's failure (see packages/core/src/schema/log.ts), so this is
+         the only place anyone is told. One sentence with the first reason in
+         it: the rest are almost always the same mistake repeated, and a board
+         opening is not the moment for a list. */
+      if (loaded.refused?.length) {
+        const [first] = loaded.refused;
+        console.error(
+          `spiega: board "${nm}" opened without ${loaded.refused.length} ` +
+          `line${loaded.refused.length === 1 ? '' : 's'} of its log that this spiega cannot draw ` +
+          `(op ${first.index + 1} — ${first.why}). The rest of the board is intact and is still being saved.`,
+        );
+      }
+      return loaded;
+    }
     catch (e) {
       /* Said once, in words, and the board is held without a log: appending
          to a file this version cannot read would put its ops after the ones

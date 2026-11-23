@@ -1,6 +1,4 @@
-/* Harness only: smoke.mjs is the suite and it runs unchanged. This gives it a
-   name of its own in the run and, because vitest forks per file, the process
-   it has always needed. See vitest.config.ts. */
-import { test } from 'vitest';
+/* Harness only: smoke.mjs is the suite and it runs unchanged. See harness.mjs. */
+import { suite } from './harness.mjs';
 
-test('smoke.mjs', () => import('./smoke.mjs'));
+suite('smoke.mjs');
