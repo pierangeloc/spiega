@@ -9,6 +9,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 
 import { emptyBoard, applyOps, LOG_CAP } from './state.js';
 
@@ -35,8 +36,21 @@ export const readBoardLog = file => {
   return { ops, tail: text === '' || text.endsWith('\n') };
 };
 
+/* Restore reads the log back through the Schema (packages/core/src/schema/log.ts),
+   which is what upgrades the shapes older versions wrote and refuses the ones
+   nothing here can read. The Schema is effect, and effect is ~70 ms that the MCP
+   server — which imports this module for `resolveBoard` and never restores —
+   must not pay at start-up. Restore is synchronous because a board is held the
+   moment it is asked for, so it is loaded on first use, by `require`, which
+   reads an ES module synchronously. */
+let logSchema = null;
+const schema = () => (logSchema ??= createRequire(import.meta.url)('../../packages/core/src/schema/log.js'));
+
+export const boardOfLog = file => path.basename(file).replace(/\.jsonl$/, '');
+
 export const restoreBoard = file => {
-  const { ops, tail } = readBoardLog(file);
+  const { ops: raw, tail } = readBoardLog(file);
+  const ops = schema().decodeLog(boardOfLog(file), raw);
   const board = emptyBoard();
   applyOps(board, ops);
   return { board, lines: ops.length, tail };
