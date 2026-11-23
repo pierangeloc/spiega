@@ -4827,6 +4827,22 @@ test('every suite in test/ is collected by the runner', () => {
   assert.ok(specs.size >= 10, `only ${specs.size} suites are collected`);
 });
 
+/* The other way it can shrink, which is worse, because the name stays in the
+   run and says `ok`. A suite signals a failed check with process.exitCode and
+   a bare import() resolves regardless, so a spec that does not read the exit
+   code reports a failing suite as passing — which is how a real failure in
+   persist.mjs survived several green CI runs. harness.mjs is the only thing
+   that reads it; a spec that does not go through it is blind. */
+test('every spec reads the exit code of the suite it collects', () => {
+  const dir = path.join(ROOT, 'test');
+  const blind = fs.readdirSync(dir)
+    .filter(f => f.endsWith('.spec.mjs'))
+    .filter(f => !/from '\.\/harness\.mjs'/.test(fs.readFileSync(path.join(dir, f), 'utf8')));
+  assert.deepEqual(blind, [],
+    'these specs import their suite without reading process.exitCode, so a ' +
+    'failure in them is reported as a pass — collect it with harness.mjs:\n  ' + blind.join('\n  '));
+});
+
 const failed = (await Promise.all(pending)).find(Boolean);
 if (failed) throw failed;
 console.log(`\n${n} passed`);

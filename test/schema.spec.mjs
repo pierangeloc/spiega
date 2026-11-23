@@ -1,5 +1,4 @@
-/* Harness only: schema.mjs is the suite and it runs unchanged. This gives it a
-   name of its own in the run. See vitest.config.ts. */
-import { test } from 'vitest';
+/* Harness only: schema.mjs is the suite and it runs unchanged. See harness.mjs. */
+import { suite } from './harness.mjs';
 
-test('schema.mjs', () => import('./schema.mjs'));
+suite('schema.mjs');

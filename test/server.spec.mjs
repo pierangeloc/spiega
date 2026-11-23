@@ -1,4 +1,4 @@
-/* Harness only: server.mjs is the suite and it runs unchanged. */
-import { test } from 'vitest';
+/* Harness only: server.mjs is the suite and it runs unchanged. See harness.mjs. */
+import { suite } from './harness.mjs';
 
-test('server.mjs', () => import('./server.mjs'));
+suite('server.mjs');

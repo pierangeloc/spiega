@@ -50,10 +50,14 @@ export const boardOfLog = file => path.basename(file).replace(/\.jsonl$/, '');
 
 export const restoreBoard = file => {
   const { ops: raw, tail } = readBoardLog(file);
-  const ops = schema().decodeLog(boardOfLog(file), raw);
+  const { ops, refused } = schema().decodeLog(boardOfLog(file), raw);
   const board = emptyBoard();
   applyOps(board, ops);
-  return { board, lines: ops.length, tail };
+  /* `lines` counts what is on the board, not what is in the file: it is what
+     compaction weighs against LOG_CAP. `refused` is the difference, and the
+     caller says it out loud — a board short of a few of its own lines looks
+     exactly like one that was always this short. */
+  return { board, lines: ops.length, tail, refused };
 };
 
 /* One process owns one board file. The lock is a file next to it holding the
