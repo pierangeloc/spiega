@@ -10,15 +10,19 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Effect, Layer } from 'effect';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { Deferred, Effect, Fiber, Layer, Pull, Stream } from 'effect';
 import { HttpRouter, HttpServerResponse } from 'effect/http';
+import { TestClock } from 'effect/testing';
 import { emptyBoard, applyOps } from '../src/board/state.js';
+import { createServer } from '../src/board/server.js';
 import {
   BoardStore,
   RequireJsonMiddleware,
   SecurityMiddleware,
   SpiegaConfig,
   SpiegaHome,
+  createBoardEvents,
   createReadNodeServer,
   createReadWebHandler,
 } from '../packages/server/src/index.js';
@@ -33,7 +37,7 @@ const test = async (name, fn) => {
     console.log('  ok  ' + name);
   } catch (e) {
     process.exitCode = 1;
-    console.log('  FAIL  ' + name + '\n        ' + (e.stack || e.message).split('\n').join('\n        '));
+    console.log('  FAIL  ' + name + '\n        ' + (e?.stack || String(e)).split('\n').join('\n        '));
   }
 };
 
@@ -296,6 +300,189 @@ try {
     } finally {
       await app.dispose();
     }
+  });
+
+  /* ---------- SSE on the same HTTP server that accepts ops ---------- */
+
+  const live = createServer({ name: 'live' });
+  await new Promise(r => live.server.listen(0, '127.0.0.1', r));
+  const liveRoot = `http://127.0.0.1:${live.server.address().port}`;
+  const liveUrl = `${liveRoot}/b/live`;
+  const post = (ops) => fetch(liveUrl + '/op', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ops }),
+  }).then(r => r.json());
+  const viewers = async (count) => {
+    const identity = await fetch(liveUrl + '/whoami').then(r => r.json());
+    const { boards } = await fetch(liveRoot + '/boards').then(r => r.json());
+    assert.equal(identity.viewers, count);
+    assert.equal(boards.find(b => b.name === 'live').viewers, count);
+  };
+  const connect = async () => {
+    const abort = new AbortController();
+    const response = await fetch(liveUrl + '/events', {
+      signal: AbortSignal.any([abort.signal, AbortSignal.timeout(3000)]),
+    });
+    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buffer = '';
+    const nextFrame = async () => {
+      while (!buffer.includes('\n\n')) {
+        const { done, value } = await reader.read();
+        if (done) {
+          assert.equal(buffer, '', 'no partial frame at EOF');
+          return null;
+        }
+        buffer += value;
+      }
+      const end = buffer.indexOf('\n\n') + 2;
+      const frame = buffer.slice(0, end);
+      buffer = buffer.slice(end);
+      return frame;
+    };
+    return { response, nextFrame, close: () => abort.abort() };
+  };
+  const frame = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const quiet = async () => {
+    const events = live.boards.get('live').events;
+    const deadline = Date.now() + 1000;
+    while (events.viewers !== 0 && Date.now() < deadline) await sleep(5);
+    assert.equal(events.viewers, 0, 'the stream scope must finish after the socket closes');
+    assert.equal(events.pending, 0, 'no retained PubSub frames');
+    await viewers(0);
+  };
+
+  try {
+    await test('two live subscribers receive the same patch and replay, in order', async () => {
+      const a = await connect();
+      const b = await connect();
+      try {
+        for (const tab of [a, b]) {
+          assert.equal(tab.response.status, 200);
+          for (const [key, value] of Object.entries({
+            'content-type': 'text/event-stream', 'cache-control': 'no-cache',
+            connection: 'keep-alive', 'x-accel-buffering': 'no',
+          })) assert.equal(tab.response.headers.get(key), value);
+          assert.equal(tab.response.headers.get('access-control-allow-origin'), null);
+          assert.equal(await tab.nextFrame(), frame('state', live.board));
+          assert.equal(await tab.nextFrame(), frame('saving', { saving: false, why: 'memory' }));
+        }
+        await viewers(2);
+        const drawn = await post([{ op: 'node', id: 'gw', label: 'Gateway' }]);
+        assert.equal(drawn.viewers, 2);
+        const firstPatch = await a.nextFrame();
+        const patch = JSON.parse(firstPatch.split('\ndata: ')[1]);
+        assert.deepEqual(patch.board.nodes.map(n => n.id), ['gw']);
+        assert.deepEqual(patch.amended, []);
+        assert.ok(patch.fresh);
+        assert.equal(firstPatch, frame('patch', patch));
+        assert.equal(await b.nextFrame(), firstPatch);
+
+        assert.equal((await fetch(liveUrl + '/replay').then(r => r.json())).viewers, 2);
+        const settledPatch = await a.nextFrame();
+        assert.match(settledPatch, /^event: patch\n/);
+        assert.equal(await b.nextFrame(), settledPatch);
+        for (const tab of [a, b]) {
+          assert.equal(await tab.nextFrame(), frame('replay', { rev: live.board.rev }));
+        }
+      } finally {
+        a.close();
+        b.close();
+      }
+      await quiet();
+    });
+
+    await test('repeated disconnects release the stream; reconnect gets the full board', async () => {
+      for (let i = 0; i < 12; i++) {
+        const tab = await connect();
+        try {
+          assert.equal(await tab.nextFrame(), frame('state', live.board));
+          assert.match(await tab.nextFrame(), /^event: saving\n/);
+          await viewers(1);
+          assert.equal((await post([{ op: 'say', text: `connected ${i}` }])).ok, true);
+        } finally {
+          tab.close();
+        }
+        await quiet();
+      }
+      assert.equal((await post([
+        { op: 'node', id: 'store', label: 'Store' },
+        { op: 'edge', from: 'gw', to: 'store' },
+      ])).viewers, 0);
+      const reconnected = await connect();
+      try {
+        const full = await fetch(liveUrl + '/state').then(r => r.json());
+        assert.deepEqual(full.nodes.map(n => n.id), ['gw', 'store']);
+        assert.equal(full.edges.length, 1);
+        assert.equal(full.transcript.length, 12);
+        assert.equal(await reconnected.nextFrame(), frame('state', full));
+        assert.match(await reconnected.nextFrame(), /^event: saving\n/);
+        assert.equal((await post([{ op: 'say', text: 'after reconnect' }])).ok, true);
+        assert.match(await reconnected.nextFrame(), /^event: patch\n/);
+
+        const events = live.boards.get('live').events;
+        assert.equal(await live.drop('live'), true);
+        assert.equal(await reconnected.nextFrame(), null, 'dropping the board ends its live stream');
+        assert.equal(events.viewers, 0);
+        assert.equal(events.pending, 0);
+      } finally {
+        reconnected.close();
+      }
+      const missing = await fetch(liveUrl + '/events');
+      assert.equal(missing.status, 404);
+      assert.deepEqual(await missing.json(), { ok: false, error: 'no board named "live"' });
+    });
+  } finally {
+    await new Promise(r => { live.server.close(r); live.server.closeAllConnections(); });
+  }
+
+  await test('a stalled subscriber has bounded backlog, released with its scope', async () => {
+    const events = createBoardEvents();
+    const stream = events.stream(emptyBoard, () => ({ saving: false, why: 'memory' }));
+    await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+      const pull = yield* Stream.toPull(stream);
+      yield* pull;
+      assert.equal(events.viewers, 1);
+      for (let rev = 0; rev < 64; rev++) events.publish('replay', { rev });
+      assert.equal(events.pending, 16);
+    })));
+    assert.equal(events.viewers, 0);
+    assert.equal(events.pending, 0, 'closing the scope unsubscribes before draining the backlog');
+  });
+
+  await test('an overrun stream ends rather than sending a partial sequence of updates', async () => {
+    const events = createBoardEvents();
+    const stream = events.stream(emptyBoard, () => ({ saving: false, why: 'memory' }));
+    await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+      const pull = yield* Stream.toPull(stream);
+      yield* pull;
+      for (let rev = 0; rev < 64; rev++) events.publish('replay', { rev });
+      const end = yield* Effect.exit(pull);
+      assert.equal(end._tag, 'Failure', 'the stream must end on the gap');
+      assert.ok(end.cause.reasons.every(Pull.isDoneFailure));
+    })).pipe(Effect.timeout('1 second')));
+    assert.equal(events.viewers, 0);
+    assert.equal(events.pending, 0);
+  });
+
+  await test('an idle event stream sends its first ping after 25 seconds', async () => {
+    const events = createBoardEvents();
+    const stream = events.stream(emptyBoard, () => ({ saving: false, why: 'memory' }));
+    const decoder = new TextDecoder();
+    const seen = [];
+    await Effect.runPromise(Effect.gen(function* () {
+      const ready = yield* Deferred.make();
+      const reader = yield* Effect.forkChild(stream.pipe(Stream.runForEach(bytes => {
+        const text = decoder.decode(bytes);
+        seen.push(text);
+        return text.startsWith('event: saving\n') ? Deferred.succeed(ready, undefined) : Effect.void;
+      })));
+      yield* Deferred.await(ready);
+      yield* TestClock.adjust('24999 millis');
+      assert.equal(seen.length, 2, 'only the initial state and saving frames');
+      yield* TestClock.adjust('1 millis');
+      assert.equal(seen[2], ': ping\n\n');
+      yield* Fiber.interrupt(reader);
+    }).pipe(Effect.provide(TestClock.layer())));
+    assert.equal(events.viewers, 0, 'interrupting the reader also stops the heartbeat');
   });
 
   await new Promise(r => nodeServer.close(r));

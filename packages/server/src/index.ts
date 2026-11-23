@@ -40,6 +40,7 @@ export {
 } from './store.js';
 
 export { MIME, ReadApp, ReadRoutes } from './routes.js';
+export { createBoardEvents, type BoardEvents } from './events.js';
 
 export {
   createBoardReadBridge,
