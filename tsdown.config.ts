@@ -46,9 +46,8 @@ export default defineConfig(roots.map(root => ({
   platform: 'node' as const,
   unbundle: true,
   deps: {
-    // The JavaScript that has not been ported, and dagre, which is vendored
-    // outside src/ and used once at settle. Both are files in the artefact
-    // already; the specifier pointing at them is correct as written.
+    // The JavaScript that has not been ported. It is copied into the artefact
+    // as-is, so the specifier pointing at it is correct as written.
     neverBundle: [/\.js$/],
   },
   // The page asks for `.js`. rolldown would otherwise write `.mjs`.

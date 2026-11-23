@@ -303,7 +303,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
        brand and is served from there rather than copied into src/. */
     if (p === '/icon.svg') return serveFile(res, path.join(ROOT, 'docs', 'logo', 'spiega-mark.svg'));
 
-    if ((p.startsWith('/src/') || p.startsWith('/vendor/')) && !p.includes('..')) {
+    if (p.startsWith('/src/') && !p.includes('..')) {
       return serveFile(res, path.join(ROOT, p.slice(1)));
     }
 

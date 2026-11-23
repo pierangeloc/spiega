@@ -236,10 +236,6 @@ const send = ops => fetch(url + '/op', {
   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ops }),
 }).then(r => r.json());
 try {
-  const vendor = await fetch(root + '/vendor/dagre.esm.js');
-  assert.equal(vendor.status, 200);
-  assert.match(vendor.headers.get('content-type'), /javascript/);
-  assert.equal(await vendor.text(), fs.readFileSync(new URL('../vendor/dagre.esm.js', import.meta.url), 'utf8'));
   for (const route of ['snapshot', 'snapshot.svg', 'replay', 'settle']) {
     await send([{ op: 'clear' }, ...specToOps({ ...spec, settle: false })]);
     assert.equal(app.board.settled, false);
@@ -270,7 +266,7 @@ try {
   assert.equal(app.board.settled, true);
   await app.flush();
   assert.equal(restoreBoard(boardFile('settle')).board.settled, true);
-  console.log('  ok  CLI, vendor route and implicit finishes persist settle exactly once');
+  console.log('  ok  CLI and implicit finishes persist settle exactly once');
 } finally {
   await app.close();
   await new Promise(r => { app.server.close(r); app.server.closeAllConnections(); });

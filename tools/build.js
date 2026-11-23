@@ -49,7 +49,6 @@ const say = msg => { if (!process.argv.includes('--quiet')) console.log(msg); };
 const ASSETS = [
   'src',           // minus the TypeScript, which is compiled over the top below
   'bin',           // the launcher; it execs src/cli.js next to it
-  'vendor',        // dagre, imported by settle from outside src/
   'skills',        // install copies these into agent config directories
   'integrations',
   'examples',
@@ -127,7 +126,6 @@ const REQUIRED = [
   'src/board/server.js',
   'src/board/board.html',
   'src/render/render.js',
-  'vendor/dagre.esm.js',
   'docs/logo/spiega-mark.svg',
 ];
 
