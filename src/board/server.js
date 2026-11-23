@@ -48,6 +48,13 @@ import { home } from '../home.js';
 let schema = null;
 const loadSchema = () => (schema ??= import('../../packages/core/src/schema/op.js'));
 
+/* The Effect HTTP server and security middleware, loaded lazily when a server
+   is created rather than when this module is imported — for the same cold-start
+   reason as `loadSchema` above: the MCP server imports `resolveBoard` and
+   `claimSession` from here and never binds a socket. */
+let serverPkg = null;
+const loadServerPkg = () => (serverPkg ??= import('../../packages/server/src/index.js'));
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
 export const SESSION_DIR = path.join(home(), '.spiega');
@@ -71,8 +78,6 @@ export const boardFile = name => boardLogFile(BOARDS_DIR, name);
 
 /* The canonical port, and the lock on being the server — see `listen`. */
 export const PORT = Number(envVar('PORT')) || 4777;
-
-const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.svg': 'image/svg+xml', '.css': 'text/css' };
 
 const json = (res, code, body) => {
   const s = JSON.stringify(body);
@@ -135,53 +140,6 @@ const readBody = req => new Promise((resolve, reject) => {
   req.on('end', () => resolve(b));
   req.on('error', reject);
 });
-
-const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-
-/* ---------- who is allowed to talk to this server ----------
-
-   The server binds 127.0.0.1, and it is tempting to read that as "only me".
-   It is not. Loopback is not a security boundary in a browser: every page the
-   person has open can reach this port, and until now every one of them could
-   read any board and write to it, because the server answered with
-   `access-control-allow-origin: *`.
-
-   That was already worse than it looked — a board carries internal service
-   names, file paths and the script of the explanation, and `/state` handed all
-   of it to any origin that asked. It becomes much worse the moment anything
-   here writes outward (#47 posts to a PR through `gh`, #44 lets the page
-   author ops), so the boundary is drawn now, before that lands.
-
-   Two headers decide it, and neither is about the *body* of the request:
-
-   Origin — a browser sends it on every cross-origin fetch and on cross-origin
-   form posts. A request carrying a foreign origin is a page that is not this
-   board, whether it meant to read one or draw on one. A request with no Origin
-   at all is not a browser: the CLI, the MCP server, the test suite, curl.
-
-   Host — a name the attacker controls can be made to resolve to 127.0.0.1
-   (DNS rebinding), and the browser then treats the page as same-origin, so the
-   Origin check above agrees with it. The Host header is the one place that lie
-   is visible, because the browser sends the name it was asked for. */
-const LOOPBACK_HOST = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i;
-
-const hostIsLoopback = req => LOOPBACK_HOST.test(req.headers.host || '');
-
-/* Same origin means the same host *and port*: another server on 127.0.0.1 is
-   a different origin and has no more business here than a page on the web. */
-const originIsOurs = req => {
-  const o = req.headers.origin;
-  if (!o) return true;
-  try { return new URL(o).host === req.headers.host; } catch { return false; }
-};
-
-/* A cross-origin POST carrying `text/plain` is a "simple request": the browser
-   sends it with no preflight to ask permission for. The Origin check above
-   already refuses it, so this is the second lock rather than the first — but
-   it is the one that does not depend on a browser being honest about who it
-   is. Only the two routes that parse a body are held to it; `/close` takes
-   none and has never sent a content-type. */
-const wantsJSON = req => /^application\/json\b/i.test(req.headers['content-type'] || '');
 
 export function createServer({ board = null, name = DEFAULT_BOARD, persist = false, debounce = 100 } = {}) {
   /* name -> { name, board, clients, log }. Nothing else in the process is per
@@ -281,126 +239,95 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
      that work. */
   const baseOf = req => app.url || `http://${req.headers.host || `127.0.0.1:${PORT}`}`;
 
+  /* The Effect HTTP router handles all security checks (loopback host,
+     same-origin-or-absent origin, silent OPTIONS, no CORS headers) and every
+     read route (/icon.svg, /src/*, /, /index.html, /boards GET,
+     /b/:name, /b/:name/, /b/:name/state, /b/:name/whoami). Started eagerly
+     when a server is created so it is ready before the first request lands,
+     while staying out of the import graph of MCP processes that never listen. */
+  const effectServer = loadServerPkg().then(pkg => ({
+    bridge: pkg.createBoardReadBridge(
+      { rootDir: ROOT, port: PORT, defaultBoard: DEFAULT_BOARD, persist, baseUrl: () => app.url },
+      {
+        get: nm => {
+          const e = boards.get(nm);
+          return e ? { name: e.name, board: e.board, viewers: e.clients.size } : undefined;
+        },
+        reopen: (nm, boardUrl) => {
+          const e = reopen(nm, boardUrl);
+          return e ? { name: e.name, board: e.board, viewers: e.clients.size } : undefined;
+        },
+        listOpen: () => [...boards.values()].map(e => ({
+          name: e.name, board: e.board, viewers: e.clients.size,
+        })),
+        listSaved: () => persist ? savedBoards().filter(s => !boards.has(s.name)) : [],
+        saving: nm => {
+          const e = boards.get(nm);
+          return e ? saving(e) : { saving: false, why: 'memory' };
+        },
+      },
+    ),
+    isJsonContentType: pkg.isJsonContentType,
+  }));
+
   const server = http.createServer(async (req, res) => {
+    const { bridge, isJsonContentType } = await effectServer;
+    if (await bridge.handle(req, res)) return;
+
     const url = new URL(req.url, 'http://x');
     const p = url.pathname;
 
-    /* No CORS headers anywhere, deliberately: nothing outside this origin has
-       a reason to read a board, so a cross-origin preflight should simply find
-       no permission rather than be told which methods exist. */
-    if (!hostIsLoopback(req)) {
-      res.writeHead(403, { 'content-type': 'text/plain' });
-      return res.end('spiega serves 127.0.0.1 only; this request arrived for another host\n');
-    }
-    if (!originIsOurs(req)) {
-      res.writeHead(403, { 'content-type': 'text/plain' });
-      return res.end('spiega refuses cross-origin requests\n');
-    }
-    if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
-
-    // the renderer, served as plain modules for the browser — one copy, every board
-    /* The icon, for the browser tab. It lives in docs/ with the rest of the
-       brand and is served from there rather than copied into src/. */
-    if (p === '/icon.svg') return serveFile(res, path.join(ROOT, 'docs', 'logo', 'spiega-mark.svg'));
-
-    if (p.startsWith('/src/') && !p.includes('..')) {
-      return serveFile(res, path.join(ROOT, p.slice(1)));
-    }
-
-    /* The board list, which is also how a client tells a spiega server from
-       whatever else might be holding the port. */
-    if (p === '/boards') {
-      if (req.method === 'POST') {
-        if (!wantsJSON(req)) return json(res, 415, { ok: false, error: 'expected content-type: application/json' });
-        let want;
-        try { want = JSON.parse(await readBody(req)); }
-        catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + e.message }); }
-        /* The name is decided here, not by the client that asked.
-
-           Each client used to work its own name out of the registry and then
-           simply use it, and the claim was only ever written on the create
-           path — so a board whose owner had exited was handed, unclaimed, to
-           every session that asked next. Reported twice: two agents in one
-           directory, one board, each clearing the other's drawing. Both read
-           an owner that was gone, both read it as free, and nothing ever made
-           it look taken. One process holds every board, so the arithmetic
-           belongs here, where it happens once and in order.
-
-           A client that names a board itself (`--board notes`) sends no owner:
-           it is asking for that board, not for one of its own, and gets
-           exactly the name it asked for. */
-        const asked = slug(want.name || DEFAULT_BOARD);
-        const nm = want.owner ? freeName(asked, want.owner) : asked;
-        const created = !boards.has(nm);
-        hold(nm);
-        const boardUrl = `${baseOf(req)}/b/${nm}`;
-        /* Record the claim. assignName has already guaranteed this board is
-           ours or free, so writing the owner cannot take one from a session
-           that is still going — and it must be written, or the next session
-           finds the board abandoned all over again. */
-        const known = listBoards({ prune: false })[nm];
-        if (want.owner ? known?.owner !== want.owner
-                       : (created || !known)) {
-          registerBoard(nm, boardUrl, want.owner ?? null, want.cwd || null);
-        }
-        return json(res, 200, { ok: true, name: nm, url: boardUrl, created });
+    /* Creating a board — the write half of /boards (GET is on the Effect router). */
+    if (p === '/boards' && req.method === 'POST') {
+      if (!isJsonContentType(req.headers['content-type'])) {
+        return json(res, 415, { ok: false, error: 'expected content-type: application/json' });
       }
-      /* Open boards first, in the shape they have always had, and then the
-         ones that only exist on disk. `open` says which is which, on every
-         entry rather than only on the new ones, so a client that wants the
-         live boards can filter rather than having to know that a missing
-         field used to mean live. Counting them costs a readdir and a stat
-         each: no board is restored by being listed. */
-      const open = [...boards.values()].map(e => ({
-        name: e.name, url: `${baseOf(req)}/b/${e.name}`, open: true,
-        rev: e.board.rev, nodes: e.board.nodes.length, viewers: e.clients.size,
-      }));
-      const saved = persist
-        ? savedBoards().filter(s => !boards.has(s.name)).map(s => ({
-          name: s.name, url: `${baseOf(req)}/b/${s.name}`, open: false,
-          written: s.written,
-        }))
-        : [];
-      return json(res, 200, {
-        ok: true, pid: process.pid, url: baseOf(req),
-        boards: [...open, ...saved],
-      });
-    }
+      let want;
+      try { want = JSON.parse(await readBody(req)); }
+      catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + e.message }); }
+      /* The name is decided here, not by the client that asked.
 
-    if (p === '/' || p === '/index.html') {
-      return index(res, boards, persist ? savedBoards().filter(s => !boards.has(s.name)) : []);
+         Each client used to work its own name out of the registry and then
+         simply use it, and the claim was only ever written on the create
+         path — so a board whose owner had exited was handed, unclaimed, to
+         every session that asked next. Reported twice: two agents in one
+         directory, one board, each clearing the other's drawing. Both read
+         an owner that was gone, both read it as free, and nothing ever made
+         it look taken. One process holds every board, so the arithmetic
+         belongs here, where it happens once and in order.
+
+         A client that names a board itself (`--board notes`) sends no owner:
+         it is asking for that board, not for one of its own, and gets
+         exactly the name it asked for. */
+      const asked = slug(want.name || DEFAULT_BOARD);
+      const nm = want.owner ? freeName(asked, want.owner) : asked;
+      const created = !boards.has(nm);
+      hold(nm);
+      const boardUrl = `${baseOf(req)}/b/${nm}`;
+      /* Record the claim. assignName has already guaranteed this board is
+         ours or free, so writing the owner cannot take one from a session
+         that is still going — and it must be written, or the next session
+         finds the board abandoned all over again. */
+      const known = listBoards({ prune: false })[nm];
+      if (want.owner ? known?.owner !== want.owner
+                     : (created || !known)) {
+        registerBoard(nm, boardUrl, want.owner ?? null, want.cwd || null);
+      }
+      return json(res, 200, { ok: true, name: nm, url: boardUrl, created });
     }
 
     const m = /^\/b\/([^/]+)(\/.*)?$/.exec(p);
-    if (!m) { res.writeHead(404); return res.end('not found'); }
+    if (!m || m[2] == null) { res.writeHead(404); return res.end('not found'); }
     const nm = decodeURIComponent(m[1]);
-
-    /* /b/<name> is the board; the page lives at /b/<name>/ because it resolves
-       its own api off its own path, and without the slash that path is /b/. */
-    if (m[2] == null) {
-      res.writeHead(302, { location: `/b/${encodeURIComponent(nm)}/` });
-      return res.end();
-    }
     const rest = m[2];
 
-    const entry = boards.get(nm) || (rest === '/' ? reopen(nm, `${baseOf(req)}/b/${nm}`) : null);
+    const entry = boards.get(nm);
     if (!entry) {
       // A client holding a registry entry we no longer honour needs to hear
       // "gone", not "broken": that is what sends it off to start a board.
-      if (rest === '/') {
-        res.writeHead(404, { 'content-type': 'text/html' });
-        return res.end(`<!doctype html><meta charset=utf-8><title>no board</title>` +
-          `<body style="font:14px system-ui;padding:3rem">No board named <b>${esc(nm)}</b> here. ` +
-          `<a href="/">The ones there are</a>.`);
-      }
       return json(res, 404, { ok: false, error: `no board named "${nm}"` });
     }
     const board = entry.board;
-
-    if (rest === '/') return serveFile(res, path.join(HERE, 'board.html'));
-    if (rest === '/state') return json(res, 200, board);
-    // who this board is, for the window title and for `spiega boards`
-    if (rest === '/whoami') return json(res, 200, { name: entry.name, pid: process.pid, ...saving(entry) });
 
     if (rest === '/events') {
       res.writeHead(200, {
@@ -418,7 +345,9 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     }
 
     if (rest === '/op' && req.method === 'POST') {
-      if (!wantsJSON(req)) return json(res, 415, { ok: false, error: 'expected content-type: application/json' });
+      if (!isJsonContentType(req.headers['content-type'])) {
+        return json(res, 415, { ok: false, error: 'expected content-type: application/json' });
+      }
       let ops;
       try { ops = JSON.parse(await readBody(req)); }
       catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + e.message }); }
@@ -478,7 +407,9 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     // Narration begins in the browser, but the handover belongs in the same
     // server log as an agent's explicit settle, not just in that one window.
     if (rest === '/settle' && req.method === 'POST') {
-      if (!wantsJSON(req)) return json(res, 415, { ok: false, error: 'expected content-type: application/json' });
+      if (!isJsonContentType(req.headers['content-type'])) {
+        return json(res, 415, { ok: false, error: 'expected content-type: application/json' });
+      }
       try { settle(entry); } catch (e) { return failedOp(res, e); }
       return json(res, 200, { ok: true, board });
     }
@@ -541,6 +472,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
       for (const c of e.clients) { try { c.end(); } catch {} }
       e.log?.close();
     }
+    void effectServer.then(({ bridge }) => bridge.dispose()).catch(() => {});
   });
 
   const app = {
@@ -552,33 +484,6 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     close: () => Promise.all([...boards.values()].map(e => e.log?.close())),
   };
   return app;
-}
-
-/* The bare port, for someone who typed it without a board name. One board is
-   almost certainly the one they wanted.
-
-   The saved ones are here because a restart leaves the server holding one
-   board and twelve logs, and a list of what survived the restart is not a
-   list of the boards somebody has. They are marked as closed and otherwise
-   plain: a link opens one, which is what opening its url does now. Making
-   this a switchboard is #61, and this is not that. */
-function index(res, boards, saved = []) {
-  const names = [...boards.keys()];
-  /* Still a redirect when there is exactly one board on the machine. With a
-     drawing of somebody else's beside it, a redirect would hide the list it
-     was meant to save them reading. */
-  if (names.length === 1 && !saved.length) {
-    res.writeHead(302, { location: `/b/${encodeURIComponent(names[0])}/` });
-    return res.end();
-  }
-  const row = (n, note = '') =>
-    `<li><a href="/b/${encodeURIComponent(n)}/">${esc(n)}</a>${note}</li>`;
-  const rows = names.map(n => row(n)).join('');
-  const closed = saved.map(s => row(s.name, ` <span style="color:#777">closed</span>`)).join('');
-  res.writeHead(200, { 'content-type': 'text/html' });
-  res.end(`<!doctype html><meta charset=utf-8><title>spiega boards</title>` +
-    `<body style="font:14px system-ui;padding:3rem"><h1 style="font-weight:600">spiega</h1>` +
-    (rows || closed ? `<ul>${rows}${closed}</ul>` : `<p>No boards yet.`));
 }
 
 /* What the drawing came out like, for the agent that cannot see it (#56).
@@ -605,14 +510,6 @@ async function auditBoard(board) {
   } catch {
     return null;
   }
-}
-
-function serveFile(res, file) {
-  fs.readFile(file, (err, buf) => {
-    if (err) { res.writeHead(404); return res.end('not found'); }
-    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
-    res.end(buf);
-  });
 }
 
 /* ---------- the board registry ----------
