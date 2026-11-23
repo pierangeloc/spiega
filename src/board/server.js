@@ -142,7 +142,7 @@ const readBody = req => new Promise((resolve, reject) => {
 });
 
 export function createServer({ board = null, name = DEFAULT_BOARD, persist = false, debounce = 100 } = {}) {
-  /* name -> { name, board, clients, log }. Nothing else in the process is per
+  /* name -> { name, board, events, log }. Nothing else in the process is per
      board: the renderer, the port and the HTTP server are shared. Tests and
      one-off renders stay in memory; `startBoard` turns persistence on. */
   const boards = new Map();
@@ -157,7 +157,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     const held = boards.get(nm);
     if (held) return held;
     const loaded = b ? { board: b, lines: 0, tail: true } : load(nm);
-    const entry = { name: nm, board: loaded.board, clients: new Set(), started: Date.now(), log: null };
+    const entry = { name: nm, board: loaded.board, events: null, started: Date.now(), log: null };
     boards.set(nm, entry);
     if (persist) {
       try {
@@ -213,15 +213,13 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     const entry = boards.get(nm);
     if (!entry) return false;
     boards.delete(nm);
-    for (const c of entry.clients) { try { c.end(); } catch { /* already gone */ } }
+    entry.events?.close();
     await entry.log?.close();
     return true;
   };
 
-  const broadcast = (entry, event, data) => {
-    const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    for (const c of entry.clients) { try { c.write(frame); } catch { entry.clients.delete(c); } }
-  };
+  const broadcast = (entry, event, data) => entry.events?.publish(event, data);
+  const viewers = entry => entry.events?.viewers ?? 0;
 
   const settle = entry => {
     if (entry.board.settled || !entry.board.nodes.length) return;
@@ -242,33 +240,35 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
   /* The Effect HTTP router handles all security checks (loopback host,
      same-origin-or-absent origin, silent OPTIONS, no CORS headers) and every
      read route (/icon.svg, /src/*, /, /index.html, /boards GET,
-     /b/:name, /b/:name/, /b/:name/state, /b/:name/whoami). Started eagerly
+     /b/:name, /b/:name/, /b/:name/state, /b/:name/whoami, /b/:name/events). Started eagerly
      when a server is created so it is ready before the first request lands,
      while staying out of the import graph of MCP processes that never listen. */
-  const effectServer = loadServerPkg().then(pkg => ({
-    bridge: pkg.createBoardReadBridge(
+  const effectServer = loadServerPkg().then(pkg => {
+    const readEntry = entry => ({
+      name: entry.name, board: entry.board, viewers: viewers(entry),
+      get events() { return entry.events ??= pkg.createBoardEvents(); },
+    });
+    const bridge = pkg.createBoardReadBridge(
       { rootDir: ROOT, port: PORT, defaultBoard: DEFAULT_BOARD, persist, baseUrl: () => app.url },
       {
         get: nm => {
           const e = boards.get(nm);
-          return e ? { name: e.name, board: e.board, viewers: e.clients.size } : undefined;
+          return e ? readEntry(e) : undefined;
         },
         reopen: (nm, boardUrl) => {
           const e = reopen(nm, boardUrl);
-          return e ? { name: e.name, board: e.board, viewers: e.clients.size } : undefined;
+          return e ? readEntry(e) : undefined;
         },
-        listOpen: () => [...boards.values()].map(e => ({
-          name: e.name, board: e.board, viewers: e.clients.size,
-        })),
+        listOpen: () => [...boards.values()].map(readEntry),
         listSaved: () => persist ? savedBoards().filter(s => !boards.has(s.name)) : [],
         saving: nm => {
           const e = boards.get(nm);
           return e ? saving(e) : { saving: false, why: 'memory' };
         },
       },
-    ),
-    isJsonContentType: pkg.isJsonContentType,
-  }));
+    );
+    return { bridge, isJsonContentType: pkg.isJsonContentType };
+  });
 
   const server = http.createServer(async (req, res) => {
     const { bridge, isJsonContentType } = await effectServer;
@@ -329,21 +329,6 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     }
     const board = entry.board;
 
-    if (rest === '/events') {
-      res.writeHead(200, {
-        'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive',
-        'x-accel-buffering': 'no',
-      });
-      res.write(`event: state\ndata: ${JSON.stringify(board)}\n\n`);
-      /* Said on connect rather than only when it goes wrong: the board is
-         already not being saved by the time anyone opens it. */
-      res.write(`event: saving\ndata: ${JSON.stringify(saving(entry))}\n\n`);
-      entry.clients.add(res);
-      const ka = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 25000);
-      req.on('close', () => { clearInterval(ka); entry.clients.delete(res); });
-      return;
-    }
-
     if (rest === '/op' && req.method === 'POST') {
       if (!isJsonContentType(req.headers['content-type'])) {
         return json(res, 415, { ok: false, error: 'expected content-type: application/json' });
@@ -387,7 +372,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
       return json(res, errors.length ? 207 : 200, {
         ok: !errors.length, errors, warnings, rev: board.rev,
         nodes: board.nodes.length, edges: board.edges.length, steps: board.flow.length,
-        viewers: entry.clients.size,
+        viewers: viewers(entry),
         ...(aimed ? { amended: { chapter: amended[amended.length - 1], title: aimed.title ?? board.chapter,
           nodes: aimed.nodes.length, edges: aimed.edges.length, steps: aimed.flow.length } } : {}),
         ...(ops && ops.audit ? { audit: await auditBoard(aimed || board) } : {}),
@@ -401,7 +386,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
       try { settle(entry); } catch (e) { return failedOp(res, e); }
       const drawable = board.log.filter(e => e.op !== 'focus' && e.op !== 'clear').length;
       if (drawable) broadcast(entry, 'replay', { rev: board.rev });
-      return json(res, 200, { ok: !!drawable, ops: drawable, viewers: entry.clients.size });
+      return json(res, 200, { ok: !!drawable, ops: drawable, viewers: viewers(entry) });
     }
 
     // Narration begins in the browser, but the handover belongs in the same
@@ -469,7 +454,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
 
   server.on('close', () => {
     for (const e of boards.values()) {
-      for (const c of e.clients) { try { c.end(); } catch {} }
+      e.events?.close();
       e.log?.close();
     }
     void effectServer.then(({ bridge }) => bridge.dispose()).catch(() => {});

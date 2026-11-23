@@ -9,13 +9,14 @@
      in-process Effect testing without binding a socket.
    - `createReadBridge`: `handle(req, res): Promise<boolean>` used by
      `src/board/server.js` so every security check and every read route runs
-     through Effect's HttpRouter while write/SSE routes (#148, #149) stay
+     through Effect's HttpRouter while write routes (#148) stay
      untouched and off the hot path.
    - `createReadNodeServer`: a standalone `node:http.Server` serving only the
      Effect read app, for HTTP-level tests (including raw Host headers).
    ============================================================ */
 
 import http from 'node:http';
+import { pipeline } from 'node:stream/promises';
 import { Layer } from 'effect';
 import { FindMyWay, HttpRouter } from 'effect/http';
 import { SpiegaConfig, type SpiegaConfigShape } from './config.js';
@@ -39,9 +40,9 @@ export const createReadWebHandler = (
   });
 
 /* Which requests belong to the Effect read router today.
-   Write routes (/boards POST, /b/:name/op, /settle, /close), SSE (/events),
+   Write routes (/boards POST, /b/:name/op, /settle, /close),
    and render/mutation routes (/replay, /export, /snapshot, /snapshot.svg)
-   return false so src/board/server.js handles them until #148/#149 land. */
+   return false so src/board/server.js handles them until #148 lands. */
 export const isReadRoute = (method: string, pathname: string): boolean => {
   if (method !== 'GET') return false;
   if (
@@ -58,14 +59,14 @@ export const isReadRoute = (method: string, pathname: string): boolean => {
   const m = /^\/b\/([^/]+)(\/.*)?$/.exec(pathname);
   if (!m) return false;
   const rest = m[2];
-  return rest === undefined || rest === '/' || rest === '/state' || rest === '/whoami';
+  return rest === undefined || rest === '/' || rest === '/state' || rest === '/whoami' || rest === '/events';
 };
 
 /* Convert a Node IncomingMessage (headers + method + url, no body needed for
    security rejections, OPTIONS, or GET read routes) into a Web Request.
    Explicitly copies the raw `host` and `origin` headers so DNS-rebinding and
    cross-origin checks see the exact values sent on the wire. */
-const toWebRequest = (req: http.IncomingMessage): Request => {
+const toWebRequest = (req: http.IncomingMessage, signal: AbortSignal): Request => {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
     if (value === undefined) continue;
@@ -79,6 +80,7 @@ const toWebRequest = (req: http.IncomingMessage): Request => {
   return new Request(`http://127.0.0.1${rawUrl}`, {
     method: req.method || 'GET',
     headers,
+    signal,
   });
 };
 
@@ -95,8 +97,38 @@ const writeWebResponse = async (
     res.end();
     return;
   }
+  if (outHeaders['content-type'] === 'text/event-stream') {
+    // Respect socket backpressure instead of buffering the rest of a live stream.
+    await pipeline(response.body, res).catch((error: unknown) => {
+      if (!res.destroyed) throw error;
+    });
+    return;
+  }
   const buf = Buffer.from(await response.arrayBuffer());
   res.end(buf);
+};
+
+const serveWebRequest = async (
+  web: WebHandlerHandle,
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  standalone = false,
+): Promise<void> => {
+  const abort = new AbortController();
+  const onClose = () => abort.abort();
+  res.once('close', onClose);
+  if (res.destroyed) onClose();
+  try {
+    const response = await web.handler(toWebRequest(req, abort.signal));
+    if (standalone && response.status === 404 && response.headers.get('content-type') === null) {
+      res.writeHead(404);
+      res.end('not found');
+      return;
+    }
+    await writeWebResponse(res, response);
+  } finally {
+    res.off('close', onClose);
+  }
 };
 
 export interface ReadBridge {
@@ -131,8 +163,7 @@ export const createReadBridge = (
 
     if (!mustHandle) return false;
 
-    const response = await web.handler(toWebRequest(req));
-    await writeWebResponse(res, response);
+    await serveWebRequest(web, req, res);
     return true;
   };
 
@@ -153,13 +184,7 @@ export const createReadNodeServer = (
   const web = createReadWebHandler(services);
   const server = http.createServer(async (req, res) => {
     try {
-      const response = await web.handler(toWebRequest(req));
-      if (response.status === 404 && response.headers.get('content-type') === null) {
-        res.writeHead(404);
-        res.end('not found');
-        return;
-      }
-      await writeWebResponse(res, response);
+      await serveWebRequest(web, req, res, true);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       res.writeHead(500, { 'content-type': 'text/plain; charset=utf-8' });

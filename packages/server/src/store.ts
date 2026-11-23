@@ -3,7 +3,7 @@
 
    Keeping the store behind an Effect service lets the read routes run against
    the live board map in src/board/server.js today, against an Effect-native
-   store once #148/#149 land, and against a lightweight in-memory store with a
+   store once #148 lands, and against a lightweight in-memory store with a
    temp SpiegaHome layer in tests.
    ============================================================ */
 
@@ -11,6 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Context, Effect, Layer } from 'effect';
 import { SpiegaConfig, SpiegaHome } from './config.js';
+import { createBoardEvents, type BoardEvents } from './events.js';
 
 export interface BoardSnapshot {
   readonly rev: number;
@@ -22,6 +23,7 @@ export interface BoardEntry {
   readonly name: string;
   readonly board: BoardSnapshot;
   readonly viewers: number;
+  readonly events: BoardEvents;
 }
 
 export interface SavedBoardInfo {
@@ -87,7 +89,8 @@ export class BoardStore extends Context.Service<BoardStore, BoardStoreShape>()(
         const config = yield* SpiegaConfig;
         const entries = new Map<string, BoardEntry>();
         for (const [name, board] of Object.entries(initial)) {
-          entries.set(name, { name, board, viewers: 0 });
+          const events = createBoardEvents();
+          entries.set(name, { name, board, get viewers() { return events.viewers; }, events });
         }
         return BoardStore.of({
           get: (name) => entries.get(name),

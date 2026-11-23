@@ -208,8 +208,30 @@ export const ReadRoutes = HttpRouter.use((router) =>
         const entry = store.get(name);
         if (!entry) return missingBoardJson(name);
         return HttpServerResponse.jsonUnsafe(
-          { name: entry.name, pid: process.pid, ...store.saving(entry.name) },
+          { name: entry.name, pid: process.pid, viewers: entry.viewers, ...store.saving(entry.name) },
           { status: 200 },
+        );
+      }),
+    );
+
+    yield* router.add(
+      'GET',
+      '/b/:name/events',
+      Effect.gen(function* () {
+        const params = yield* HttpRouter.params;
+        const name = params.name ?? '';
+        const entry = store.get(name);
+        if (!entry) return missingBoardJson(name);
+        return HttpServerResponse.stream(
+          entry.events.stream(() => entry.board, () => store.saving(name)),
+          {
+            contentType: 'text/event-stream',
+            headers: {
+              'cache-control': 'no-cache',
+              connection: 'keep-alive',
+              'x-accel-buffering': 'no',
+            },
+          },
         );
       }),
     );
