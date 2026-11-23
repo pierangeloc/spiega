@@ -2915,7 +2915,7 @@ test('every relative link in docs/ points at something that exists', () => {
   }
 });
 
-test('the documented vocabulary matches what the board accepts', () => {
+test('the documented vocabulary matches what the board accepts', async () => {
   const doc = fs.readFileSync(path.join(ROOT, 'docs/vocabulary.md'), 'utf8');
 
   // every node kind the renderer knows must be in the table, and vice versa
@@ -2923,11 +2923,14 @@ test('the documented vocabulary matches what the board accepts', () => {
     assert.ok(new RegExp(`\`${kind}\``).test(doc), `docs/vocabulary.md never mentions the "${kind}" kind`);
   }
 
-  // every op the board accepts must be listed
-  const src = fs.readFileSync(path.join(ROOT, 'src/board/state.js'), 'utf8');
-  const ops = [...src.matchAll(/^    case '([a-z]+)'/gm)].map(m => m[1]);
-  assert.ok(ops.length >= 10, `expected the op list, found ${ops.length}`);
-  for (const op of ops) {
+  /* Every op the board accepts must be listed. Asked of the Schema rather than
+     grepped out of the reducer's switch: since #135 the vocabulary is defined
+     there, and the switch is one of its two readers. The grep also read the
+     reducer as a *file*, which stopped being possible the day it became
+     TypeScript — the copy in dist/ is compiled, and reindented with it. */
+  const { OP_NAMES } = await import('../packages/core/src/schema/op.js');
+  assert.ok(OP_NAMES.length >= 10, `expected the op list, found ${OP_NAMES.length}`);
+  for (const op of OP_NAMES) {
     assert.ok(new RegExp(`\`${op}\``).test(doc), `docs/vocabulary.md never mentions the "${op}" op`);
   }
 

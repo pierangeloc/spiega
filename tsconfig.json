@@ -14,7 +14,7 @@
     "vitest.config.ts",
     "eslint.config.js",
     "src/index.ts",
-    "src/board/state.js",
+    "src/board/state.ts",
     "src/board/settle.js",
     "src/board/script.js",
     "src/board/map.js",

@@ -39,10 +39,13 @@
 
 import { Schema } from 'effect';
 
+import type { Mutable } from './mutable.js';
+
 /* A cell, as a settled board freezes it. Finite rather than Int: the reducer
    asks only for finiteness, and a half-column is a layout the renderer can
-   draw. */
-const Cell = Schema.Struct({ col: Schema.Finite, row: Schema.Finite });
+   draw. Exported for board.ts, which freezes the same cell — an op carrying a
+   position and a board holding one are the same two numbers. */
+export const Cell = Schema.Struct({ col: Schema.Finite, row: Schema.Finite });
 
 /* The waypoints a settled long edge keeps, so a restore and a browser replay
    show the same lanes without loading dagre. */
@@ -54,8 +57,11 @@ const str = Schema.optionalKey(Schema.String);
 
 /* A number, or the string an agent sends instead of one. The reducer reads
    these through `Number()`, so `"3"` has always worked and a schema that
-   refused it would lose a line of somebody's script to pedantry. */
-const Num = Schema.Union([Schema.Finite, Schema.String]).annotate({
+   refused it would lose a line of somebody's script to pedantry.
+
+   Exported, like Cell, because the board holds what the op carried: a `col`
+   that arrived as `"3"` is on the board as `"3"`. */
+export const Num = Schema.Union([Schema.Finite, Schema.String]).annotate({
   description: 'a number; a numeric string is accepted',
 });
 const num = Schema.optionalKey(Num);
@@ -278,7 +284,7 @@ export const OP_NAMES = Object.keys(OPS) as (keyof typeof OPS)[];
 
 /** Every op there is. The type the board, the reducer and the tools all speak. */
 export const Op = Schema.Union(Object.values(OPS));
-export type Op = typeof Op.Type;
+export type Op = Mutable<typeof Op.Type>;
 
 /* Compiled once, here, rather than per request: these are on the critical path
    of somebody talking. A guard is ~0.1 µs, against a 200 µs budget for the

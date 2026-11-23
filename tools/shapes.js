@@ -24,7 +24,13 @@ import { renderSVG } from '../src/render/render.js';
 import { PAPER } from '../src/render/theme.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = path.join(ROOT, 'docs', 'shapes');
+/* Where the pictures go. Beside this file by default, which is what the suite
+   wants: it runs the copy in dist/ and compares what comes out with the copies
+   the build put there. A path on the command line is how the repository asks
+   for its own, and `pnpm run shapes` is that call — the tool has to run from
+   the build now, because the reducer it draws with is TypeScript and no longer
+   exists in the source tree (AGENTS.md, "What runs is dist/"). */
+const OUT = process.argv[2] ? path.resolve(process.argv[2]) : path.join(ROOT, 'docs', 'shapes');
 
 /* One sample per thing worth seeing. Each is the op list an agent would send,
    so the page doubles as a set of worked examples — the picture and the JSON
@@ -142,6 +148,6 @@ fs.mkdirSync(OUT, { recursive: true });
 for (const [name, ops] of SAMPLES) {
   const file = path.join(OUT, `${name}.svg`);
   fs.writeFileSync(file, sheet(ops));
-  console.log(`  ${path.relative(ROOT, file)}`);
+  console.log(`  ${path.relative(process.cwd(), file)}`);
 }
 console.log(`\n${SAMPLES.length} shapes`);
