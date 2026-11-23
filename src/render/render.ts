@@ -1,4 +1,3 @@
-// @ts-check
 /* ============================================================
    spiega render — a spec becomes one SVG.
 
@@ -15,26 +14,19 @@ import { drawCallout } from './callout.js';
 import { planFloating } from './floating.js';
 import { assign, layout, boundaryShapes, pieceNames } from './layout.js';
 
-/** @typedef {import('../board/state.js').Board} Board */
-/** @typedef {import('../board/state.js').FlowStep} FlowStep */
-/** @typedef {import('./layout.js').Placed} Placed */
+import type { Board, Edge, FlowStep } from '@spiega/core';
+import type { Placed } from './layout.js';
 
 /* Where a boundary's card sits, in the corner-based form the drawing takes.
    The centre is what the placement pass works in; the card is drawn from its
    top-left corner. */
-/** @param {{at: number[], w: number, h: number}|undefined} t */
-const tabRect = t => (t ? { x: t.at[0] - t.w / 2, y: t.at[1] - t.h / 2, w: t.w, h: t.h } : null);
+const tabRect = (t: { at: number[], w: number, h: number } | undefined): { x: number, y: number, w: number, h: number } | null => (t ? { x: t.at[0] - t.w / 2, y: t.at[1] - t.h / 2, w: t.w, h: t.h } : null);
 
 /* Flow steps may name an edge ("gw>orders") and/or nodes to light. Numbering
    runs over the steps that name an edge, so the badges on the board match the
    numbers in the step list beside it. */
-/**
- * @param {{flow?: FlowStep[]}} spec
- * @returns {{stepOf: Record<string, number>, steps: FlowStep[]}}
- */
-export function indexFlow(spec) {
-  /** @type {Record<string, number>} */
-  const stepOf = {};        // edge key -> step number
+export function indexFlow(spec: { flow?: FlowStep[] }): { stepOf: Record<string, number>, steps: FlowStep[] } {
+  const stepOf: Record<string, number> = {};        // edge key -> step number
   const steps = spec.flow || [];
   let n = 0;
   steps.forEach((s, i) => {
@@ -46,15 +38,9 @@ export function indexFlow(spec) {
 }
 
 /* What one step lights: its own hop, both ends of it, and anything it names. */
-/**
- * @param {FlowStep} s
- * @returns {{nodes: Set<string>, edges: Set<string>}}
- */
-function lightsOf(s) {
-  /** @type {Set<string>} */
-  const nodes = new Set(s.lights || []);
-  /** @type {Set<string>} */
-  const edges = new Set();
+function lightsOf(s: FlowStep): { nodes: Set<string>, edges: Set<string> } {
+  const nodes = new Set<string>(s.lights || []);
+  const edges = new Set<string>();
   if (s.edge) {
     edges.add(s.edge);
     const [a, b] = s.edge.split('>');
@@ -83,20 +69,14 @@ function lightsOf(s) {
    `context` is empty when the active step names no phase, which makes a
    grouped board behave exactly as an ungrouped one until somebody groups
    something. */
-/**
- * @param {Board} spec
- * @param {FlowStep[]} steps
- * @param {number|null} active
- * @returns {{nodes: Set<string>, edges: Set<string>, context: {nodes: Set<string>, edges: Set<string>}}|null}
- */
-function focusAt(spec, steps, active) {
-  if (active == null || !steps[active]) return null;
+type Focus = { nodes: Set<string>, edges: Set<string>, context: { nodes: Set<string>, edges: Set<string> } };
+function focusAt(steps: FlowStep[], active: number | null): Focus | null {
+  if (active == null) return null;
   const s = steps[active];
+  if (!s) return null;
   const { nodes, edges } = lightsOf(s);
-  /** @type {Set<string>} */
-  const cn = new Set();
-  /** @type {Set<string>} */
-  const ce = new Set();
+  const cn = new Set<string>();
+  const ce = new Set<string>();
   if (s.group) {
     for (const peer of steps) {
       if (peer === s || peer.group !== s.group) continue;
@@ -120,21 +100,14 @@ function focusAt(spec, steps, active) {
    not which way its value went. A node may be given the other side with a
    `notch` field, for the board where the flow says nothing — a lone field
    with no edges at all, which is not a side of anything. */
-/**
- * @param {Board['nodes']} nodes
- * @param {Board['edges']} edges
- * @returns {Record<string, 'left'|'right'>}
- */
-function notchSides(nodes, edges) {
-  /** @type {Record<string, {in: number, out: number}>} */
-  const ends = {};
+function notchSides(nodes: Board['nodes'], edges: Board['edges']): Record<string, 'left' | 'right'> {
+  const ends: Record<string, { in: number, out: number }> = {};
   for (const n of nodes) ends[n.id] = { in: 0, out: 0 };
   for (const e of edges) {
     if (ends[e.from]) ends[e.from].out++;
     if (ends[e.to]) ends[e.to].in++;
   }
-  /** @type {Record<string, 'left'|'right'>} */
-  const out = {};
+  const out: Record<string, 'left' | 'right'> = {};
   for (const n of nodes) {
     const { in: i, out: o } = ends[n.id];
     out[n.id] = n.notch === 'left' || n.notch === 'right' ? n.notch
@@ -143,16 +116,15 @@ function notchSides(nodes, edges) {
   return out;
 }
 
-/**
- * @param {Board} spec
- * @param {{
- *   active?: number|null,
- *   placed?: Placed|null,
- *   margin?: number,
- *   hand?: boolean
- * }} [options]
- */
-export function renderSVG(spec, { active, placed = null, margin = 0, hand = true } = {}) {
+export function renderSVG(
+  spec: Board,
+  { active, placed = null, margin = 0, hand = true }: {
+    active?: number | null,
+    placed?: Placed | null,
+    margin?: number,
+    hand?: boolean,
+  } = {},
+) {
   // A board carries its own highlighted step, so renderSVG(board) does the
   // right thing; pass `active` only to override it (null clears it).
   if (active === undefined) active = spec.active ?? null;
@@ -160,11 +132,10 @@ export function renderSVG(spec, { active, placed = null, margin = 0, hand = true
   const edges = spec.edges || [];
   const place = assign({ nodes, edges }, placed || {});
   const { stepOf, steps } = indexFlow(spec);
-  /** @param {{e: any, key: string}} r */
-  const stepFor = r => (r.e.step != null ? r.e.step : (stepOf[r.key] ?? null));
+  const stepFor = (r: { e: Edge, key: string }): number | null => (r.e.step != null ? r.e.step : (stepOf[r.key] ?? null));
   // the gutters are sized for the tags that cross them, step numbers included
   const { boxes, lanes, width, height } = layout({ nodes, edges, boundaries: spec.boundaries }, place, e => stepFor({ e, key: edgeKey(e) }));
-  const focus = focusAt(spec, steps, active);
+  const focus = focusAt(steps, active);
   const notches = notchSides(nodes, edges);
 
   /* Everything that floats is placed before the canvas is sized, in one pass

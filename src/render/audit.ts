@@ -33,6 +33,18 @@
    bare specifiers. See AGENTS.md.
    ============================================================ */
 
+import type { Pt } from './ink.js';
+
+type Rect = { x: number, y: number, w: number, h: number };
+type Route = { key: string, pts: Pt[] };
+/* What a rendered board hands over that the audit reads: renderSVG's result,
+   less everything the audit has no use for. */
+type Drawn = { svg: string, offset: { x: number, y: number }, boxes: Record<string, Rect>, planned: Route[] };
+type Astray = { kind: 'tag' | 'callout' | 'tab', text: string, on: string };
+type Buried = { edge: string, box: string };
+/* A drawn pill or card, with the words found on it. */
+type Words = Rect & { text: string };
+
 /* Monospace advance. The board's faces (SF Mono, Menlo, Consolas) are all
    about 0.6 em; letter-spacing is added per character on top. */
 const ADVANCE = 0.6;
@@ -52,10 +64,10 @@ export const CROSSINGS_FLOOR = 4;
    longer than the explanation it interrupts does not get read. */
 const NAMED = 4;
 
-const unescape = s => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-const attr = (s, k) => { const m = s.match(new RegExp(`\\b${k}="([^"]*)"`)); return m ? m[1] : null; };
+const unescape = (s: string): string => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+const attr = (s: string, k: string): string | null => { const m = s.match(new RegExp(`\\b${k}="([^"]*)"`)); return m ? m[1] : null; };
 
-function textBox(attrs, body, dx, dy) {
+function textBox(attrs: string, body: string, dx: number, dy: number): Rect {
   const x = Number(attr(attrs, 'x')) + dx, y = Number(attr(attrs, 'y')) + dy;
   const size = Number(attr(attrs, 'font-size'));
   const spacing = parseFloat(attr(attrs, 'letter-spacing') || '0');
@@ -65,7 +77,7 @@ function textBox(attrs, body, dx, dy) {
   return { x: x0, y: y - size * 0.75, w, h: size * 0.95 };
 }
 
-function pathBox(d, dx, dy) {
+function pathBox(d: string, dx: number, dy: number): Rect {
   const n = (d.match(/-?\d+(?:\.\d+)?/g) || []).map(Number);
   const xs = n.filter((_, i) => i % 2 === 0), ys = n.filter((_, i) => i % 2 === 1);
   const x0 = Math.min(...xs) + dx, y0 = Math.min(...ys) + dy;
@@ -76,9 +88,16 @@ function pathBox(d, dx, dy) {
    every word and every pill knows what it belongs to. Only translations are
    followed: the one rotation on the board is a note's tilt, and a note is
    measured by its card. */
-export function measureDrawing(svg) {
-  const stack = [];
-  const nodeText = [], tags = new Map(), callouts = new Map(), balls = [], tabs = [];
+export function measureDrawing(svg: string) {
+  type Group = { attrs: string, dx: number, dy: number, fills: Words[] };
+  const stack: Group[] = [];
+  const nodeText: (Rect & { id: string, text: string })[] = [];
+  const tags = new Map<string, Words & { key: string }>();
+  const callouts = new Map<Group, Words>();
+  const balls: Rect[] = [];
+  const tabs: Words[] = [];
+  const named = (k: string): string | undefined =>
+    stack.map(g => attr(g.attrs, k)).find((v): v is string => !!v);
   // an attribute may hold a `>`: every edge is named `from>to`
   const re = /<(\/?)(g|text|path)\b((?:[^>"]|"[^"]*")*?)\/?>([^<]*)/g;
   for (const m of svg.matchAll(re)) {
@@ -91,8 +110,8 @@ export function measureDrawing(svg) {
     }
     if (close) continue;
     const dx = stack.reduce((s, g) => s + g.dx, 0), dy = stack.reduce((s, g) => s + g.dy, 0);
-    const node = stack.find(g => attr(g.attrs, 'data-node'));
-    const edge = stack.find(g => attr(g.attrs, 'data-edge'));
+    const nodeId = named('data-node');
+    const edgeId = named('data-edge');
     const inTag = stack.some(g => attr(g.attrs, 'class') === 'tag');
     const call = stack.find(g => attr(g.attrs, 'data-callout') != null);
     /* A boundary's name rides a card. The card is what is measured, and it is
@@ -109,7 +128,7 @@ export function measureDrawing(svg) {
     });
     if (tag === 'text') {
       const b = textBox(attrs, body, dx, dy);
-      if (node) nodeText.push({ id: attr(node.attrs, 'data-node'), text: unescape(body), ...b });
+      if (nodeId !== undefined) nodeText.push({ id: nodeId, text: unescape(body), ...b });
       else if (call) {
         // keyed by the group itself: two callouts may share an id, or have none
         const prev = callouts.get(call);
@@ -120,19 +139,18 @@ export function measureDrawing(svg) {
           card.text = (card.text ? card.text + ' ' : '') + unescape(body);
           tabs.push(card);
         }
-      } else if (edge && inTag) {
-        const k = attr(edge.attrs, 'data-edge');
-        const t = tags.get(k);
+      } else if (edgeId !== undefined && inTag) {
+        const t = tags.get(edgeId);
         if (t) t.text = (t.text ? t.text + ' ' : '') + unescape(body);
       }
     } else if (tag === 'path' && bgroup && attr(attrs, 'class') === 'f') {
-      bgroup.fills.push(pathBox(attr(attrs, 'd') || '', dx, dy));
+      bgroup.fills.push({ ...pathBox(attr(attrs, 'd') || '', dx, dy), text: '' });
     } else if (tag === 'path' && call && attr(attrs, 'class') === 'f') {
       // the ball a leader ends in: `M(x - r) y a r r ...`, so its centre is r to the right
       const m = (attr(attrs, 'd') || '').match(/^M(-?[\d.]+) (-?[\d.]+)\s*a([\d.]+)/);
       if (m) balls.push({ x: Number(m[1]) + dx, y: Number(m[2]) + dy - Number(m[3]), w: Number(m[3]) * 2, h: Number(m[3]) * 2 });
-    } else if (tag === 'path' && edge && inTag && attr(attrs, 'class') === 'f') {
-      const k = attr(edge.attrs, 'data-edge');
+    } else if (tag === 'path' && edgeId !== undefined && inTag && attr(attrs, 'class') === 'f') {
+      const k = edgeId;
       if (!tags.has(k)) tags.set(k, { key: k, text: '', ...pathBox(attr(attrs, 'd') || '', dx, dy) });
     }
   }
@@ -145,17 +163,17 @@ export function measureDrawing(svg) {
   };
 }
 
-const union = (a, b) => {
+const union = (a: Rect, b: Rect): Rect => {
   const x = Math.min(a.x, b.x), y = Math.min(a.y, b.y);
   return { x, y, w: Math.max(a.x + a.w, b.x + b.w) - x, h: Math.max(a.y + a.h, b.y + b.h) - y };
 };
-const meets = (a, b) =>
+const meets = (a: Rect, b: Rect): boolean =>
   a.x < b.x + b.w - SLACK && a.x + a.w > b.x + SLACK && a.y < b.y + b.h - SLACK && a.y + a.h > b.y + SLACK;
 
 /* Does a polyline pass through a box? Sampled rather than solved: a route is
    a handful of short segments and the boxes are few, so the crude version is
    fast enough to run on every batch and has no cases in it to get wrong. */
-function crosses(pts, b, inset = 2) {
+function crosses(pts: Pt[], b: Rect, inset = 2): boolean {
   for (let i = 1; i < pts.length; i++) {
     const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
     const n = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / STEP));
@@ -169,21 +187,21 @@ function crosses(pts, b, inset = 2) {
 
 /* The text half, over a rendered board. `spec` supplies the node kinds, so a
    note is measured by its card rather than its tilted words. */
-export function overprints(spec, r) {
+export function overprints(spec: { nodes?: { id: string, kind?: string }[] }, r: Drawn) {
   const drawn = measureDrawing(r.svg);
   const kinds = Object.fromEntries((spec.nodes || []).map(n => [n.id, n.kind]));
   /* The drawing is shifted to make room for what overhangs the top left, and
      the layout's boxes and routes are not. Everything here is in the drawing's
      coordinates. */
   const { x: ox, y: oy } = r.offset;
-  const at = b => ({ x: b.x + ox, y: b.y + oy, w: b.w, h: b.h });
+  const at = (b: Rect): Rect => ({ x: b.x + ox, y: b.y + oy, w: b.w, h: b.h });
   const cards = Object.entries(r.boxes).filter(([id]) => kinds[id] === 'note').map(([id, b]) => ({ id, ...at(b) }));
   const words = drawn.nodeText.filter(t => kinds[t.id] !== 'note');
   // what a tag is painted beneath: the drawing, not a queue's strip of words, which is in `words`
   const bodies = Object.entries(r.boxes).filter(([id]) => kinds[id] !== 'note').map(([id, b]) => ({ id, ...at(b) }));
   const routes = r.planned.map(p => ({ key: p.key, pts: p.pts.map(([x, y]) => [x + ox, y + oy]) }));
 
-  const text = [], astray = [];
+  const text: string[] = [], astray: Astray[] = [];
   const floats = [
     ...drawn.tags.map(t => ({ ...t, what: `tag "${t.text}"` , tag: true })),
     ...drawn.callouts.map(c => ({ ...c, what: `callout "${c.text}"`, tag: false })),
@@ -223,8 +241,8 @@ export function overprints(spec, r) {
 
 /* Every arrow that passes through a box which is neither of its ends. The
    board says it connects those two; the line says it touched four. */
-export function buriedArrows({ boxes, planned }) {
-  const found = [];
+export function buriedArrows({ boxes, planned }: { boxes: Record<string, Rect>, planned: Route[] }): Buried[] {
+  const found: Buried[] = [];
   for (const r of planned) {
     const [from, to] = r.key.split('>');
     for (const [id, b] of Object.entries(boxes)) {
@@ -238,7 +256,7 @@ export function buriedArrows({ boxes, planned }) {
 /* Do two segments meet anywhere but at their ends? Routes share their ends by
    design — every arrow out of one box leaves from the same side — so a shared
    endpoint is the drawing working, not a crossing. */
-const meet = (p, q, r, s) => {
+const meet = (p: Pt, q: Pt, r: Pt, s: Pt): boolean => {
   const d = (q[0] - p[0]) * (s[1] - r[1]) - (q[1] - p[1]) * (s[0] - r[0]);
   if (!d) return false;   // parallel, including the overlapping case: no X to see
   const t = ((r[0] - p[0]) * (s[1] - r[1]) - (r[1] - p[1]) * (s[0] - r[0])) / d;
@@ -248,7 +266,7 @@ const meet = (p, q, r, s) => {
 
 /* How many pairs of arrows cross. Pairs rather than points: two lines that
    meet twice are one tangle to a reader, not two. */
-export function crossings(planned) {
+export function crossings(planned: Route[]): number {
   let n = 0;
   for (let i = 0; i < planned.length; i++)
     for (let j = i + 1; j < planned.length; j++) {
@@ -262,7 +280,7 @@ export function crossings(planned) {
 }
 
 /* The whole measurement, over a board the renderer has just drawn. */
-export function audit(spec, r) {
+export function audit(spec: { nodes?: { id: string, kind?: string }[] }, r: Drawn) {
   const { text, astray } = overprints(spec, r);
   return {
     over: text,
@@ -280,7 +298,9 @@ export function audit(spec, r) {
    say what to do: the remedy for a board that cannot be placed is fewer things
    on it, and a report that provoked a blind redraw would be worse than
    silence. */
-export function report({ over = [], astray = [], buried = [], crossings = 0 }) {
+export function report({ over = [], astray = [], buried = [], crossings = 0 }: {
+  over?: string[], astray?: Astray[], buried?: Buried[], crossings?: number,
+}): string[] {
   const lines = [...over];
   /* A label on somebody else's line. Named rather than counted, because
      "a label is ambiguous" is nothing to act on and "this label, on that
