@@ -27,9 +27,13 @@ tsdown + Vitest, the browser rule as lint, the conventions rewritten, and the
 two holes phase 0 left — lint that could not parse TypeScript, and a build
 that did not compile `packages/`.
 
-**Phase 1 is the queue below.** The five workspace packages exist as stubs
-whose `index.ts` names the issue that fills each one, and every board still
-draws from the JavaScript in `src/`.
+**Phase 1 is in progress.** Round 1 (#135) and two of Round 2's three tracks
+(#137, #138) have landed: `packages/core/src/schema/` holds the op union and
+the board Schema, and `state.ts`, `script.ts`, `tape.ts`, `map.ts`, `camera.ts`
+and `spec.ts` are all TypeScript. What remains in phase 1 is #139 (dagre from
+npm and `settle`), #140 (old op logs through the Schema), and #136 (real MCP
+tool schemas) — all three now unblocked. The other four workspace packages are
+still stubs, and the renderer in `src/render/` is still JavaScript.
 
 ## The decision the whole of phase 1 rests on
 
@@ -72,27 +76,27 @@ tracks do not touch each other's files and can run in parallel.
 
 Both were cheap and both widen the oracle everything after them is judged by.
 
-### Round 1 — the keystone, alone
+### Round 1 — done
 
-**#135, the op union.** Everything else in phase 1 reads the shape it defines,
-so a second agent writing against a moving union is rework. It also carries the
-two conventions the change has to earn: `effect` as the package's first runtime
-dependency, and the browser-rule exemption above.
+**#135, the op union** (#169). Everything else in phase 1 reads the shape it
+defines, and it established both conventions: `effect` as the package's first
+runtime dependency, and the browser-rule exemption for
+`packages/core/src/schema/`.
 
-### Round 2 — three tracks, in parallel
+### Round 2 — #137 and #138 done; #139 remaining
 
-| | | watch |
+| | | status / watch |
 |---|---|---|
-| #137 | the reducer in TypeScript | the biggest module in the repo, and already `@ts-check`ed, so it is JSDoc → real types plus the fallout. Keep it **mutable**: that is why `POST /op` fits its budget. Gate on `persist.mjs`'s 0.2 ms p99, and do not let the new property tests argue it into immutability |
-| #138 | script, tape, map, camera, spec | five modules, ~760 lines, mostly `@ts-check`ed already. The lowest-risk track in the phase |
-| #139 | dagre from npm, settle ported | the version question is already answered: `vendor/README.md` pins `@dagrejs/dagre` **3.1.3** with a SHA-256, and the bundle is unmodified, so the `customOrder` hook settle relies on is in the package. The `smoke.mjs` test asserting the page never reaches `vendor/` or `settle.js` gets **updated**, not deleted. `AGENTS.md` still says dagre stays vendored — that sentence is this issue's to rewrite |
+| #137 | the reducer in TypeScript | **done** (#171) — `src/board/state.ts`, `packages/core/src/schema/board.ts`, and the property suite in `test/reducer.mjs` |
+| #138 | script, tape, map, camera, spec | **done** (#172) — all five ported in place |
+| #139 | dagre from npm, settle ported | **unblocked** — the version question is already answered: `vendor/README.md` pins `@dagrejs/dagre` **3.1.3** with a SHA-256, and the bundle is unmodified, so the `customOrder` hook settle relies on is in the package. The `smoke.mjs` test asserting the page never reaches `vendor/` or `settle.js` gets **updated**, not deleted. `AGENTS.md` still says dagre stays vendored — that sentence is this issue's to rewrite |
 
-### Round 3
+### Round 3 — unblocked
 
 | | |
 |---|---|
-| #140 | old op logs restore through the Schema. Needs #135 and #137. One input only a human can supply: **copies of real op logs out of `~/.spiega`, anonymised**, as goldens — collect them during round 2 so the work is not blocked on it |
-| #136 | `board_draw` advertises a real schema. Needs #135, and four real MCP clients, so it is `ready-for-human` |
+| #140 | old op logs restore through the Schema. Unblocked now (#135 and #137 are done). One input only a human can supply: **copies of real op logs out of `~/.spiega`, anonymised**, as goldens — collect them before handing this to an agent |
+| #136 | `board_draw` advertises a real schema. Unblocked, and needs four real MCP clients, so it is `ready-for-human` |
 
 ### The human track, startable now
 
@@ -106,7 +110,7 @@ risk in the plan, and it produces the ADR that de-risks #151 long before phase
 The oracle is not the suite alone.
 
 ```sh
-pnpm test          # 11 suites, inside dist/
+pnpm test          # 12 suites, inside dist/
 pnpm run lint      # the browser rule, over the source tree
 pnpm run typecheck # root plus every package, strict
 pnpm run pack      # the tarball npm would publish
