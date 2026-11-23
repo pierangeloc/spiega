@@ -71,7 +71,7 @@ const BROWSER_SAFE = [
   // The typed packages are browser-safe by definition: they are what the render
   // port is moving src/render into, and the page will import them.
   'packages/core/**', 'packages/render/**',
-  // All of src/render — every file there is pure today, audit.js included, even
+  // All of src/render — every file there is pure today, audit.ts included, even
   // though the page does not reach it.
   'src/render/**',
   // src/board is covered wholesale rather than by a list of the seven modules

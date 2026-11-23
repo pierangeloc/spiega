@@ -1,9 +1,8 @@
 {
-  // The JavaScript that has not been ported yet. Types are opt-in here: the
-  // modules below say `// @ts-check` and are listed one by one, because
-  // turning `checkJs` on would also check the render modules they import,
-  // which together still carry ~234 strict errors. Annotating those is the
-  // render port's job (#141–#145), not this file's.
+  // The root's own sources: the TypeScript modules ported so far, listed one
+  // by one. The render package is finished (#141–#145); what is left is the
+  // JavaScript outside it, which opts in with `// @ts-check` and a line here,
+  // because `checkJs` stays off for the files that have not been ported.
   //
   // Shared options live in tsconfig.base.json, which every package extends.
   "extends": "./tsconfig.base.json",
