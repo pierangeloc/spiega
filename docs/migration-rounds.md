@@ -151,12 +151,12 @@ there is a quiet moment; the pictures and the type checks were never affected.
 One issue, run alone: with #150 held there was no second track that did not
 collide with it, and a port gated on byte-identical pictures needs no help.
 
-### Round 7 — done, bar one Linux window
+### Round 7 — done
 
 | | | status / unblocks |
 |---|---|---|
 | #145 | Port `render` and `audit`, and close the render package (Phase 2) | **done** (#184) — **phase 2 is finished**; `src/render` has no JavaScript left. Every gallery, example, regression and shape SVG byte-identical. Unblocks #153, and with it the whole of phase 4 |
-| #150 | Snapshot, export and the board window on Effect (Phase 3) | **landed** (#185), **issue still open** — the three render routes on the Effect router, `snapshot`/`export`/`open` in strict TypeScript, and `open` itself on Effect. Unblocks #158 → #159 → #160 |
+| #150 | Snapshot, export and the board window on Effect (Phase 3) | **done** (#185) — the three render routes on the Effect router, `snapshot`/`export`/`open` in strict TypeScript, and `open` itself on Effect. Unblocks #158 → #159 → #160 |
 
 Run in parallel, as planned; they never touched each other's code. They did
 collide on two config files — `tsconfig.json` and `eslint.config.js`, which
@@ -164,13 +164,14 @@ every port edits — so the second PR needed a rebase after the first merged.
 Worth expecting rather than avoiding: parallel ports always meet in the
 manifest.
 
-**#150 is open on purpose.** Everything is built and verified except the Linux
-window: `spiega open` was checked on macOS, where AppleScript confirmed one
-app-mode window and a second call raising it rather than opening another, and
-the Linux path is ported faithfully with its *decision* covered by a test that
-runs on macOS. Nobody has watched a window appear on Linux. A test of what a
-launcher would run says nothing about that, and CI here is push-only on macOS.
-Close it when someone has looked.
+**#150 was closed on macOS verification alone, knowingly.** `spiega open` was
+checked there — AppleScript confirmed one app-mode window and a second call
+raising it rather than opening another — and the Linux path is ported
+faithfully with its *decision* covered by a test that runs on macOS. Nobody has
+watched a window appear on Linux, and a test of what a launcher would run says
+nothing about that; CI here is push-only on macOS. That gap is accepted rather
+than closed. If a Linux board ever opens wrong, start here, and note that #158
+touches the same boundary next.
 
 The criterion that could have failed silently did not: a snapshot written, the
 server stopped, the file opened from disk with networking blocked — drawing,
