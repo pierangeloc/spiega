@@ -129,7 +129,8 @@ export default [
     // runs only in the server process — a test in smoke.mjs still asserts that
     // the board page never reaches settle.js or dagre. The other three read
     // files and start processes: the export reads the page and its modules off
-    // disk, the snapshot inlines the icon, and open starts a browser.
+    // disk, the snapshot inlines the icon, and open runs the window Effects in
+    // packages/server/src/window.ts, which start a browser.
     files: ['src/board/settle.ts', 'src/board/export.ts', 'src/board/open.ts', 'src/board/snapshot.ts'],
     rules: { ...nodeSide, '@typescript-eslint/no-restricted-imports': 'off' },
   },

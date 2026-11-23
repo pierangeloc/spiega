@@ -43,6 +43,30 @@ export class RenderFailed extends Data.TaggedError('RenderFailed')<{
 /* An export asked for a chapter the board does not have. */
 export class NoSuchChapter extends Data.TaggedError('NoSuchChapter') {}
 
+/* Why a board's window could not be raised. None of these is a failure of
+   `spiega open`: each is the answer that sends it on to open a window
+   instead. They are errors so the reason travels typed, not as a sentence. */
+
+/* No way to find a window by its title on this platform yet. */
+export class NoWindowRaising extends Data.TaggedError('NoWindowRaising')<{
+  readonly platform: string;
+  readonly url: string;
+}> {}
+
+/* No Chromium-family browser is running, so there is no window to look in. */
+export class NoBrowserRunning extends Data.TaggedError('NoBrowserRunning') {}
+
+/* Browsers are running and none of their windows is showing this board. */
+export class NoBoardWindow extends Data.TaggedError('NoBoardWindow')<{
+  readonly name: string;
+}> {}
+
+/* The browser, or the system's opener, could not be started at all. */
+export class LaunchFailed extends Data.TaggedError('LaunchFailed')<{
+  readonly cmd: string;
+  readonly cause: unknown;
+}> {}
+
 /* The log could not be written. Never a response: the ops are already on the
    board and the agent is mid-sentence, so this one is raised on the board
    itself (see oplog.ts) and never in reply to the request that happened to
