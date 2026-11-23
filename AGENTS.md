@@ -216,9 +216,9 @@ modules that opted in early are worth having opted in.
 
 The JavaScript that has not been ported is checked file by file. `checkJs` is
 off; a module opts in by saying `// @ts-check` and being listed in
-`tsconfig.json` — do both, or it is checked by nobody. Turning `checkJs` on
-would pull in the render modules it imports, which together still carry ~234
-strict errors; annotating those is the render port's job (#141–#145).
+`tsconfig.json` — do both, or it is checked by nobody. Render is no longer the
+reason for that: the whole package is TypeScript since #145, and what is left
+unchecked is the JavaScript outside it, which #160 finishes.
 
 It is a separate job from `pnpm test` on purpose. The suite answers "does it
 work", the checker answers "do the types hold", and a run that cannot tell you

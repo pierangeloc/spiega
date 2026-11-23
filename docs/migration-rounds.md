@@ -151,34 +151,57 @@ there is a quiet moment; the pictures and the type checks were never affected.
 One issue, run alone: with #150 held there was no second track that did not
 collide with it, and a port gated on byte-identical pictures needs no help.
 
-### Round 7 — unblocked now
+### Round 7 — done, bar one Linux window
+
+| | | status / unblocks |
+|---|---|---|
+| #145 | Port `render` and `audit`, and close the render package (Phase 2) | **done** (#184) — **phase 2 is finished**; `src/render` has no JavaScript left. Every gallery, example, regression and shape SVG byte-identical. Unblocks #153, and with it the whole of phase 4 |
+| #150 | Snapshot, export and the board window on Effect (Phase 3) | **landed** (#185), **issue still open** — the three render routes on the Effect router, `snapshot`/`export`/`open` in strict TypeScript, and `open` itself on Effect. Unblocks #158 → #159 → #160 |
+
+Run in parallel, as planned; they never touched each other's code. They did
+collide on two config files — `tsconfig.json` and `eslint.config.js`, which
+every port edits — so the second PR needed a rebase after the first merged.
+Worth expecting rather than avoiding: parallel ports always meet in the
+manifest.
+
+**#150 is open on purpose.** Everything is built and verified except the Linux
+window: `spiega open` was checked on macOS, where AppleScript confirmed one
+app-mode window and a second call raising it rather than opening another, and
+the Linux path is ported faithfully with its *decision* covered by a test that
+runs on macOS. Nobody has watched a window appear on Linux. A test of what a
+launcher would run says nothing about that, and CI here is push-only on macOS.
+Close it when someone has looked.
+
+The criterion that could have failed silently did not: a snapshot written, the
+server stopped, the file opened from disk with networking blocked — drawing,
+transcript and numbered steps intact, at full and narrow width. Its new suite
+carries a negative control, so the offline check cannot pass vacuously. That is
+the shape to copy; a snapshot that opens empty passes every other test in the
+repo.
+
+**`open` moved onto Effect here rather than in #158**, decided mid-round: the
+port was already open in the same files. #158 is correspondingly narrower —
+`serve`, plus the `open` *command* wired to Effects that now exist. The round
+also turned up #186: a browser that vanishes between the check and the launch
+throws uncaught, which in the MCP server takes every tool down with it. It is
+old behaviour, carried across faithfully rather than fixed in a port.
+
+### Round 8 — unblocked now
 
 | | | unblocks |
 |---|---|---|
-| #145 | Port `render` and `audit`, and close the render package (Phase 2) | #153, and with it the whole of phase 4 |
-| #150 | Snapshot, export and the board window on Effect (Phase 3) | #158 → #159 → #160 |
+| #153 | A React board, served beside the old one (Phase 4) | #154 → #155 → #156 → #157 |
+| #158 | `serve` and the `open` command on the Effect CLI (Phase 3) | #159 → #160 |
 
-They do not touch each other's files: #145 is `src/render/`, #150 is
-`src/board/server.js` and the snapshot, export and open paths beside it. Run
-them in parallel.
+They do not touch each other: #153 is a new app served alongside, #158 is the
+CLI. #186 belongs with #158 or just after it — the error channel it needs is
+already there, and fixing it anywhere else means touching the same boundary
+twice.
 
-**#145 ends phase 2** and is the last thing standing between the board and
-React: #153 is blocked on it, and #154, #155, #156 and #157 behind that. It is
-also the widest render diff of the migration — `render.js` is what every
-picture comes out of — so the byte-identity gate does the whole job again.
-
-**#150 wants eyes, not just a suite.** Two of its four acceptance criteria
-cannot be self-verified by whoever writes it:
-
-- `spiega open` gets a chromeless window **on macOS and Linux** — two
-  platforms, and CI only runs one of them (macOS is push-only here).
-- a snapshot opens from the filesystem **with no server running**, drawing,
-  transcript and steps intact.
-
-A snapshot that opens empty is the exact failure `AGENTS.md` opens with, and it
-passes every test in the suite. Decide before dispatch who looks: either the
-brief says render it and look and attaches what it saw, or the work stops at
-the PR and a human opens the window and the file.
+**#153 is the first round of phase 4**, and the first that is not a port: a
+second board, served beside the old one, judged on whether it draws the same
+thing rather than on byte-identical output. Expect it to want more review
+rounds than a port did, and brief it with that in mind.
 
 ### The human track, startable now
 
@@ -195,7 +218,7 @@ The best use of your own hands while agents port the core.
 The oracle is not the suite alone.
 
 ```sh
-pnpm test          # 16 suites, inside dist/
+pnpm test          # 18 suites, inside dist/
 pnpm run lint      # the browser rule, over the source tree
 pnpm run typecheck # root plus every package, strict
 pnpm run pack      # the tarball npm would publish
@@ -216,7 +239,7 @@ And, per round:
   at a narrow width too.
 - **That the suite ran at all.** Since #182 the harness reads every suite's
   exit code, so a failure is a failure. Before it, two of them were failing
-  into a green run. Read the count: 16 passed, not "no output".
+  into a green run. Read the count: 18 passed, not "no output".
 
 ## Two things this queue keeps getting right by accident
 
