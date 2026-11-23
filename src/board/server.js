@@ -150,7 +150,13 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
   const load = nm => {
     if (!persist) return { board: emptyBoard(), lines: 0, tail: true };
     try { return restoreBoard(boardFile(nm)); }
-    catch { return { board: emptyBoard(), lines: 0, tail: true }; }
+    catch (e) {
+      /* Said once, in words, and the board is held without a log: appending
+         to a file this version cannot read would put its ops after the ones
+         it could not, and compacting it would overwrite them. */
+      console.error(`spiega: ${e.name === 'LogError' ? e.message : `could not restore "${nm}": ${e.message}`}`);
+      return { board: emptyBoard(), lines: 0, tail: true, unreadable: true };
+    }
   };
 
   const hold = (nm, b = null) => {
@@ -159,7 +165,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     const loaded = b ? { board: b, lines: 0, tail: true } : load(nm);
     const entry = { name: nm, board: loaded.board, clients: new Set(), started: Date.now(), log: null };
     boards.set(nm, entry);
-    if (persist) {
+    if (persist && !loaded.unreadable) {
       try {
         entry.log = createLog(boardFile(nm), {
           lines: loaded.lines, tail: loaded.tail, debounce,
