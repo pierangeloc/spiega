@@ -13,7 +13,7 @@
    there is no walk to do, only a question about each file — and because the
    walk ran over dist/, which is a copy. Two properties the walk also asserted
    are not about any one file and stayed in the suite: that the page's root
-   imports exist on disk, and that nothing it reaches is vendor/ or settle.js. */
+   imports exist on disk, and that nothing it reaches is settle.js or dagre. */
 
 // Brought in for its parser, not for its rule sets: nothing here extends
 // typescript-eslint's recommended configs. ESLint has no TypeScript of its own,
@@ -92,9 +92,8 @@ export default [
   {
     // dist/ is a copy — the JavaScript is assembled into it byte-for-byte — so
     // linting it says nothing the source tree has not already said, and a stale
-    // build would report a file you have already fixed. vendor/ is a
-    // checked-in bundle nobody here edits.
-    ignores: ['dist/**', 'vendor/**', '.agents/**'],
+    // build would report a file you have already fixed.
+    ignores: ['dist/**', '.agents/**'],
   },
   {
     /* Every .ts file in the repository, browser-safe or not, so that one is
@@ -117,18 +116,23 @@ export default [
     rules: browserSafeTs,
   },
   {
-    // The node side. These run only in the server process, and the board page
-    // must never reach them — a test in smoke.mjs still asserts that for
-    // settle.js, which is the one that evaluates dagre.
+    // The node side (JavaScript). These run only in the server process, and the
+    // board page must never reach them.
     files: [
       'src/board/export.js',
       'src/board/log.js',
       'src/board/open.js',
       'src/board/server.js',
-      'src/board/settle.js',
       'src/board/snapshot.js',
     ],
     rules: nodeSide,
+  },
+  {
+    // The node side (TypeScript). `settle.ts` imports `@dagrejs/dagre`, which
+    // runs only in the server process — a test in smoke.mjs still asserts that
+    // the board page never reaches settle.js or dagre.
+    files: ['src/board/settle.ts'],
+    rules: { ...nodeSide, '@typescript-eslint/no-restricted-imports': 'off' },
   },
   {
     /* The Schema, which is the one thing in a browser-safe package that the

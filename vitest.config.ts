@@ -45,10 +45,8 @@ export default defineConfig({
     silent: 'passed-only',
     /* Everything in dist/ is loaded by node, not put through the runner's
        transform. The artefact is finished code — it is what a user's node
-       imports, dagre's vendored bundle included — and transforming it on the
-       way in would mean the suite asserts against something nobody installs.
-       It also keeps the runner from going looking for the source map dagre's
-       bundle names and does not ship. */
+       imports — and transforming it on the way in would mean the suite asserts
+       against something nobody installs. */
     server: { deps: { external: [/[\\/]dist[\\/]/] } },
   },
 });

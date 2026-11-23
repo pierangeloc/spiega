@@ -4761,9 +4761,9 @@ test('every module the board page imports is on disk', () => {
     'imported by the board page and not there:\n  ' + missing.join('\n  '));
 });
 
-/* Dagre is vendored for `settle`, which orders a finished board once, in the
+/* Dagre is installed for `settle`, which orders a finished board once, in the
    server process. A board that is still being drawn must not pay for it, and
-   the page is the one consumer that would pay by fetching it.
+   the page is the one consumer that would pay by trying to fetch it.
 
    The op Schema is here for the same reason, differently: it is browser-safe
    code that a browser cannot *fetch*, because it imports `effect` by name and
@@ -4774,26 +4774,33 @@ test('every module the board page imports is on disk', () => {
    reaches may import the Schema's types, never the Schema. */
 test('the board page does not reach dagre, or the Schema', () => {
   const seen = new Set();
+  const bare = [];
   const walk = spec => {
     const file = path.join(ROOT, spec.replace(/^\//, ''));
     if (seen.has(file)) return;
     seen.add(file);
     let src;
     try { src = fs.readFileSync(file, 'utf8'); } catch { return; }
-    // Only the specifiers a browser would actually fetch. Anything else is the
-    // lint rule's business, and this walk no longer has an opinion about it.
-    for (const m of src.matchAll(/^\s*(?:import|export)[^'"\n]*from\s*['"]([./][^'"]*)['"]/gm)) {
+    // Walk relative specifiers a browser would fetch, and flag any bare import
+    // of dagre directly; other bare specifiers are the lint rule's business.
+    for (const m of src.matchAll(/^\s*(?:import|export)[^'"\n]*from\s*['"]([^'"]+)['"]/gm)) {
       const dep = m[1];
-      walk(dep.startsWith('/') ? dep : path.join(path.dirname(spec), dep));
+      if (/^[./]/.test(dep)) walk(dep.startsWith('/') ? dep : path.join(path.dirname(spec), dep));
+      else if (dep === '@dagrejs/dagre' || dep.startsWith('@dagrejs/dagre/')) {
+        bare.push(`${path.relative(ROOT, file)} -> ${dep}`);
+      }
     }
   };
   boardRoots().forEach(walk);
 
   assert.ok(seen.size >= 8, 'the walk should reach the whole renderer, not stop at the first file');
-  const reached = [...seen]
-    .filter(file => file.includes('/vendor/') || file.endsWith('/board/settle.js')
-      || file.includes('/packages/core/src/schema/'))
-    .map(file => path.relative(ROOT, file));
+  const reached = [
+    ...[...seen]
+      .filter(file => file.endsWith('/board/settle.js')
+        || file.includes('/packages/core/src/schema/'))
+      .map(file => path.relative(ROOT, file)),
+    ...bare,
+  ];
   assert.deepEqual(reached, [],
     'the board page must not fetch or evaluate these — dagre is for a finished ' +
     'board in the server, and the Schema names `effect`, which the page cannot ' +
