@@ -41,6 +41,10 @@ const say = msg => { if (!process.argv.includes('--quiet')) console.log(msg); };
  * and the picture tools, which run against the built artefact rather than
  * against src/ — see ADR 0002. What reaches npm is decided by `files` in the
  * manifest, not by this list.
+ *
+ * `packages/` is absent because there is nothing in it to copy: it is
+ * TypeScript and the manifests of five workspace packages that are never
+ * published on their own. compile() writes what the artefact needs.
  */
 const ASSETS = [
   'src',           // minus the TypeScript, which is compiled over the top below
@@ -73,8 +77,14 @@ function manifest() {
   return JSON.stringify(out, null, 2) + '\n';
 }
 
+/* The TypeScript, from wherever it has reached: src/, as modules are ported in
+ * place, and packages/<name>/src, as the typed domain fills up. Both land in dist/
+ * at the path they have here, which is what lets a compiled module find its
+ * neighbours — ported or not, in its own package or another — by walking up
+ * from its own file, exactly as every other module in this artefact does.
+ */
 function compile() {
-  const entries = fs.globSync('src/**/*.ts', { cwd: ROOT });
+  const entries = fs.globSync(['src/**/*.ts', 'packages/*/src/**/*.ts'], { cwd: ROOT });
   if (!entries.length) return say('spiega build: nothing ported to TypeScript yet');
 
   const bin = path.join(ROOT, 'node_modules', '.bin', 'tsdown');
@@ -84,6 +94,23 @@ function compile() {
   }
   const r = spawnSync(bin, ['--logLevel', 'warn'], { cwd: ROOT, stdio: 'inherit' });
   if (r.status !== 0) process.exit(r.status ?? 1);
+
+  /* An unbundled build writes relative to the deepest directory holding all of
+   * its inputs, so where a module lands is inferred rather than declared —
+   * tsdown.config.ts gives each source root its own build to keep that
+   * inference honest, and this is the check that it was. A module compiled to
+   * the wrong path is not a build error: it is a board that imports a URL
+   * which 404s, or a suite that imports the module it replaced, and neither
+   * says why.
+   */
+  const astray = entries
+    .map(e => e.replace(/\.ts$/, '.js'))
+    .filter(js => !fs.existsSync(path.join(DIST, js)));
+  if (astray.length) {
+    console.error('spiega build: these did not compile to the path they are imported from:\n  ' +
+      astray.join('\n  '));
+    process.exit(1);
+  }
 }
 
 /* A board that cannot find its renderer renders empty and says nothing, which

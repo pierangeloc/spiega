@@ -104,6 +104,12 @@ fails until you add it to that list — say which it is, deliberately, rather
 than widening a glob. Do not route around it, and note that lint reads the
 source tree while the suite reads `dist/`.
 
+One thing the rule does allow, and the ports depend on it: a **type-only**
+import of a bare specifier. `import type { Op } from '@spiega/core'` is erased
+at compile time, so nothing is fetched and no board goes dark; that is how a
+browser-side module speaks the typed domain while `effect` stays out of the
+page's import graph. Drop the `type` and it fails, as it should.
+
 Two things the page-walk asserted are not about any one file, so they are still
 tests in `smoke.mjs`: that the page's root imports exist on disk, and that
 nothing it reaches is `vendor/` or `settle.js` — an unsettled board must not
