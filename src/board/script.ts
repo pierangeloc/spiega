@@ -1,4 +1,3 @@
-// @ts-check
 /* ============================================================
    Which line of the script belongs to which step.
 
@@ -26,32 +25,32 @@
    ============================================================ */
 
 import { litKeys } from './camera.js';
+import type { Board, Chapter } from './state.js';
 
-/** @typedef {import('./state.js').Board} Board */
+export type LineState = { step: number | null, state: 'on' | 'off' | 'free' | 'idle' };
+export type BackwardsTag = { line: number, step: number, after: number };
+export type TagReport = {
+  lines: number,
+  tagged: number,
+  steps: number,
+  backwards: BackwardsTag[],
+  ordered: boolean,
+};
+export type GroupRun = { id: string, label: string, from: number, to: number };
 
-/** @typedef {{step: number|null, state: 'on'|'off'|'free'|'idle'}} LineState */
-/** @typedef {{line: number, step: number, after: number}} BackwardsTag */
-/** @typedef {{
- *   lines: number, tagged: number, steps: number,
- *   backwards: BackwardsTag[], ordered: boolean
- * }} TagReport */
+type Surface = Board | Chapter;
 
 /* Per transcript entry, the step index it belongs to, or null.
    Returns a plain array, parallel to board.transcript. */
-/**
- * @param {Board} [board]
- * @returns {(number|null)[]}
- */
-export function scriptSteps(board) {
+export function scriptSteps(board?: Surface): (number | null)[] {
   const t = board?.transcript || [];
   if (!t.length) return [];
   const flow = board?.flow || [];
-  /** @type {Map<string, number>} */
-  const byEdge = new Map();
+  const byEdge = new Map<string, number>();
   flow.forEach((s, i) => { if (s.edge && !byEdge.has(s.edge)) byEdge.set(s.edge, i); });
 
-  /** @param {number|null} i @returns {number|null} */
-  const clamp = i => (typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < flow.length ? i : null);
+  const clamp = (i: number | null): number | null =>
+    (typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < flow.length ? i : null);
 
   /* What was lit when each line was said, in log order. The log holds `say`
      ops in the same order as the transcript, so the two line up by counting.
@@ -61,11 +60,10 @@ export function scriptSteps(board) {
      chapter's lines under the steps of the one before it. Every chapter break
      starts the count again, and a chapter already set aside carries its own
      answer and never reaches this walk (see closeChapter in state.js). */
-  /** @type {(number|null)[]} */
-  let whileLit = [];
-  /** @type {number|null} */
-  let lit = null;
-  for (const e of board?.log || []) {
+  let whileLit: (number | null)[] = [];
+  let lit: number | null = null;
+  const log = board && 'log' in board ? board.log : [];
+  for (const e of log || []) {
     if (e.op === 'chapter') { whileLit = []; lit = null; }
     else if (e.op === 'focus') lit = e.step == null ? null : Number(e.step);
     else if (e.op === 'say') whileLit.push(lit);
@@ -74,17 +72,12 @@ export function scriptSteps(board) {
   return t.map((e, i) => {
     if (e.step != null) return clamp(Number(e.step));
     if (e.edge != null && byEdge.has(e.edge)) return byEdge.get(e.edge) ?? null;
-    return clamp(whileLit[i]);
+    return clamp(whileLit[i] ?? null);
   });
 }
 
 /* The lines belonging to a step, as indices into board.transcript. */
-/**
- * @param {Board|undefined} board
- * @param {number|null} step
- * @returns {number[]}
- */
-export function linesFor(board, step) {
+export function linesFor(board: Surface | undefined, step: number | null): number[] {
   if (step == null) return [];
   const at = scriptSteps(board);
   return at.map((s, i) => (s === step ? i : -1)).filter(i => i >= 0);
@@ -103,17 +96,11 @@ export function linesFor(board, step) {
    about it, which would be a claim about somebody's transcript that nobody
    made — and the rail is in the order things were said, which no grouping
    gets to reorder. */
-/** @typedef {{id: string, label: string, from: number, to: number}} GroupRun */
-/**
- * @param {Board} [board]
- * @returns {GroupRun[]}
- */
-export function groupRuns(board) {
+export function groupRuns(board?: Surface): GroupRun[] {
   const at = scriptSteps(board);
   const flow = board?.flow || [];
   const names = board?.groups || {};
-  /** @type {GroupRun[]} */
-  const runs = [];
+  const runs: GroupRun[] = [];
   at.forEach((step, line) => {
     const id = step == null ? null : (flow[step]?.group || null);
     if (!id) return;
@@ -136,17 +123,13 @@ export function groupRuns(board) {
 
    Kept here rather than in the page so it can be tested without a DOM, and so
    the live rail and a snapshot cannot drift apart. */
-/**
- * @param {Board} [board]
- * @returns {LineState[]}
- */
-export function lineStates(board) {
+export function lineStates(board?: Surface): LineState[] {
   const at = scriptSteps(board);
   const active = board?.active;
   const anyHere = active != null && at.some(s => s === active);
   return at.map(step => {
-    /** @type {'on'|'off'|'free'|'idle'} */
-    const state = !anyHere ? 'idle' : step === active ? 'on' : step == null ? 'free' : 'off';
+    const state: LineState['state'] =
+      !anyHere ? 'idle' : step === active ? 'on' : step == null ? 'free' : 'off';
     return { step, state };
   });
 }
@@ -159,12 +142,7 @@ export function lineStates(board) {
 
    Returns the step to focus, or null to clear. Lives here, with the rest of
    the script-to-step reasoning, so it can be tested without a DOM. */
-/**
- * @param {Board|undefined} board
- * @param {number} step
- * @returns {number|null|undefined}
- */
-export function clickStep(board, step) {
+export function clickStep(board: Surface | undefined, step: number): number | null | undefined {
   if (!Number.isInteger(step) || step < 0 || step >= (board?.flow?.length || 0)) return undefined;
   return board?.active === step ? null : step;
 }
@@ -192,16 +170,13 @@ export function clickStep(board, step) {
 
    Returns the step to focus, null to clear, or undefined when the box is in
    no step at all — nothing to walk to, so nothing happens. */
-/**
- * @param {Board|undefined} board
- * @param {string} id
- * @param {number|null} [from]
- * @returns {number|null|undefined}
- */
-export function clickNode(board, id, from = board?.active ?? null) {
+export function clickNode(
+  board: Surface | undefined,
+  id: string,
+  from: number | null = board?.active ?? null,
+): number | null | undefined {
   const flow = board?.flow || [];
-  /** @type {number[]} */
-  const steps = [];
+  const steps: number[] = [];
   flow.forEach((s, i) => { if (litKeys(s).includes(id)) steps.push(i); });
   if (!steps.length) return undefined;
   const at = from == null ? -1 : steps.indexOf(from);
@@ -225,17 +200,11 @@ export function clickNode(board, id, from = board?.active ?? null) {
    Reported, not corrected: reordering someone's transcript would be a lie
    about the session, and the untagged lines have no place in step order
    anyway. */
-/**
- * @param {Board} [board]
- * @returns {TagReport}
- */
-export function tagReport(board) {
+export function tagReport(board?: Surface): TagReport {
   const at = scriptSteps(board);
-  /** @type {{step: number, line: number}[]} */
-  const tagged = [];
+  const tagged: { step: number, line: number }[] = [];
   at.forEach((step, line) => { if (step != null) tagged.push({ step, line }); });
-  /** @type {BackwardsTag[]} */
-  const backwards = [];
+  const backwards: BackwardsTag[] = [];
   for (let k = 1; k < tagged.length; k++) {
     if (tagged[k].step < tagged[k - 1].step) {
       backwards.push({ line: tagged[k].line + 1, step: tagged[k].step + 1, after: tagged[k - 1].step + 1 });

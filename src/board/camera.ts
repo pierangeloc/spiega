@@ -22,10 +22,27 @@
    browser — which is the point of it living outside the page.
    ============================================================ */
 
+import type { FlowStep } from './state.js';
+
+export type Box = { x: number, y: number, w: number, h: number };
+export type Bounds = { x0: number, y0: number, x1: number, y1: number };
+export type View = { x: number, y: number, k: number };
+export type Point = { x: number, y: number };
+export type Size = { w: number, h: number };
+
+export type FrameRequest = {
+  subject: Box | null | undefined,
+  canvas: Size,
+  view: View,
+  visible: Bounds,
+  offset?: Point,
+  pad?: number,
+};
+
 const PAD = 30;          // breathing room around the subject, in screen pixels
 
 /* The bounding box of some boxes, in canvas coordinates. */
-export function unionBox(boxes, keys) {
+export function unionBox(boxes: Record<string, Box | undefined>, keys: Iterable<string>): Box | null {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const k of keys) {
     const b = boxes[k];
@@ -40,11 +57,7 @@ export function unionBox(boxes, keys) {
 /* What a step lights: the nodes it names, plus both ends of its edge. The
    same rule render.js uses to decide what is lit, so the camera frames
    exactly what the eye is being pointed at. */
-/**
- * @param {import('./state.js').FlowStep|undefined|null} step
- * @returns {string[]}
- */
-export function litKeys(step) {
+export function litKeys(step: FlowStep | undefined | null): string[] {
   if (!step) return [];
   const keys = new Set(step.lights || []);
   if (step.edge) {
@@ -55,7 +68,7 @@ export function litKeys(step) {
   return [...keys];
 }
 
-const inside = (r, v, pad = 0) =>
+const inside = (r: Bounds, v: Bounds, pad = 0): boolean =>
   r.x0 >= v.x0 - pad && r.y0 >= v.y0 - pad && r.x1 <= v.x1 + pad && r.y1 <= v.y1 + pad;
 
 /* Where the camera should go, or null for "stay where you are".
@@ -63,19 +76,19 @@ const inside = (r, v, pad = 0) =>
    `subject` and `offset` are canvas coordinates; `canvas` is the full canvas
    size; `visible` is the part of the stage a reader can actually see, in
    screen pixels — the steps bar sits over the bottom of it. */
-export function frame({ subject, canvas, view, visible, offset = { x: 0, y: 0 }, pad = PAD }) {
+export function frame({ subject, canvas, view, visible, offset = { x: 0, y: 0 }, pad = PAD }: FrameRequest): View | null {
   if (!subject) return null;
   const { w: W, h: H } = canvas;
   const availW = visible.x1 - visible.x0, availH = visible.y1 - visible.y0;
   if (availW < 60 || availH < 60) return null;
 
-  const screen = (b, k) => ({
+  const screen = (b: Box, k: number): Bounds => ({
     x0: (b.x + offset.x) * k + view.x, y0: (b.y + offset.y) * k + view.y,
     x1: (b.x + b.w + offset.x) * k + view.x, y1: (b.y + b.h + offset.y) * k + view.y,
   });
 
   // the whole plan is on screen: hold it
-  const whole = { x0: view.x, y0: view.y, x1: view.x + W * view.k, y1: view.y + H * view.k };
+  const whole: Bounds = { x0: view.x, y0: view.y, x1: view.x + W * view.k, y1: view.y + H * view.k };
   if (inside(whole, visible, 2)) return null;
 
   // the subject is on screen with room around it: hold that too
@@ -89,7 +102,7 @@ export function frame({ subject, canvas, view, visible, offset = { x: 0, y: 0 },
   /* Centre the subject, but never past the canvas edge: a subject framed
      against empty paper reads as the edge of the world. When an axis fits
      entirely, centre the canvas on it instead. */
-  const place = (total, a0, a1, centre) => {
+  const place = (total: number, a0: number, a1: number, centre: number): number => {
     const avail = a1 - a0;
     if (total * k <= avail) return a0 + (avail - total * k) / 2;
     return Math.min(a0, Math.max(a1 - total * k, a0 + avail / 2 - centre));
