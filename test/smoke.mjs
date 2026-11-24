@@ -2580,10 +2580,11 @@ await atest('board_draw and board_tag take their list as a JSON string, as some 
    server down with it — every other board the session was talking about,
    gone over an unrelated tool call.
    This drives the real server over its real pipe, same as the test above,
-   with its PATH broken so the binary `open` launches (the system opener,
-   reached with `tab: true` to skip the Chromium search entirely) resolves to
-   nothing — the same ENOENT a vanished binary would report, with no need to
-   touch anything actually installed on the machine running the suite. */
+   with its PATH broken so the system opener it launches (reached with
+   `tab: true` to skip the Chromium search entirely — `open` on macOS,
+   `xdg-open` on Linux) resolves to nothing — the same ENOENT a vanished
+   binary would report, with no need to touch anything actually installed on
+   the machine running the suite. */
 await atest('a browser that vanishes between the check and the launch is a tool error, not a dead server (#186)', async () => {
   const { spawn } = await import('node:child_process');
   const { createServer } = await import('../src/board/server.js');
@@ -2591,11 +2592,17 @@ await atest('a browser that vanishes between the check and the launch is a tool 
   await new Promise(r => app.server.listen(0, '127.0.0.1', r));
   const board = `http://127.0.0.1:${app.server.address().port}/b/mcp186`;
 
+  // the system opener openBoard falls back to with no Chromium — the binary
+  // this test's broken PATH must fail to resolve, and the one the message
+  // must name. Mirrors openBoard in window.ts.
+  const opener = process.platform === 'darwin' ? 'open'
+    : process.platform === 'win32' ? 'start' : 'xdg-open';
+
   const child = spawn(process.execPath, [path.join(ROOT, 'src/mcp/server.js')], {
     stdio: ['pipe', 'pipe', 'pipe'],
     // PATH has to resolve `node` for nothing here — the parent already found
     // it and spawned this child with an absolute path — but it must not
-    // resolve `open`, the command board_open reaches with tab:true.
+    // resolve `opener`, the command board_open reaches with tab:true.
     env: { ...process.env, SPIEGA_URL: board, PATH: '/spiega-test-no-such-path' },
   });
   const waiting = new Map();
@@ -2623,7 +2630,7 @@ await atest('a browser that vanishes between the check and the launch is a tool 
     const opened = await callTool('board_open', { tab: true });
     // the acceptance criterion: a tool error, not a dead process
     assert.ok(opened.isError, 'a browser that could not be launched should fail the tool call, not the process');
-    assert.match(opened.content[0].text, /could not start open:/,
+    assert.match(opened.content[0].text, new RegExp(`could not start ${opener}:`),
       `the message should name what it tried to start: ${opened.content[0]?.text}`);
 
     // and the process really is still there to ask again — before the fix,
@@ -2663,8 +2670,12 @@ await atest('serve and open take the same flags and values through effect/cli (#
   const app = createServer({ name: 'parity' });
   await new Promise(r => app.server.listen(0, '127.0.0.1', r));
   const U = `http://127.0.0.1:${app.server.address().port}/b/parity`;
-  // a PATH with no `open` on it: the launcher `--tab` reaches is gone
+  // a PATH with no system opener on it: the launcher `--tab` reaches is gone
   const broken = { ...env, SPIEGA_URL: U, PATH: '/spiega-test-no-such-path' };
+  // the system opener openBoard falls back to with no Chromium — `open` on
+  // macOS, `xdg-open` on Linux — the binary the message must name.
+  const opener = process.platform === 'darwin' ? 'open'
+    : process.platform === 'win32' ? 'start' : 'xdg-open';
 
   // a port we know is free, for the solo serve below
   const probe = await import('node:http');
@@ -2677,18 +2688,23 @@ await atest('serve and open take the same flags and values through effect/cli (#
   try {
     /* open: every flag it advertises is accepted in one call, and --tab
        flows to the launcher — a tab skips the Chromium search, so the gone
-       `open` is the one that fails, named rather than thrown. --size/--pos/
-       --browser/--new ride the same parse: a parser that swallowed any of
-       them would refuse the whole command before it got this far. */
+       system opener is the one that fails, named rather than thrown.
+       --size/--pos/--browser/--new ride the same parse: a parser that
+       swallowed any of them would refuse the whole command before it got this
+       far. `--tab=false` is the switch the old `flag()` read as truthy (the
+       string "false" is not empty), so it must reach the launcher exactly as
+       bare `--tab` does — #158 is "same flags and behaviour", and a boolean
+       switch is presence, not a value. */
     for (const args of [
       ['open', '--tab', '--size', '1200x900', '--pos', '60,60', '--browser', 'brave', '--new'],
       ['open', '--tab'],                                  // the raise-or-open path, without --new
+      ['open', '--tab=false'],                            // an explicit value on a switch is still the switch
     ]) {
       await assert.rejects(
         () => run(process.execPath, [path.join(ROOT, 'src/cli.js'), ...args], { env: broken }),
         e => {
           assert.equal(e.code, 1, `open ${args.slice(1).join(' ')} must exit non-zero, not ${e.code}`);
-          assert.match(e.stderr, /spiega open: could not start open:/,
+          assert.match(e.stderr, new RegExp(`spiega open: could not start ${opener}:`),
             `it should name the opener it tried: ${e.stderr}`);
           return true;
         });
@@ -2709,10 +2725,13 @@ await atest('serve and open take the same flags and values through effect/cli (#
     assert.match(out, new RegExp(`spiega serving http://127\\.0\\.0\\.1:${PORT}/b/parity-solo  \\(its own process\\)`),
       `--port and --solo land in the URL and the aside: ${out.trim()}`);
 
-    /* serve --quiet on a board that is already up says nothing. */
-    const { stdout: quiet } = await run(process.execPath,
-      [path.join(ROOT, 'src/cli.js'), 'serve', '--board', 'parity-solo', '--quiet'], { env });
-    assert.equal(quiet, '', '--quiet silences the already-running line');
+    /* serve --quiet on a board that is already up says nothing — and so does
+       --quiet=false, because a switch is presence, not a value. */
+    for (const q of ['--quiet', '--quiet=false']) {
+      const { stdout: quiet } = await run(process.execPath,
+        [path.join(ROOT, 'src/cli.js'), 'serve', '--board', 'parity-solo', q], { env });
+      assert.equal(quiet, '', `${q} silences the already-running line`);
+    }
   } finally {
     for (const c of children) c.kill('SIGKILL');
     app.server.close();

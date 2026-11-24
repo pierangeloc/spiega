@@ -40,14 +40,23 @@ const run = <Name extends string, Input>(
     Effect.provide(NodeServices.layer),
   ));
 
+/* A boolean switch, read the way src/cli.js's `flag()` read one: present in
+   argv is true, whatever follows the `=`. `flag('tab')` returned the non-empty
+   string `"false"` for `--tab=false`, which is truthy, so `--tab=false`
+   selected tab mode; effect/cli's Flag.Boolean parses a real false there, so
+   read it as optional and treat "was mentioned at all" as true. `--tab=false`,
+   `--tab=true` and `--tab` are all the same switch, exactly as they were. */
+const Switch = (name: string) =>
+  Flag.Boolean(name).pipe(Flag.optional, Flag.map(Option.isSome));
+
 /* ---------- serve ---------- */
 
 const serveConfig = {
   port: Flag.Int('port').pipe(Flag.optional),
-  open: Flag.Boolean('open').pipe(Flag.withDefault(false)),
-  solo: Flag.Boolean('solo').pipe(Flag.withDefault(false)),
-  quiet: Flag.Boolean('quiet').pipe(Flag.withDefault(false)),
-  tab: Flag.Boolean('tab').pipe(Flag.withDefault(false)),
+  open: Switch('open'),
+  solo: Switch('solo'),
+  quiet: Switch('quiet'),
+  tab: Switch('tab'),
   size: Flag.String('size').pipe(Flag.optional),
   browser: Flag.String('browser').pipe(Flag.optional),
   // Global flags (src/cli.js's GLOBAL_FLAGS): already consumed upstream, into
@@ -98,11 +107,11 @@ export const runServe = run(serveCommand);
 /* ---------- open ---------- */
 
 const openConfig = {
-  tab: Flag.Boolean('tab').pipe(Flag.withDefault(false)),
+  tab: Switch('tab'),
   size: Flag.String('size').pipe(Flag.optional),
   pos: Flag.String('pos').pipe(Flag.optional),
   browser: Flag.String('browser').pipe(Flag.optional),
-  new: Flag.Boolean('new').pipe(Flag.withDefault(false)),
+  new: Switch('new'),
   board: Flag.String('board').pipe(Flag.optional),
   name: Flag.String('name').pipe(Flag.optional),
 } satisfies Command.Command.Config;
