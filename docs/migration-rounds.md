@@ -35,20 +35,19 @@ strict TypeScript, and `vendor/` is gone (`@dagrejs/dagre@3.1.3` comes from
 npm). What remains in phase 1 is #136 (real MCP tool schemas,
 `ready-for-human`).
 
-**Phases 2, 3 and 4 have all started:**
-- **Phase 2 (render):** #141 (`theme.ts`, `math.ts`, `geom.ts`), #142
-  (`ink.ts`, `glyphs.ts`), #143 (`edges.ts`, `callout.ts`) and #144
-  (`layout.ts`, `floating.ts`) landed. One issue left in the phase: #145
-  (`render`, `audit`, and closing `packages/render`), unblocked now.
-- **Phase 3 (server):** #147 (Effect HTTP read routes, loopback/origin
-  middleware, `SpiegaHome`/`SpiegaConfig`/`BoardStore` services in
-  `packages/server/`), #149 (the event stream as a `Stream` over a bounded
-  `PubSub`) and #148 (`POST /op`, `/settle` and `/close` on the Effect router,
-  the log flushed by a fiber off the request path) landed; #150 (snapshot,
-  export and the board window) is unblocked and is the last of the phase.
-- **Phase 4 (board app):** #152 (framework-free `Model`, `Msg`, `Cmd`, pure
-  `update`, and fixture store in `packages/board/src/app/`) landed; #153 (React
-  board beside the old one) waits on #145 finishing the render port.
+**Phase 2 (render) is finished.** #141–#145 landed; `src/render` is strict
+TypeScript and the picture sets remain byte-checked.
+
+**Phase 3 (server/CLI) is in progress.** #147–#150 and #158 landed: the Effect
+router, stream, log flush, snapshot/export/window and `serve`/`open` CLI are in
+place. #186's vanished-browser failure is now a tool error rather than a dead
+MCP server. Next is #159 (install and doctor), then #160 (the last JavaScript).
+The human-gated #146, #136 and #151 remain separate.
+
+**Phase 4 (board app) is in progress.** #152 and #153 landed: `/next` serves a
+self-contained React page against the Kalman fixture beside the unchanged
+legacy board. It is not live yet; #154 (step mode, camera, chapters and
+draw-on) is next, followed by #155–#157.
 
 ## The decision the whole of phase 1 rests on
 
@@ -187,22 +186,31 @@ also turned up #186: a browser that vanishes between the check and the launch
 throws uncaught, which in the MCP server takes every tool down with it. It is
 old behaviour, carried across faithfully rather than fixed in a port.
 
-### Round 8 — unblocked now
+### Round 8 — done
+
+| | | status / unblocks |
+|---|---|---|
+| #158 + #186 | `serve` and `open` on the Effect CLI; a vanished browser reports an error (Phase 3) | **done** (#188) — unblocks #159 → #160 |
+| #153 | A React board, served beside the old one (Phase 4) | **done** (#187) — `/next` draws the Kalman fixture without a live connection; unblocks #154 → #155 → #156 → #157 |
+
+They were implemented independently. #188 merged first, completing the CLI
+boundary and its #186 fix; #187 then merged after reconciling the shared
+lockfile and rerunning all 19 suites, lint, typecheck, pack and CI. The legacy
+page remains intact.
+
+**#153 is the first round of phase 4**, and the first that is not a port. Its
+fixture page is a visual parity starting point, not a live-board cutover:
+playback, camera gestures and the live connection belong to later rounds.
+
+### Round 9 — unblocked now
 
 | | | unblocks |
 |---|---|---|
-| #153 | A React board, served beside the old one (Phase 4) | #154 → #155 → #156 → #157 |
-| #158 | `serve` and the `open` command on the Effect CLI (Phase 3) | #159 → #160 |
+| #154 | Step mode, camera, chapters and draw-on at parity (Phase 4) | #155 → #156 → #157 |
+| #159 | Install and doctor on Effect (Phase 3) | #160 |
 
-They do not touch each other: #153 is a new app served alongside, #158 is the
-CLI. #186 belongs with #158 or just after it — the error channel it needs is
-already there, and fixing it anywhere else means touching the same boundary
-twice.
-
-**#153 is the first round of phase 4**, and the first that is not a port: a
-second board, served beside the old one, judged on whether it draws the same
-thing rather than on byte-identical output. Expect it to want more review
-rounds than a port did, and brief it with that in mind.
+These are separate board-app and CLI tracks. Check their tracker blockers
+before starting; the queue is a snapshot, not the source of truth.
 
 ### The human track, startable now
 
@@ -219,7 +227,7 @@ The best use of your own hands while agents port the core.
 The oracle is not the suite alone.
 
 ```sh
-pnpm test          # 18 suites, inside dist/
+pnpm test          # 19 suites, inside dist/
 pnpm run lint      # the browser rule, over the source tree
 pnpm run typecheck # root plus every package, strict
 pnpm run pack      # the tarball npm would publish
@@ -240,7 +248,7 @@ And, per round:
   at a narrow width too.
 - **That the suite ran at all.** Since #182 the harness reads every suite's
   exit code, so a failure is a failure. Before it, two of them were failing
-  into a green run. Read the count: 18 passed, not "no output".
+  into a green run. Read the count: 19 passed, not "no output".
 
 ## Two things this queue keeps getting right by accident
 
