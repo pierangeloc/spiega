@@ -194,7 +194,7 @@ async function installHandler(cfg: InstallConfig): Promise<void> {
   const { install, TARGET_NAMES, TARGETS, detect } = await import('../../../src/install.js');
   const { c, sym, pad, shortPath, heading } = await import('../../../src/term.js');
   const g = sym();
-  const want = [...cfg.targets];
+  const want = [...cfg.targets].map((t) => String(t));
   const nameW = Math.max(...TARGET_NAMES.map((n) => n.length)) + 2;
   const getsW = Math.max(...Object.values(TARGETS).map((t) => t.gets.length)) + 2;
 
@@ -226,7 +226,7 @@ async function installHandler(cfg: InstallConfig): Promise<void> {
   console.log(heading('spiega install'));
   // Without either PATH flag, let the existing interactive prompt decide.
   const touchShell = cfg.noPath ? false : cfg.path ? true : 'ask';
-  const results = install(want, { touchShell, binDir: Option.getOrElse(cfg.binDir, () => false) });
+  const results = install(want, { touchShell, binDir: Option.getOrElse(cfg.binDir, () => null) });
   for (const r of results) {
     const mark = !r.ok ? c.accent(g.bad) : r.state === 'unchanged' ? c.dim(g.idle) : c.good(g.ok);
     const gets = r.gets ? pad(c.muted(r.gets), getsW + 10) : pad('', getsW + 10);

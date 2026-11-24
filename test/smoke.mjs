@@ -1069,7 +1069,7 @@ test('tagging a board drawn before the feature existed makes it light up', () =>
    installs, which is the worst time to find out. */
 test('every install target copies a file that exists', () => {
   const src = fs.readFileSync(path.join(ROOT, 'src/install.js'), 'utf8');
-  const refs = [...src.matchAll(/path\.join\(ROOT,\s*((?:'[^']+'(?:,\s*)?)+)\)/g)]
+  const refs = [...src.matchAll(/path\.join\(ROOT,\s*((?:['"][^'"]+['"](?:,\s*)?)+)\)/g)]
     .map(m => m[1].split(',').map(x => x.trim().slice(1, -1)));
   assert.ok(refs.length >= 3, `install.js should name the files it installs, found ${refs.length}`);
   for (const r of refs) {
@@ -1823,6 +1823,36 @@ test('effect/cli install preserves agent configs and accepts both bin-dir spelli
     assert.equal(fs.readFileSync(instructions, 'utf8'), first);
     assert.ok(fs.lstatSync(path.join(bin, 'spiega')).isSymbolicLink());
     assert.ok(!fs.existsSync(path.join(home, '.config', 'opencode', 'AGENTS.md')));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/* The port's own proof: install and doctor read home and the XDG config root
+   from a SpiegaHome service, so a test can point them at a temp directory with
+   a Layer instead of mutating process.env. The same install that the CLI runs
+   lands in the layer's home, and nowhere else. */
+test('install runs against a SpiegaHome layer, not the process environment', async () => {
+  const { installEffect } = await import('../src/install.js');
+  const { SpiegaHome } = await import('../packages/cli/src/config.js');
+  const { Effect } = await import('effect');
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-layer-'));
+  const config = path.join(home, 'profile');
+  try {
+    fs.mkdirSync(path.join(config, 'opencode'), { recursive: true });
+    const results = await Effect.runPromise(
+      installEffect(['opencode'], { touchShell: false }).pipe(
+        Effect.provide(SpiegaHome.fromPath(home, config)),
+      ),
+    );
+    assert.equal(results[0].ok, true, 'the opencode target installs');
+    assert.ok(fs.existsSync(path.join(config, 'opencode', 'opencode.json')),
+      'the MCP entry lands in the layer\'s config root');
+    assert.ok(fs.existsSync(path.join(config, 'opencode', 'AGENTS.md')),
+      'and the instruction block beside it');
+    assert.ok(!fs.existsSync(path.join(home, '.config', 'opencode', 'opencode.json')),
+      'the layer\'s config root is honoured, not the default ~/.config');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

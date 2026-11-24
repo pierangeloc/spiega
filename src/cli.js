@@ -437,11 +437,20 @@ const main = async () => {
       let installed = true;
       try { import.meta.resolve('effect/cli'); } catch { installed = false; }
       if (!built || !installed) {
-        const { doctor, format } = await import('./doctor.js');
-        const rows = doctor();
-        if (!built) rows.unshift({ level: 'bad', what: 'build', detail: 'compiled CLI is missing', fix: 'pnpm install && pnpm run build' });
-        if (!installed) rows.unshift({ level: 'bad', what: 'dependencies', detail: 'effect/cli is not installed', fix: 'pnpm install' });
-        console.log(format(rows));
+        // The full doctor is Effect, which is exactly what is missing here,
+        // so this is the one diagnosis that can still run: say what is broken
+        // and how to fix it, in the doctor's own shape.
+        const { c, sym, pad, heading } = await import('./term.js');
+        const g = sym();
+        const rows = [];
+        if (!built) rows.push({ level: 'bad', what: 'build', detail: 'compiled CLI is missing', fix: 'pnpm install && pnpm run build' });
+        if (!installed) rows.push({ level: 'bad', what: 'dependencies', detail: 'effect/cli is not installed', fix: 'pnpm install' });
+        const w = Math.max(...rows.map(r => r.what.length)) + 2;
+        console.log(heading('spiega doctor'));
+        for (const r of rows) console.log(`  ${c.accent(g.bad)} ${c.bold(pad(r.what, w))}${r.detail}`);
+        console.log(`\n  ${c.bold('To fix')}`);
+        for (const f of [...new Set(rows.map(r => r.fix))]) console.log(`    ${c.dim(g.arrow)} ${f}`);
+        console.log('');
         process.exitCode = 1;
         return;
       }
@@ -937,7 +946,7 @@ const main = async () => {
       // The same check doctor uses, not a second guess at it: `git -C` walks
       // up, so a plain `rev-parse` inside an npm prefix under nvm answers
       // about nvm's own clone. That bug shipped once already.
-      const { isCheckout } = await import('./doctor.js');
+      const { isCheckout } = await import('./checkout.js');
       const root = path.resolve(HERE, '..');
       let where = 'installed from npm';
       if (isCheckout()) {
