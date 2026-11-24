@@ -40,7 +40,7 @@ const roots = ['src', ...fs.globSync('packages/*/src')]
   .filter(dir => fs.globSync(`${dir}/**/*.ts`).length > 0);
 
 /* The React view is bundled by Vite, not compiled module by module — see
- * tools/next.js. Compiling it here too would put a second, dead copy of it in
+ * tools/board.js. Compiling it here too would put a second, dead copy of it in
  * the artefact, including a module that reads a constant which only exists
  * inside the bundle. tools/build.js leaves it out of its own check for the
  * same reason, and from the same name.

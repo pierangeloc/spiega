@@ -4,9 +4,9 @@
    One card per line, in the order they were said, with the phases of the
    explanation as headings over the runs of lines they cover. Which line
    belongs to which step, and how it should look, is `script.ts`'s answer
-   (`lineStates`, `groupRuns`) — the same answer board.html paints.
+   (`lineStates`, `groupRuns`) — the same answer the snapshot paints.
 
-   board.html appends to this rail rather than rebuilding it, because
+   The old page appended to this rail rather than rebuilding it, because
    rebuilding restarts every card's fade-in and walking 1/6 … 6/6 would make
    the whole script flicker. React does that for free: a step change rewrites
    the className of cards that are already mounted and touches nothing else, so

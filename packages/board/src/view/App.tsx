@@ -6,11 +6,8 @@
    function of the model. That is what makes the later swap to Foldkit a rewrite
    of this directory and nothing else.
 
-   The panes are board.html's panes, in board.html's rows: the bar, the chapter
-   strip's row, and `main` as a grid of the
-   rail and the stage. The stylesheet is board.html's own, lifted at build time
-   rather than copied, so the two pages cannot drift apart while both are
-   served.
+   The panes are the body grid's rows in board.css: the bar, the chapter
+   strip's row, and `main` as a grid of the rail and the stage.
 
    ============================================================ */
 
@@ -36,12 +33,14 @@ export function Board({ model, dispatch }: {
   readonly dispatch: (msg: Msg) => unknown,
 }) {
   const title = model.board?.title;
+  const tag = model.boardTag;
 
-  /* What the window is called. board.html adds the board's own name from
-     /whoami after it; there is no server behind this page to ask. */
+  /* What the window is called. The board's own name rides in brackets because
+     the window title is the only handle an OS has on a browser app window:
+     `spiega focus` finds the window by it. */
   useEffect(() => {
-    document.title = title ? `${title} · spiega` : 'spiega';
-  }, [title]);
+    document.title = (title ? `${title} · spiega` : 'spiega') + (tag ? ` [${tag}]` : '');
+  }, [title, tag]);
 
   return (
     <>
@@ -49,7 +48,7 @@ export function Board({ model, dispatch }: {
         <span
           className={`dot${model.link === 'live' ? '' : ` ${model.link}`}`}
           id="live"
-          title={LINK_TITLE[model.link]}
+          title={model.exported ? 'standalone copy' : LINK_TITLE[model.link]}
         />
         <h1 id="title">{title || 'spiega'}</h1>
         <span className="spacer" />
@@ -68,7 +67,7 @@ export function Board({ model, dispatch }: {
           </svg>
         </button>
         <Transport model={model} dispatch={dispatch} />
-        <button className={`btn${model.replay.active ? ' on' : ''}`} id="replay" title="play the session back as it happened" onClick={() => dispatch({ type: 'replayToggle' })}>{model.replay.active ? 'stop' : 'replay'}</button>
+        {model.chapterOnly ? null : <button className={`btn${model.replay.active ? ' on' : ''}`} id="replay" title="play the session back as it happened" onClick={() => dispatch({ type: 'replayToggle' })}>{model.replay.active ? 'stop' : 'replay'}</button>}
       </div>
       <Chapters model={model} dispatch={dispatch} />
       <main id="main" className={model.railOpen ? undefined : 'norail'}>

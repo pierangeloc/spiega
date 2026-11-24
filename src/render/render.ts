@@ -225,7 +225,7 @@ export function renderSVG(
 
   // The wobble already lives in the path data (render/ink.js), so the filter is
   // only ever grain. On a live board that redraws while it animates, the grain
-  // is cheaper as a CSS overlay — see board/board.html — so `hand` is off there.
+  // is cheaper as a CSS overlay — see packages/board/board.css — so `hand` is off there.
   for (const p of calls) {
     const key = String(p.c.at || '');
     const state = !focus ? 'idle'

@@ -8,12 +8,16 @@ import { browserStore } from './browser.js';
 const root = document.getElementById('root');
 if (!root) throw new Error('the React board has no #root to mount in');
 
-/* In a split pane the rail would eat the board, so board.html opens with it
+/* In a split pane the rail would eat the board, so the page opens with it
    closed below the same width at which the stylesheet turns it into a drawer
    over the drawing. A reader can still open it from the bar. */
 const railOpen = !matchMedia('(max-width:820px)').matches;
 
 const store = browserStore(railOpen);
+addEventListener('pointerdown', (event) => {
+  if (event.target instanceof Element && event.target.closest('#exports')) return;
+  store.dispatch({ type: 'closeExportMenu' });
+});
 window.addEventListener('keydown', (event) => {
   const target = event.target;
   if (target instanceof Element && target.closest('input, textarea, select, button, [contenteditable]')) return;

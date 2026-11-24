@@ -2,8 +2,8 @@
    The board's op log on disk.
 
    Split from state.js rather than living in it because state.js is imported by
-   the browser — board.html loads it off disk as an ES module — and `node:fs`
-   does not resolve there. Keeping the two apart is what lets the board page and
+   the browser — it is bundled into the board page — and `node:fs` does not
+   resolve there. Keeping the two apart is what lets the board page and
    the CLI go on sharing one definition of what an op means.
    ============================================================ */
 

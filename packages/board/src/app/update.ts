@@ -26,7 +26,7 @@ import {
   type ChapterRef,
   type Model,
 } from './model.js';
-import type { Msg } from './msg.js';
+import type { Msg, SettleGated } from './msg.js';
 
 export type UpdateResult = readonly [Model, readonly Cmd[]];
 
@@ -41,7 +41,7 @@ function removeChanged(list: readonly ChapterRef[], ref: ChapterRef): readonly C
 }
 
 /**
- * Compute the fit-to-stage view, matching board.html's `fit()`.
+ * Compute the fit-to-stage view.
  * Returns `null` when the stage is too small to fit sensibly (e.g. mid-resize).
  */
 function computeFitView(model: Model): View | null {
@@ -380,8 +380,47 @@ function stepReplay(model: Model): UpdateResult {
   return [nextModel, [{ type: 'scheduleReplayStep', delayMs }]];
 }
 
+/* A live board with boxes on it, not yet settled and not
+   mid-replay, is tidied by the server before a tape or a replay starts. A
+   pause is not a start, so it never waits on the network. */
+function needsSettle(model: Model, msg: SettleGated): boolean {
+  const board = model.board;
+  if (model.exported || !board || board.settled || !board.nodes.length || model.replay.active) return false;
+  return !(msg.type === 'narrateToggle' && model.playback.tapePlaying);
+}
+
+const SETTLE_FAILED = 'spiega could not tidy this board — narration and replay have not started. Try again when the server is connected.';
+
+function isGated(msg: Msg): msg is SettleGated {
+  return msg.type === 'narrateToggle' || msg.type === 'narrateNext' || msg.type === 'narratePrev'
+    || msg.type === 'replayToggle' || msg.type === 'replayStart';
+}
+
 export function update(model: Model, msg: Msg): UpdateResult {
+  if (isGated(msg) && needsSettle(model, msg)) return [model, [{ type: 'settleBoard', then: msg }]];
+  return transition(model, msg);
+}
+
+function transition(model: Model, msg: Msg): UpdateResult {
   switch (msg.type) {
+    case 'settled': {
+      let cmds: readonly Cmd[] = [];
+      let next = model;
+      // The stream may already have delivered the settled board; otherwise show
+      // it before the tape starts, rather than speaking over the old arrangement.
+      if (msg.board && msg.board.rev !== model.board?.rev) {
+        [next, cmds] = transition(model, { type: 'stateReceived', board: msg.board });
+      }
+      const [after, more] = transition({ ...next, caption: null }, msg.then);
+      return [after, [...cmds, ...more]];
+    }
+
+    case 'settleFailed':
+      return noCmds({ ...model, caption: { text: SETTLE_FAILED, problem: true } });
+
+    case 'boardTagged':
+      return noCmds({ ...model, boardTag: msg.tag });
+
     case 'stateReceived': {
       const first = model.board === null;
       const prevActive = model.board?.active ?? null;

@@ -32,7 +32,7 @@ export type LinkStatus = 'live' | 'idle' | 'down';
 
 export type SavingStatus =
   | { readonly saving: true }
-  | { readonly saving: false, readonly why: string };
+  | { readonly saving: false, readonly why: string, readonly error?: string };
 
 export type VoiceInfo = {
   readonly name: string,
@@ -261,6 +261,8 @@ export function unsavedWarning(model: Model): string | null {
   if (model.saving.saving || model.saving.why === 'memory') return null;
   return model.saving.why === 'other-server'
     ? 'another spiega owns this board\u2019s file \u2014 nothing drawn here will survive a restart'
+    : model.saving.why === 'write-failed'
+      ? `writing this board\u2019s file is failing (${model.saving.error ?? 'unknown error'}) \u2014 nothing drawn here will survive a restart`
     : 'this board\u2019s file could not be opened \u2014 nothing drawn here will survive a restart';
 }
 

@@ -230,7 +230,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
 
   /* The Effect HTTP router handles all security checks (loopback host,
      same-origin-or-absent origin, silent OPTIONS, no CORS headers), every read
-     route (/icon.svg, /src/*, /, /index.html, /boards GET, /b/:name,
+     route (/icon.svg, /, /index.html, /boards GET, /b/:name,
      /b/:name/, /b/:name/state, /b/:name/whoami, /b/:name/events), the routes
      that change a board (POST /b/:name/op, /settle and /close) and the ones
      that draw it into a file (GET /b/:name/export, /snapshot, /snapshot.svg).

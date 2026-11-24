@@ -105,16 +105,10 @@ await test('an in-memory board is not a warning', async () => {
    actually breaks — which payloads raise the banner and what it says — rather
    than how it looks. */
 await test('the board raises the banner for exactly the boards that are not saved', async () => {
-  const html = fs.readFileSync(new URL('../src/board/board.html', import.meta.url), 'utf8');
-  const src = html.match(/function setSaving\(s\) \{[\s\S]*?\n\}/);
-  assert.ok(src, 'setSaving must exist in board.html');
-
-  const els = { unsaved: { hidden: true }, unsavedwhy: { textContent: '' } };
-  const setSaving = new Function('$', src[0] + '; return setSaving;')(id => els[id]);
+  const { init, unsavedWarning, update } = await import('../packages/board/src/index.js');
   const shown = payload => {
-    els.unsaved.hidden = true; els.unsavedwhy.textContent = '';
-    setSaving(payload);
-    return els.unsaved.hidden ? null : els.unsavedwhy.textContent;
+    const [model] = update(init(), { type: 'savingChanged', status: payload });
+    return unsavedWarning(model);
   };
 
   assert.equal(shown({ saving: true, file: '/x' }), null, 'a saved board says nothing');
@@ -125,11 +119,8 @@ await test('the board raises the banner for exactly the boards that are not save
   const failing = shown({ saving: false, why: 'write-failed', file: '/x', error: 'ENOSPC: no space left on device' });
   assert.match(failing, /writing this board.s file is failing \(ENOSPC: no space left on device\)/,
     'a board whose writes are failing says what the disk said');
-  assert.match(failing, /will not survive a restart/);
+  assert.match(failing, /nothing drawn here will survive a restart/);
   assert.equal(shown({ saving: true, file: '/x' }), null, 'and the banner clears when it recovers');
-
-  assert.match(html, /addEventListener\('saving'/,
-    'the banner is useless if nothing listens for the event the server sends');
 });
 
 /* The failure that starts part-way through. A board that was being saved, and

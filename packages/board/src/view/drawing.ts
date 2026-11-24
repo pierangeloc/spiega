@@ -1,14 +1,14 @@
 /* ============================================================
    What the stage draws, and where it sits — without React.
 
-   The drawing is a string. `renderSVG` returns one, board.html drops it into
-   `.pan` as-is, and this page does exactly the same; componentising the SVG is
-   not on anybody's plan. The value of keeping that in a module of its own is
-   that the Node suite can ask for the string and compare it, byte for byte,
-   with the one the old page would mount for the same board.
+   The drawing is a string. `renderSVG` returns one and the stage drops it into
+   `.pan` as-is; componentising the SVG is not on anybody's plan. The value of
+   keeping that in a module of its own is that the Node suite can ask for the
+   string and compare it, byte for byte, with what the renderer draws for the
+   same board.
 
    The camera is not computed here. `update` already works out the fit, pan and
-   zoom — the same arithmetic board.html's `fit()` does — so the view's whole
+   zoom, so the view's whole
    job is to turn `model.camera` into a transform.
    ============================================================ */
 

@@ -1,17 +1,14 @@
 /* ============================================================
-   The board this page draws.
+   The board the Node suite renders.
 
    No server, no stream, no timers: `createFixtureStore` drives the whole
    model/update loop in memory, applying the ops below through the real reducer
-   exactly as a live board would. That is what makes this page screenshottable
-   off disk, and what makes the Node suite able to render the same thing.
+   exactly as a live board would. The page itself connects to its board
+   (browser.ts); this is only reached from ssr.tsx, so the ops never ship.
 
    The ops are baked in at build time — see vite.config.ts, which reads a spec
    from examples/ and converts it there rather than here, because `specToOps`
-   reaches settle.ts and would pull @dagrejs/dagre into a page that settles
-   nothing.
-
-   Round #156 is what replaces this with the live board.
+   reaches settle.ts and would pull @dagrejs/dagre into the bundle.
    ============================================================ */
 
 import type { Op } from '../../../../src/board/state.js';

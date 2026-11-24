@@ -256,7 +256,7 @@ function noteSheet() {
 
 /* The title is board chrome: `title` sets the name in the bar above the
    drawing, and the bar is not part of renderSVG. So the drawing is real and the
-   strip is drawn to match board.html — the one place the gallery mimics rather
+   strip is drawn to match the board page's bar — the one place the gallery mimics rather
    than renders. */
 function titleSheet() {
   const t = render([

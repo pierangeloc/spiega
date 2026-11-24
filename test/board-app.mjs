@@ -143,7 +143,7 @@ await test('exported copy steps locally without emitting postOps', () => {
 await test('clickLine toggles step and parks narrator; clickNode cycles steps lighting that box', () => {
   const store = createFixtureStore({
     ops: singleChapterOps(),
-    init: { narratorAvailable: true },
+    init: { narratorAvailable: true, exported: true },
   });
 
   // Clicking line 1 (tagged step 0) focuses step 0 and parks playhead at 1
@@ -271,7 +271,7 @@ await test('follow/fit camera framing uses camera.frame and respects user pan/zo
 await test('narrator playback: whole-board tour switches chapters, steps, and returns to map', () => {
   const store = createFixtureStore({
     ops: multiChapterOps(),
-    init: { narratorAvailable: true },
+    init: { narratorAvailable: true, exported: true },
   });
 
   // Starts on map with whole-board tape (lede + 3*(title+line) + 3 chapter lines = 10 sections)
@@ -319,7 +319,10 @@ await test('narrator playback: whole-board tour switches chapters, steps, and re
 });
 
 await test('manual steps cancel narration before focusing; narration-driven steps do not', () => {
-  const store = createFixtureStore({ ops: singleChapterOps(), init: { narratorAvailable: true } });
+  const board = emptyBoard();
+  applyOps(board, singleChapterOps());
+  board.settled = true;
+  const store = createFixtureStore({ board, init: { narratorAvailable: true } });
   store.dispatch({ type: 'narratePlay', index: 1 });
   store.clearCmds();
   store.dispatch({ type: 'narrateSectionStarted', index: 1 });
@@ -350,7 +353,7 @@ await test('narration command boundary loads, plays, cancels stale callbacks, an
   };
   let store;
   const run = narrationRunner(player, () => store.getSnapshot());
-  store = createFixtureStore({ ops: singleChapterOps(), init: { narratorAvailable: true }, runCmd: run });
+  store = createFixtureStore({ ops: singleChapterOps(), init: { narratorAvailable: true, exported: true }, runCmd: run });
   store.dispatch({ type: 'narratePlay', index: 1 });
   assert.deepEqual(calls, ['load', 'play:1']);
   assert.equal(sections[1].text, 'The gateway forwards the request.');
@@ -432,7 +435,7 @@ await test('pausing during the final tour beat does not return to the map', asyn
 await test('rate cycling, keyboard rate nudges, and voice selection', () => {
   const store = createFixtureStore({
     ops: singleChapterOps(),
-    init: { narratorAvailable: true },
+    init: { narratorAvailable: true, exported: true },
   });
 
   // cycleRate follows RATES: 1 -> 1.25 -> 1.5 -> 2 -> 0.75
@@ -472,7 +475,7 @@ await test('rate cycling, keyboard rate nudges, and voice selection', () => {
 });
 
 await test('replay cancels a voice sample even before narration has started', () => {
-  const store = createFixtureStore({ ops: singleChapterOps(), init: { narratorAvailable: true } });
+  const store = createFixtureStore({ ops: singleChapterOps(), init: { narratorAvailable: true, exported: true } });
   store.dispatch({ type: 'setVoice', name: 'Samantha' });
   store.clearCmds();
   store.dispatch({ type: 'replayStart' });
@@ -504,7 +507,7 @@ await test('silent flow timer steps through flow and stops at end', () => {
 });
 
 await test('replay coalesces amends, steps without mutating live board, and blocks clicks', () => {
-  const store = createFixtureStore({ ops: multiChapterOps() });
+  const store = createFixtureStore({ ops: multiChapterOps(), init: { exported: true } });
   store.apply([
     { op: 'amend', chapter: 1, ops: [{ op: 'node', id: 'm1', label: 'Metrics' }] },
     { op: 'amend', chapter: 1, ops: [{ op: 'edge', from: 'api', to: 'm1' }] },
