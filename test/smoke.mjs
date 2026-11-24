@@ -1069,7 +1069,7 @@ test('tagging a board drawn before the feature existed makes it light up', () =>
    installs, which is the worst time to find out. */
 test('every install target copies a file that exists', () => {
   const src = fs.readFileSync(path.join(ROOT, 'src/install.js'), 'utf8');
-  const refs = [...src.matchAll(/path\.join\(ROOT,\s*((?:'[^']+'(?:,\s*)?)+)\)/g)]
+  const refs = [...src.matchAll(/path\.join\(ROOT,\s*((?:['"][^'"]+['"](?:,\s*)?)+)\)/g)]
     .map(m => m[1].split(',').map(x => x.trim().slice(1, -1)));
   assert.ok(refs.length >= 3, `install.js should name the files it installs, found ${refs.length}`);
   for (const r of refs) {
@@ -1699,10 +1699,13 @@ test('doctor does not mistake an enclosing repo for its own checkout', async () 
     // the package, copied in with no .git of its own — an npm install
     const pkg = path.join(tmp, 'lib', 'node_modules', 'spiega');
     fs.mkdirSync(pkg, { recursive: true });
-    for (const d of ['src', 'bin', 'skills', 'integrations']) {
+    for (const d of ['src', 'bin', 'skills', 'integrations', 'packages/cli']) {
       if (fs.existsSync(path.join(ROOT, d))) fs.cpSync(path.join(ROOT, d), path.join(pkg, d), { recursive: true });
     }
     fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(pkg, 'package.json'));
+    // The CLI now imports effect/cli and its compiled command module. Keep
+    // the fake install inside the enclosing repo, but supply its dependencies.
+    fs.symlinkSync(path.join(ROOT, '..', 'node_modules'), path.join(pkg, 'node_modules'));
 
     const home = path.join(tmp, 'home');
     fs.mkdirSync(home, { recursive: true });
@@ -1728,6 +1731,226 @@ test('doctor does not mistake an enclosing repo for its own checkout', async () 
       'nor its dirty working tree');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('doctor names a missing checkout build rather than failing to import its CLI', async () => {
+  const cp = await import('node:child_process');
+  const sourceCli = path.join(ROOT, '..', 'src', 'cli.js');
+  let out;
+  try {
+    out = cp.execFileSync(process.execPath, [sourceCli, 'doctor'], { encoding: 'utf8' });
+  } catch (error) {
+    out = String(error.stdout || '');
+  }
+  assert.match(out, /compiled CLI is missing/);
+  assert.match(out, /pnpm install && pnpm run build/);
+});
+
+test('doctor diagnoses a built CLI whose dependencies are missing', async () => {
+  const cp = await import('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-doctor-deps-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'packages/cli/src'), { recursive: true });
+    for (const name of ['cli.js', 'doctor.js', 'agents-block.js', 'term.js', 'pi.js', 'home.js']) {
+      fs.copyFileSync(path.join(ROOT, 'src', name), path.join(dir, 'src', name));
+    }
+    fs.writeFileSync(path.join(dir, 'packages/cli/src/index.js'), 'throw new Error("should not import")');
+    fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"spiega","type":"module","engines":{"node":">=24"}}');
+    let out;
+    try {
+      out = cp.execFileSync(process.execPath, [path.join(dir, 'src/cli.js'), 'doctor'], {
+        env: isolatedEnv(dir), encoding: 'utf8',
+      });
+    } catch (error) {
+      out = String(error.stdout || '');
+    }
+    assert.match(out, /effect\/cli is not installed/);
+    assert.match(out, /pnpm install/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('effect/cli install keeps project hand edits across repeated runs', async () => {
+  const cp = await import('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-cli-install-'));
+  const file = path.join(dir, 'AGENTS.md');
+  const cli = path.join(ROOT, 'src', 'cli.js');
+  const run = (args) => cp.execFileSync(process.execPath, [cli, 'install', ...args], {
+    cwd: dir, env: { ...isolatedEnv(dir), HOME: dir }, encoding: 'utf8',
+  });
+  try {
+    fs.writeFileSync(file, 'Hand-written instructions.\n');
+    assert.match(run(['project', '--no-path']), /1 installed/);
+    const first = fs.readFileSync(file, 'utf8');
+    assert.match(first, /^Hand-written instructions\./);
+    assert.match(first, /<!-- SPIEGA_START -->/);
+    assert.match(run(['project', '--no-path']), /1 already current/);
+    assert.equal(fs.readFileSync(file, 'utf8'), first);
+    assert.match(run(['--list']), /project/);
+    assert.match(run(['--detect']), /spiega install — what would happen/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('effect/cli install preserves agent configs and accepts both bin-dir spellings', async () => {
+  const cp = await import('node:child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-cli-targets-'));
+  const config = path.join(home, 'profile');
+  const bin = path.join(home, 'bin');
+  const cli = path.join(ROOT, 'src/cli.js');
+  const env = { ...isolatedEnv(home), XDG_CONFIG_HOME: config };
+  const run = args => cp.execFileSync(process.execPath, [cli, 'install', ...args], {
+    env, cwd: home, encoding: 'utf8',
+  });
+  try {
+    const instructions = path.join(config, 'opencode', 'AGENTS.md');
+    const settings = path.join(config, 'opencode', 'opencode.json');
+    fs.mkdirSync(path.dirname(instructions), { recursive: true });
+    fs.writeFileSync(instructions, 'Before\n\nAfter\n');
+    fs.writeFileSync(settings, JSON.stringify({ theme: 'hand edit', mcp: { other: { enabled: true } } }));
+    assert.match(run(['opencode', `--bin-dir=${bin}`, '--no-path']), /1 installed/);
+    const first = fs.readFileSync(instructions, 'utf8');
+    assert.match(first, /^Before\n\nAfter\n/);
+    assert.equal(first.split(START).length, 2);
+    assert.equal(first.split(END).length, 2);
+    assert.equal(JSON.parse(fs.readFileSync(settings, 'utf8')).theme, 'hand edit');
+    assert.deepEqual(JSON.parse(fs.readFileSync(settings, 'utf8')).mcp.other, { enabled: true });
+    assert.match(run(['opencode', '--bin-dir', bin, '--no-path']), /1 already current/);
+    assert.equal(fs.readFileSync(instructions, 'utf8'), first);
+    assert.ok(fs.lstatSync(path.join(bin, 'spiega')).isSymbolicLink());
+    assert.ok(!fs.existsSync(path.join(home, '.config', 'opencode', 'AGENTS.md')));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/* The port's own proof: install and doctor read home and the XDG config root
+   from a SpiegaHome service, so a test can point them at a temp directory with
+   a Layer instead of mutating process.env. The same install that the CLI runs
+   lands in the layer's home, and nowhere else. */
+test('install runs against a SpiegaHome layer, not the process environment', async () => {
+  const { installEffect } = await import('../src/install.js');
+  const { SpiegaHome } = await import('../packages/cli/src/config.js');
+  const { Effect } = await import('effect');
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-layer-'));
+  const config = path.join(home, 'profile');
+  try {
+    fs.mkdirSync(path.join(config, 'opencode'), { recursive: true });
+    const results = await Effect.runPromise(
+      installEffect(['opencode'], { touchShell: false }).pipe(
+        Effect.provide(SpiegaHome.fromPath(home, config)),
+      ),
+    );
+    assert.equal(results[0].ok, true, 'the opencode target installs');
+    assert.ok(fs.existsSync(path.join(config, 'opencode', 'opencode.json')),
+      'the MCP entry lands in the layer\'s config root');
+    assert.ok(fs.existsSync(path.join(config, 'opencode', 'AGENTS.md')),
+      'and the instruction block beside it');
+    assert.ok(!fs.existsSync(path.join(home, '.config', 'opencode', 'opencode.json')),
+      'the layer\'s config root is honoured, not the default ~/.config');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/* A config whose JSON is a valid value but not an object is a file we do not
+   understand. install must refuse it — report the target failed and leave the
+   bytes alone — rather than silently swap in a fresh {} and add the MCP key on
+   top of somebody else's file. */
+test('install refuses a config whose root is not a JSON object', async () => {
+  const { installEffect } = await import('../src/install.js');
+  const { SpiegaHome } = await import('../packages/cli/src/config.js');
+  const { Effect } = await import('effect');
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-nonroot-'));
+  const config = path.join(home, 'profile');
+  try {
+    fs.mkdirSync(path.join(config, 'opencode'), { recursive: true });
+    const file = path.join(config, 'opencode', 'opencode.json');
+    for (const body of ['[]', 'null', '"hand-edited"', '42']) {
+      fs.writeFileSync(file, body);
+      const results = await Effect.runPromise(
+        installEffect(['opencode'], { touchShell: false }).pipe(
+          Effect.provide(SpiegaHome.fromPath(home, config)),
+        ),
+      );
+      assert.equal(results[0].ok, false, `${body} must be refused, not replaced`);
+      assert.equal(fs.readFileSync(file, 'utf8'), body, 'the original bytes are untouched');
+      assert.ok(!fs.readdirSync(path.join(config, 'opencode')).some(n => n.includes('.bak')),
+        'no backup is taken of a file that was refused');
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/* The nested container the entry lives in — opencode's `mcp`, every other
+   harness's `mcpServers` — has to be an object too. A string or array there is
+   someone's own content, and the same refusal, untouched, applies. */
+test('install refuses a config whose MCP container is not a JSON object', async () => {
+  const { installEffect } = await import('../src/install.js');
+  const { SpiegaHome } = await import('../packages/cli/src/config.js');
+  const { Effect } = await import('effect');
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-nonmcp-'));
+  const config = path.join(home, 'profile');
+  try {
+    fs.mkdirSync(path.join(config, 'opencode'), { recursive: true });
+    const oc = path.join(config, 'opencode', 'opencode.json');
+    const ocBody = JSON.stringify({ mcp: 'hand-edited' });
+    fs.writeFileSync(oc, ocBody);
+    const a = await Effect.runPromise(
+      installEffect(['opencode'], { touchShell: false }).pipe(
+        Effect.provide(SpiegaHome.fromPath(home, config)),
+      ),
+    );
+    assert.equal(a[0].ok, false, 'a string mcp container must be refused');
+    assert.equal(fs.readFileSync(oc, 'utf8'), ocBody, 'opencode.json is untouched');
+
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    const cl = path.join(home, '.claude.json');
+    const clBody = JSON.stringify({ mcpServers: ['not', 'a', 'table'] });
+    fs.writeFileSync(cl, clBody);
+    const b = await Effect.runPromise(
+      installEffect(['claude'], { touchShell: false }).pipe(
+        Effect.provide(SpiegaHome.fromPath(home, config)),
+      ),
+    );
+    assert.equal(b[0].ok, false, 'an array mcpServers container must be refused');
+    assert.equal(fs.readFileSync(cl, 'utf8'), clBody, '.claude.json is untouched');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/* doctor is read-only by construction, but the same shapes reach it: a config
+   whose MCP container is not an object must be diagnosed (not registered), not
+   trip a crash, and never rewritten. */
+test('doctor diagnoses a config it does not understand without rewriting it', async () => {
+  const { doctorEffect } = await import('../src/doctor.js');
+  const { SpiegaHome } = await import('../packages/cli/src/config.js');
+  const { Effect } = await import('effect');
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-doctor-shape-'));
+  try {
+    const file = path.join(home, '.claude.json');
+    const body = JSON.stringify({ mcpServers: 'not a table' });
+    fs.writeFileSync(file, body);
+    const rows = await Effect.runPromise(
+      doctorEffect().pipe(Effect.provide(SpiegaHome.fromPath(home, path.join(home, '.config')))),
+    );
+    const claude = rows.filter(r => r.what === 'claude MCP');
+    assert.equal(claude.length, 1, 'the claude MCP row is present');
+    assert.equal(claude[0].level, 'warn', 'diagnosed as a warning, not a crash');
+    assert.match(claude[0].detail, /not registered/);
+    assert.equal(fs.readFileSync(file, 'utf8'), body, 'doctor never rewrites what it reads');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 
