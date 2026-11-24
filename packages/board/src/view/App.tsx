@@ -23,6 +23,7 @@ import type { Msg } from '../app/msg.js';
 import type { BoardStore } from '../app/store.js';
 import { Rail } from './Rail.js';
 import { Stage } from './Stage.js';
+import { Chapters } from './Chapters.js';
 
 const LINK_TITLE = {
   live: 'the agent just drew something',
@@ -67,6 +68,7 @@ export function Board({ model, dispatch }: {
           </svg>
         </button>
       </div>
+      <Chapters model={model} dispatch={dispatch} />
       <main id="main" className={model.railOpen ? undefined : 'norail'}>
         <Rail model={model} dispatch={dispatch} />
         <Stage model={model} dispatch={dispatch} />

@@ -13,4 +13,11 @@ if (!root) throw new Error('the React board has no #root to mount in');
    over the drawing. A reader can still open it from the bar. */
 const railOpen = !matchMedia('(max-width:820px)').matches;
 
-createRoot(root).render(<App store={fixtureStore(railOpen)} />);
+const store = fixtureStore(railOpen);
+addEventListener('keydown', e => {
+  if ((e.target as Element)?.closest('input, textarea, select, [contenteditable]')) return;
+  if (['ArrowRight', 'ArrowLeft', 'f', '0', '+', '=', '-', '_', 'Escape'].includes(e.key)) e.preventDefault();
+  store.dispatch({ type: 'keyDown', key: e.key });
+});
+addEventListener('hashchange', () => store.dispatch({ type: 'hashChanged', hash: location.hash }));
+createRoot(root).render(<App store={store} />);
