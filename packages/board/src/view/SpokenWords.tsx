@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 
-/* Offsets count the plain spoken text, not its markdown delimiters. */
+/* The synthesiser indexes the whole plain sentence, so one position is shared
+   across every fragment and markdown delimiters do not advance it. */
 export function spokenWords(text: string, offset: number) {
   let position = 0;
   const words = (part: string) => part.split(/(\s+)/).filter(Boolean).map((word, i) => {

@@ -161,6 +161,41 @@ test('whole-board narration marks the outline card and spoken word', () => {
   assert.match(html, /class="t"><span class="w lit">/);
 });
 
+test('speech offsets span markdown fragments in transcript and map', () => {
+  const store = fixtureStore(true, { narratorAvailable: true });
+  const board = emptyBoard();
+  const text = 'First **important** then `last`';
+  applyOps(board, [
+    { op: 'node', id: 'first', label: 'First' },
+    { op: 'say', text },
+    { op: 'chapter', title: 'Second' },
+    { op: 'node', id: 'second', label: 'Second' },
+    { op: 'say', text: 'Another chapter.' },
+  ]);
+  store.dispatch({ type: 'stateReceived', board, full: true });
+  store.dispatch({ type: 'selectChapter', chapter: 0 });
+  store.dispatch({ type: 'narratePlay', index: 0 });
+  store.dispatch({ type: 'narrateSectionStarted', index: 0 });
+
+  const check = (index, scope) => {
+    for (const [offset, word] of [[0, 'First'], [6, 'important'], [16, 'then'], [21, 'last']]) {
+      store.dispatch({ type: 'narrateWord', index, offset });
+      const html = renderBoard(store);
+      const content = scope(html);
+      assert.deepEqual([...content.matchAll(/<span class="w lit">([^<]+)<\/span>/g)].map(m => m[1]), [word],
+        `${word} must be the only lit word at offset ${offset}`);
+    }
+  };
+  check(0, html => html.match(/<span class="said-body">([\s\S]*?)<\/span><\/div>/)?.[1] ?? '');
+
+  store.dispatch({ type: 'openMap' });
+  const index = store.getSnapshot().playback.tape.findIndex(s => s.kind === 'outline' && s.card === 1 && s.part === 'line');
+  assert.ok(index >= 0);
+  store.dispatch({ type: 'narratePlay', index });
+  store.dispatch({ type: 'narrateSectionStarted', index });
+  check(index, html => html.match(/<span class="line">([\s\S]*?)<\/span><span class="meta">/)?.[1] ?? '');
+});
+
 test('replay control stops narration and displays replay captions', () => {
   const store = fixtureStore(true, { narratorAvailable: true });
   assert.ok(renderBoard(store).includes('id="replay"'));
