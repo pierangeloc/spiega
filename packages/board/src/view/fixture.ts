@@ -20,9 +20,12 @@ import type { InitOptions } from '../app/model.js';
 
 declare const __SPIEGA_FIXTURE_OPS__: readonly Op[];
 
-export function fixtureStore(railOpen: boolean, options: InitOptions = {}, runCmd?: CmdRunner): FixtureStore {
+export function fixtureStore(railOpen: boolean, options: InitOptions & { hash?: string, runCmd?: CmdRunner } = {}): FixtureStore {
+  const { hash, runCmd, ...init } = options;
   return createFixtureStore({
     ops: __SPIEGA_FIXTURE_OPS__,
+    hash,
+    runCmd,
     init: {
       /* The truth about this page: there is no server behind it and no stream
          to be disconnected from, so the link dot reads connected-and-waiting
@@ -30,8 +33,7 @@ export function fixtureStore(railOpen: boolean, options: InitOptions = {}, runCm
          state an exported board opens in. */
       exported: true,
       railOpen,
-      ...options,
+      ...init,
     },
-    runCmd,
   });
 }

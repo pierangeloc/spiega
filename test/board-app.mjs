@@ -373,6 +373,62 @@ await test('narration command boundary loads, plays, cancels stale callbacks, an
   assert.equal(calls.at(-1), 'stop');
 });
 
+await test('whole-board callbacks preserve tape and cancel before replay schedules', () => {
+  const effects = [];
+  let sections = [];
+  let abandoned;
+  const player = {
+    load(next) { sections = next; },
+    play(i) { effects.push(`play:${i}`); sections[i].onStart(); },
+    pause() {},
+    rewind() { effects.push('stop'); abandoned?.onStart(); },
+    park() {}, setRate() {}, setVoice() {}, sample() {},
+  };
+  let store;
+  const run = narrationRunner(player, () => store.getSnapshot());
+  store = createFixtureStore({
+    ops: multiChapterOps(), init: { narratorAvailable: true, exported: true },
+    runCmd(cmd, dispatch) {
+      if (cmd.type === 'setHash') effects.push(`hash:${cmd.hash}`);
+      if (cmd.type === 'scheduleReplayStep') effects.push('schedule');
+      run(cmd, dispatch);
+    },
+  });
+  effects.length = 0;
+  store.dispatch({ type: 'narratePlay' });
+  sections[7].onStart();
+  assert.deepEqual(effects, ['play:0', 'hash:#1']);
+  assert.equal(store.getSnapshot().playback.tape.length, 10);
+  assert.equal(activeStep(store.getSnapshot()), 0);
+  abandoned = sections[8];
+  store.dispatch({ type: 'replayStart' });
+  assert.deepEqual(effects, ['play:0', 'hash:#1', 'stop', 'schedule']);
+  assert.equal(store.getSnapshot().replay.active, true);
+  assert.equal(store.getSnapshot().viewing, null);
+});
+
+await test('pausing during the final tour beat does not return to the map', async () => {
+  let sections = [];
+  let release;
+  const player = {
+    load(next) { sections = next; }, play() {}, pause() {}, rewind() {},
+    park() {}, setRate() {}, setVoice() {}, sample() {},
+  };
+  let store;
+  const run = narrationRunner(player, () => store.getSnapshot(), () => new Promise(resolve => { release = resolve; }));
+  store = createFixtureStore({ ops: multiChapterOps(), init: { narratorAvailable: true, exported: true }, runCmd: run });
+  store.dispatch({ type: 'narratePlay' });
+  sections.at(-1).onStart();
+  assert.equal(store.getSnapshot().mapOpen, false);
+  const done = sections.at(-1).onDone(() => true);
+  assert.equal(store.getSnapshot().playback.tapePlaying, true);
+  store.dispatch({ type: 'narratePause' });
+  release();
+  await done;
+  assert.equal(store.getSnapshot().mapOpen, false);
+  assert.equal(store.getSnapshot().playback.tapeEnded, false);
+});
+
 await test('rate cycling, keyboard rate nudges, and voice selection', () => {
   const store = createFixtureStore({
     ops: singleChapterOps(),
@@ -413,6 +469,14 @@ await test('rate cycling, keyboard rate nudges, and voice selection', () => {
     store.cmds.map(c => c.type),
     ['persistVoice', 'narratorSetVoice', 'narratorSample'],
   );
+});
+
+await test('replay cancels a voice sample even before narration has started', () => {
+  const store = createFixtureStore({ ops: singleChapterOps(), init: { narratorAvailable: true } });
+  store.dispatch({ type: 'setVoice', name: 'Samantha' });
+  store.clearCmds();
+  store.dispatch({ type: 'replayStart' });
+  assert.deepEqual(store.cmds.map(c => c.type), ['narratorStop', 'scheduleReplayStep']);
 });
 
 await test('silent flow timer steps through flow and stops at end', () => {

@@ -137,7 +137,8 @@ function withLoadedTape(model: Model): UpdateResult {
 function stopPlaybackCmds(model: Model): { model: Model, cmds: Cmd[] } {
   const cmds: Cmd[] = [];
   let playback = model.playback;
-  if (playback.tapePlaying || playback.tapeIndex >= 0 || playback.tapeEnded) {
+  // A voice preview can be speaking even before the tape has a playhead.
+  if (playback.narratorAvailable || playback.tapePlaying || playback.tapeIndex >= 0 || playback.tapeEnded) {
     playback = { ...playback, tapePlaying: false, tapeIndex: -1, tapeEnded: false, wordOffset: null };
     cmds.push({ type: 'narratorStop' });
   }

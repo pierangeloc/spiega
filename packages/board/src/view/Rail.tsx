@@ -25,22 +25,7 @@ import {
 } from '../app/model.js';
 import type { Msg } from '../app/msg.js';
 import { mdish } from './text.js';
-
-/* Keep the offset on the spoken (plain) text, while preserving the same code
-   and bold markup as the rest of the rail. */
-function spokenWords(text: string, offset: number) {
-  let position = 0;
-  const words = (part: string) => part.split(/(\s+)/).filter(Boolean).map((word, i) => {
-    const start = position;
-    position += word.length;
-    return /^\s+$/.test(word) ? word : <span key={i} className={`w${start <= offset && offset < position ? ' lit' : ''}`}>{word}</span>;
-  });
-  return text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean).map((part, i) => {
-    if (part.startsWith('`') && part.endsWith('`')) return <code key={i}>{words(part.slice(1, -1))}</code>;
-    if (part.startsWith('**') && part.endsWith('**')) return <b key={i}>{words(part.slice(2, -2))}</b>;
-    return <Fragment key={i}>{words(part)}</Fragment>;
-  });
-}
+import { spokenWords } from './SpokenWords.js';
 
 export function Rail({ model, dispatch }: {
   readonly model: Model,

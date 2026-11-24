@@ -431,10 +431,31 @@ const main = async () => {
        thing go stale in four different ways, and the one that bites is the
        process that has been alive since before the change. */
     case 'doctor': {
-      const { doctor, format } = await import('./doctor.js');
-      const rows = doctor();
-      console.log(format(rows));
-      if (rows.some(r => r.level === 'bad')) process.exitCode = 1;
+      // A checkout without dist/, or an unpacked build without dependencies,
+      // cannot load effect/cli. Diagnose it before importing the command.
+      const built = fs.existsSync(path.join(HERE, '../packages/cli/src/index.js'));
+      let installed = true;
+      try { import.meta.resolve('effect/cli'); } catch { installed = false; }
+      if (!built || !installed) {
+        // The full doctor is Effect, which is exactly what is missing here,
+        // so this is the one diagnosis that can still run: say what is broken
+        // and how to fix it, in the doctor's own shape.
+        const { c, sym, pad, heading } = await import('./term.js');
+        const g = sym();
+        const rows = [];
+        if (!built) rows.push({ level: 'bad', what: 'build', detail: 'compiled CLI is missing', fix: 'pnpm install && pnpm run build' });
+        if (!installed) rows.push({ level: 'bad', what: 'dependencies', detail: 'effect/cli is not installed', fix: 'pnpm install' });
+        const w = Math.max(...rows.map(r => r.what.length)) + 2;
+        console.log(heading('spiega doctor'));
+        for (const r of rows) console.log(`  ${c.accent(g.bad)} ${c.bold(pad(r.what, w))}${r.detail}`);
+        console.log(`\n  ${c.bold('To fix')}`);
+        for (const f of [...new Set(rows.map(r => r.fix))]) console.log(`    ${c.dim(g.arrow)} ${f}`);
+        console.log('');
+        process.exitCode = 1;
+        return;
+      }
+      const { runDoctor } = await import('../packages/cli/src/index.js');
+      await runDoctor(argv.slice(1));
       return;
     }
 
@@ -458,68 +479,8 @@ const main = async () => {
     }
 
     case 'install': {
-      const { install, TARGET_NAMES, TARGETS, detect } = await import('./install.js');
-      const { c, sym, pad, shortPath, heading } = await import('./term.js');
-      const g = sym();
-      const want = positional().filter(a => a !== 'install');
-
-      const nameW = Math.max(...TARGET_NAMES.map(n => n.length)) + 2;
-      const getsW = Math.max(...Object.values(TARGETS).map(t => t.gets.length)) + 2;
-
-      if (want[0] === 'list' || flag('list')) {
-        console.log(heading('spiega install \u2014 targets'));
-        for (const n of TARGET_NAMES) {
-          const t = TARGETS[n];
-          console.log(`  ${c.bold(pad(n, nameW))}${pad(c.muted(t.gets), getsW + 10)}${c.dim(t.app)}`);
-        }
-        console.log(`\n  ${c.dim('spiega install')} with no arguments does whatever is on this machine.\n`);
-        return;
-      }
-
-      if (flag('detect')) {
-        const here = detect();
-        console.log(heading('spiega install \u2014 what would happen'));
-        for (const n of TARGET_NAMES) {
-          const t = TARGETS[n], found = here.includes(n);
-          const mark = found ? c.good(g.ok) : c.dim(g.idle);
-          const row = `  ${mark} ${c.bold(pad(n, nameW))}${pad(c.muted(t.gets), getsW + 10)}`;
-          // `project` is not missing, it is opt-in: it writes into the
-          // directory you happen to be standing in, so it is never automatic
-          const why = n === 'project' ? 'ask for it by name' : 'not on this machine';
-          console.log(row + c.dim(found ? t.app : `${t.app} \u2014 ${why}`));
-        }
-        console.log(`\n  ${c.good(g.ok)} ${c.dim('would be installed')}   ${c.dim(g.idle)} ${c.dim('skipped \u2014 name it to install anyway')}\n`);
-        return;
-      }
-
-      console.log(heading('spiega install'));
-      /* Neither flag: ask. The prompt refuses itself when there is nobody
-         to answer, so a scripted install never hangs and never writes. */
-      const touchShell = flag('no-path') ? false : flag('path') ? true : 'ask';
-      const bin = flag('bin-dir');
-      if (bin === true) die('spiega install: --bin-dir needs a directory');
-      const results = install(want, { touchShell, binDir: bin });
-      for (const r of results) {
-        const mark = !r.ok ? c.accent(g.bad) : r.state === 'unchanged' ? c.dim(g.idle) : c.good(g.ok);
-        const gets = r.gets ? pad(c.muted(r.gets), getsW + 10) : pad('', getsW + 10);
-        const tail = r.ok
-          ? c.dim(r.state === 'unchanged' ? 'already there' : shortPath(r.where, 46))
-          : c.accent(r.note);
-        console.log(`  ${mark} ${c.bold(pad(r.name, nameW))}${gets}${tail}`);
-      }
-
-      const wrote = results.filter(r => r.ok && r.state === 'written').length;
-      const same = results.filter(r => r.ok && r.state === 'unchanged').length;
-      const failed = results.filter(r => !r.ok);
-      const parts = [];
-      if (wrote) parts.push(`${wrote} installed`);
-      if (same) parts.push(`${same} already current`);
-      if (failed.length) parts.push(c.accent(`${failed.length} failed`));
-      console.log(`\n  ${parts.join(c.dim(` ${g.dot} `)) || 'nothing to do'}`);
-      // the step people skip, and then conclude the feature was never built
-      if (wrote) console.log(`  ${c.dim('Start a fresh agent session \u2014 a running one keeps the server it launched.')}`);
-      console.log(`  ${c.dim(`Check it any time with ${c.plain('spiega doctor')}.`)}\n`);
-      if (failed.length) process.exitCode = 1;
+      const { runInstall } = await import('../packages/cli/src/index.js');
+      await runInstall(argv.slice(1));
       return;
     }
 
@@ -985,7 +946,7 @@ const main = async () => {
       // The same check doctor uses, not a second guess at it: `git -C` walks
       // up, so a plain `rev-parse` inside an npm prefix under nvm answers
       // about nvm's own clone. That bug shipped once already.
-      const { isCheckout } = await import('./doctor.js');
+      const { isCheckout } = await import('./checkout.js');
       const root = path.resolve(HERE, '..');
       let where = 'installed from npm';
       if (isCheckout()) {
