@@ -9,8 +9,7 @@
    cannot know — how big the stage is, and how big the drawing came out — and
    reports them; `update` does the fit arithmetic board.html's `fit()` does.
 
-   Not here, and deliberately: the pan and zoom gestures, the fit/follow/export
-   tools in the top right, and the narration caption. Those are #154 and #155.
+   Export and the narration caption belong to the remaining board work.
    ============================================================ */
 
 import { useEffect, useMemo, useRef } from 'react';
@@ -30,6 +29,7 @@ export function Stage({ model, dispatch }: {
   const pan = useRef<HTMLDivElement>(null);
   const ink = useRef(new Map<string, Set<string>>());
   const drag = useRef<{ x: number, y: number, lastX: number, lastY: number, node: string | null, moved: boolean } | null>(null);
+  const hasSteps = (currentSurface(model)?.flow.length ?? 0) > 0;
 
   /* Memoised on what the drawing is of, not on the model: the camera moves far
      more often than the board changes, `renderSVG` is the most expensive thing
@@ -46,13 +46,29 @@ export function Stage({ model, dispatch }: {
   useEffect(() => {
     const el = stage.current;
     if (!el) return;
+    const bar = el.querySelector<HTMLElement>('.steps');
     const report = (): void => {
-      dispatch({ type: 'stageResized', size: { w: el.clientWidth, h: el.clientHeight } });
+      dispatch({ type: 'stageResized', size: { w: el.clientWidth, h: el.clientHeight }, stepsBarHeight: bar?.offsetHeight ?? 0 });
     };
     report();
     const observer = new ResizeObserver(report);
     observer.observe(el);
+    if (bar) observer.observe(bar);
     return () => observer.disconnect();
+  }, [dispatch, hasSteps]);
+
+  // React's delegated wheel listener is passive in Chrome, so it cannot stop
+  // the page scrolling while the reader zooms the drawing.
+  useEffect(() => {
+    const el = stage.current;
+    if (!el) return;
+    const wheel = (e: WheelEvent): void => {
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      dispatch({ type: 'zoom', factor: 1 - e.deltaY * .0016, origin: { x: e.clientX - r.left, y: e.clientY - r.top } });
+    };
+    el.addEventListener('wheel', wheel, { passive: false });
+    return () => el.removeEventListener('wheel', wheel);
   }, [dispatch]);
 
   // How big the drawing came out, and where its boxes landed: the camera needs
@@ -71,10 +87,11 @@ export function Stage({ model, dispatch }: {
   // amendment to that chapter still arrives stroke by stroke.
   useEffect(() => {
     const el = pan.current;
-    if (!el || !drawing) return;
+    if (!el) return;
     const key = model.replay.active ? `replay-${model.replay.chapterAt ?? 'live'}` : `chapter-${model.viewing ?? 'live'}`;
     let seen = ink.current.get(key);
     if (!seen) { seen = new Set(); ink.current.set(key, seen); }
+    if (!drawing) { seen.clear(); return; }
     const leads = new Set((currentSurface(model)?.flow ?? []).flatMap(step => litKeys(step)));
     el.querySelectorAll<SVGGElement>('g[data-node]').forEach(g => g.classList.toggle('go', leads.has(g.dataset.node ?? '')));
     const groups = [...el.querySelectorAll<SVGGElement>('[data-node],[data-boundary],[data-edge]')]
@@ -94,11 +111,6 @@ export function Stage({ model, dispatch }: {
 
   return (
     <div className="stage" id="stage" ref={stage}
-      onWheel={e => {
-        e.preventDefault();
-        const r = e.currentTarget.getBoundingClientRect();
-        dispatch({ type: 'zoom', factor: 1 - e.deltaY * .0016, origin: { x: e.clientX - r.left, y: e.clientY - r.top } });
-      }}
       onPointerDown={e => {
         const target = e.target as Element;
         if (target.closest('.steps, .blank code, .warnings, .caption, .tools')) return;

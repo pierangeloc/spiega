@@ -16,12 +16,15 @@
 
 import type { Op } from '../../../../src/board/state.js';
 import { createFixtureStore, type FixtureStore } from '../app/store.js';
+import type { CmdRunner } from '../app/store.js';
 
 declare const __SPIEGA_FIXTURE_OPS__: readonly Op[];
 
-export function fixtureStore(railOpen: boolean): FixtureStore {
+export function fixtureStore(railOpen: boolean, options: { following?: boolean, hash?: string, runCmd?: CmdRunner } = {}): FixtureStore {
   return createFixtureStore({
     ops: __SPIEGA_FIXTURE_OPS__,
+    hash: options.hash,
+    runCmd: options.runCmd,
     init: {
       /* The truth about this page: there is no server behind it and no stream
          to be disconnected from, so the link dot reads connected-and-waiting
@@ -29,6 +32,7 @@ export function fixtureStore(railOpen: boolean): FixtureStore {
          state an exported board opens in. */
       exported: true,
       railOpen,
+      following: options.following,
       // Narration is #154. Until then nothing here speaks.
       narratorAvailable: false,
     },

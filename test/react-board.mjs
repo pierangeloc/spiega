@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { fixtureStore, renderBoard, stageRender, STAGE_MARGIN } from '../support/board-view.js';
+import { fixtureStore, readFollow, renderBoard, runBrowserCommand, stageRender, STAGE_MARGIN } from '../support/board-view.js';
 import { applyOps, emptyBoard } from '../src/board/state.js';
 import { specToOps } from '../src/spec.js';
 import { renderSVG } from '../src/render/render.js';
@@ -149,6 +149,26 @@ test('step controls, follow and fit expose the model transitions', () => {
   assert.equal(store.getSnapshot().board.active, 0);
   store.dispatch({ type: 'keyDown', key: 'Escape' });
   assert.equal(store.getSnapshot().board.active, null);
+});
+
+test('follow preference survives reload and chapter navigation updates the address', () => {
+  const values = new Map();
+  const replaced = [];
+  const browser = {
+    localStorage: { getItem: k => values.get(k) ?? null, setItem: (k, v) => values.set(k, v) },
+    location: { pathname: '/next', search: '?fixture=1', hash: '' },
+    history: { replaceState: (_state, _title, url) => replaced.push(url) },
+  };
+  const make = () => fixtureStore(true, { following: readFollow(browser), runCmd: cmd => runBrowserCommand(browser, cmd) });
+  const store = make();
+  store.dispatch({ type: 'toggleFollow' });
+  assert.equal(values.get('spiega.follow'), 'off');
+  assert.equal(make().getSnapshot().camera.following, false);
+  runBrowserCommand(browser, { type: 'setHash', hash: '#1' });
+  assert.deepEqual(replaced, ['/next?fixture=1#1']);
+  const blocked = { ...browser, get localStorage() { throw new Error('storage blocked'); } };
+  assert.equal(readFollow(blocked), true);
+  assert.doesNotThrow(() => runBrowserCommand(blocked, { type: 'persistFollow', following: true }));
 });
 
 test('chapter tabs keep their own drawing and script when revisited', () => {
