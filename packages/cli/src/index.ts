@@ -52,7 +52,7 @@ const Switch = (name: string) =>
 /* ---------- serve ---------- */
 
 const serveConfig = {
-  port: Flag.Int('port').pipe(Flag.optional),
+  port: Flag.String('port').pipe(Flag.optional),
   open: Switch('open'),
   solo: Switch('solo'),
   quiet: Switch('quiet'),
@@ -78,7 +78,13 @@ async function serveHandler(cfg: ServeConfig): Promise<void> {
     if (!cfg.quiet) console.log(`spiega: "${name}" is already running on ${existing}`);
     return;
   }
-  const { url, serving } = await startBoard({ name, port: Option.getOrElse(cfg.port, () => PORT), solo: cfg.solo });
+  // `--port` is read as a string and coerced with Number, exactly as the old
+  // `Number(flag('port', PORT))` did: "0x10" is 16, "5000.5" is 5000.5, "abc"
+  // is NaN, and whatever startBoard then does with it is what the old CLI
+  // handed it too. effect/cli's Int flag would reject those, which is not
+  // this migration's business to change.
+  const port = Option.getOrElse(Option.map(cfg.port, (s) => Number(s)), () => PORT);
+  const { url, serving } = await startBoard({ name, port, solo: cfg.solo });
   if (!cfg.quiet) {
     console.log(serving
       ? `spiega serving ${url}${cfg.solo ? '  (its own process)' : ''}`

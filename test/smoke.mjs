@@ -2677,12 +2677,18 @@ await atest('serve and open take the same flags and values through effect/cli (#
   const opener = process.platform === 'darwin' ? 'open'
     : process.platform === 'win32' ? 'start' : 'xdg-open';
 
-  // a port we know is free, for the solo serve below
+  // two ports we know are free, for the solo serve below — the second is
+  // passed in hex to prove --port is coerced with Number(), not parsed as int
   const probe = await import('node:http');
-  const s = probe.createServer();
-  await new Promise(r => s.listen(0, '127.0.0.1', r));
-  const PORT = s.address().port;
-  await new Promise(r => s.close(r));
+  const freePort = async () => {
+    const s = probe.createServer();
+    await new Promise(r => s.listen(0, '127.0.0.1', r));
+    const p = s.address().port;
+    await new Promise(r => s.close(r));
+    return p;
+  };
+  const PORT = await freePort();
+  const HEX_PORT = await freePort();
 
   const children = [];
   try {
@@ -2711,19 +2717,40 @@ await atest('serve and open take the same flags and values through effect/cli (#
     }
 
     /* serve: --port and --solo reach startBoard, and the line says so. */
-    const solo = spawn(process.execPath,
-      [path.join(ROOT, 'src/cli.js'), 'serve', '--board', 'parity-solo', '--solo', '--port', String(PORT)],
-      { env, stdio: ['ignore', 'pipe', 'pipe'] });
-    children.push(solo);
-    let out = '';
-    await new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error(`serve never printed a URL line; saw ${JSON.stringify(out)}`)), 8000);
-      solo.stdout.on('data', d => { out += d; if (/spiega serving /.test(out)) { clearTimeout(t); resolve(); } });
-      solo.stderr.on('data', d => { out += d; });
-      solo.once('error', reject);
-    });
-    assert.match(out, new RegExp(`spiega serving http://127\\.0\\.0\\.1:${PORT}/b/parity-solo  \\(its own process\\)`),
-      `--port and --solo land in the URL and the aside: ${out.trim()}`);
+    const serveSolo = (board, portArg) => {
+      const child = spawn(process.execPath,
+        [path.join(ROOT, 'src/cli.js'), 'serve', '--board', board, '--solo', '--port', portArg],
+        { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      children.push(child);
+      return new Promise((resolve, reject) => {
+        let out = '';
+        const t = setTimeout(() => reject(new Error(`serve never printed a URL line; saw ${JSON.stringify(out)}`)), 8000);
+        child.stdout.on('data', d => { out += d; if (/spiega serving /.test(out)) { clearTimeout(t); resolve(out); } });
+        child.stderr.on('data', d => { out += d; });
+        child.once('error', reject);
+      });
+    };
+    assert.match(await serveSolo('parity-solo', String(PORT)),
+      new RegExp(`spiega serving http://127\\.0\\.0\\.1:${PORT}/b/parity-solo  \\(its own process\\)`),
+      `--port and --solo land in the URL and the aside`);
+
+    /* --port is read as a string and coerced with Number(), exactly as the old
+       `Number(flag('port', PORT))` did — so "0x" + HEX_PORT.toString(16) is
+       HEX_PORT, not an int-parse failure. */
+    assert.match(await serveSolo('parity-hex', `0x${HEX_PORT.toString(16)}`),
+      new RegExp(`spiega serving http://127\\.0\\.0\\.1:${HEX_PORT}/b/parity-hex  \\(its own process\\)`),
+      `--port 0x${HEX_PORT.toString(16)} is Number()d back to ${HEX_PORT}`);
+
+    /* bare --port: the old flag() returned true and Number(true) was 1 — a
+       port nobody meant. effect/cli cannot express a bare value, so it fails
+       with "Missing value" instead of silently binding 1. */
+    await assert.rejects(
+      () => run(process.execPath, [path.join(ROOT, 'src/cli.js'), 'serve', '--board', 'parity', '--solo', '--port'], { env }),
+      e => {
+        assert.equal(e.code, 1, 'bare --port must fail');
+        assert.match(e.stderr, /Missing value for flag --port/, `it should say why: ${e.stderr}`);
+        return true;
+      });
 
     /* serve --quiet on a board that is already up says nothing — and so does
        --quiet=false, because a switch is presence, not a value. */
