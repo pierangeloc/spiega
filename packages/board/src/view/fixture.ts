@@ -15,11 +15,12 @@
    ============================================================ */
 
 import type { Op } from '../../../../src/board/state.js';
-import { createFixtureStore, type FixtureStore } from '../app/store.js';
+import { createFixtureStore, type CmdRunner, type FixtureStore } from '../app/store.js';
+import type { InitOptions } from '../app/model.js';
 
 declare const __SPIEGA_FIXTURE_OPS__: readonly Op[];
 
-export function fixtureStore(railOpen: boolean): FixtureStore {
+export function fixtureStore(railOpen: boolean, options: InitOptions = {}, runCmd?: CmdRunner): FixtureStore {
   return createFixtureStore({
     ops: __SPIEGA_FIXTURE_OPS__,
     init: {
@@ -29,8 +30,8 @@ export function fixtureStore(railOpen: boolean): FixtureStore {
          state an exported board opens in. */
       exported: true,
       railOpen,
-      // Narration is #154. Until then nothing here speaks.
-      narratorAvailable: false,
+      ...options,
     },
+    runCmd,
   });
 }

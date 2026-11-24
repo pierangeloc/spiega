@@ -72,6 +72,7 @@ export type PlaybackState = {
   readonly tapeIndex: number,
   /** True after the tape ran to its end, so the next play starts from 0. */
   readonly tapeEnded: boolean,
+  readonly wordOffset: number | null,
   /** Playback rate, clamped to [0.5, 2.5]. */
   readonly rate: number,
   readonly voice: string | null,
@@ -173,6 +174,7 @@ export function init(options: InitOptions = {}): Model {
       tapePlaying: false,
       tapeIndex: -1,
       tapeEnded: false,
+      wordOffset: null,
       rate: clampRate(options.rate ?? 1),
       voice: options.voice ?? null,
       voices: options.voices ?? [],

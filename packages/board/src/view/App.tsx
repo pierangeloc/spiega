@@ -12,8 +12,7 @@
    rather than copied, so the two pages cannot drift apart while both are
    served.
 
-   What the bar does not carry yet: the narrator's transport, the voice picker
-   and replay. Those are #154 and #155.
+   Replay and chapter navigation are still part of the subsequent page work.
    ============================================================ */
 
 import { useEffect, useSyncExternalStore } from 'react';
@@ -23,6 +22,7 @@ import type { Msg } from '../app/msg.js';
 import type { BoardStore } from '../app/store.js';
 import { Rail } from './Rail.js';
 import { Stage } from './Stage.js';
+import { Transport } from './Transport.js';
 
 const LINK_TITLE = {
   live: 'the agent just drew something',
@@ -66,6 +66,7 @@ export function Board({ model, dispatch }: {
             <path d="M6 7h8M6 10h8M6 13h5" />
           </svg>
         </button>
+        <Transport model={model} dispatch={dispatch} />
       </div>
       <main id="main" className={model.railOpen ? undefined : 'norail'}>
         <Rail model={model} dispatch={dispatch} />

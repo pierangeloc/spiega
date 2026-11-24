@@ -10,7 +10,7 @@
    reports them; `update` does the fit arithmetic board.html's `fit()` does.
 
    Not here, and deliberately: the pan and zoom gestures, the fit/follow/export
-   tools in the top right, and the narration caption. Those are #154 and #155.
+   tools in the top right, and replay's caption. Those are subsequent page work.
    ============================================================ */
 
 import { useEffect, useMemo, useRef } from 'react';

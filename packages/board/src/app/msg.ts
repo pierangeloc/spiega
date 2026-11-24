@@ -64,6 +64,7 @@ export type Msg =
   | { readonly type: 'narrateRestart' }
   | { readonly type: 'narrateSectionStarted', readonly index: number }
   | { readonly type: 'narrateSectionEnded', readonly index: number }
+  | { readonly type: 'narrateWord', readonly index: number, readonly offset: number }
   | { readonly type: 'narrateStopped' }
   | { readonly type: 'cycleRate' }
   | { readonly type: 'setRate', readonly rate: number }

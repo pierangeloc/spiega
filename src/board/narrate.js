@@ -116,6 +116,7 @@ export function gapBefore(prev, next) {
   return LINE_GAP;
 }
 
+/** @param {{ onState?: (state: { playing: boolean, index: number, total: number, rate: number }) => void }} options */
 export function createNarrator({ onState = () => {} } = {}) {
   const synth = typeof speechSynthesis !== 'undefined' ? speechSynthesis : null;
 
@@ -271,10 +272,11 @@ export function createNarrator({ onState = () => {} } = {}) {
     sample(text = 'This is how the board will read your explanation.') {
       if (!synth) return;
       stop();
+      const mine = token;
       const u = new SpeechSynthesisUtterance(text);
       if (voice) u.voice = voice;
       u.rate = rate;
-      setTimeout(() => synth.speak(u), 30);
+      setTimeout(() => { if (mine === token) synth.speak(u); }, 30);
     },
 
     /* The tape's contents. Replacing it keeps the position if it still

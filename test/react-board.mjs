@@ -123,6 +123,24 @@ test('the steps strip says where the flow is, and walks it', () => {
   assert.ok(walked.includes('class="said off go"'), 'the other steps\' lines recede');
 });
 
+test('narration transport follows the model, with a visible no-voice fallback', () => {
+  const unavailable = renderBoard(fixtureStore(true));
+  assert.ok(unavailable.includes('no voice'));
+  assert.ok(unavailable.includes('id="play"'), 'silent flow playback remains available');
+  const store = fixtureStore(true, { narratorAvailable: true, voices: [{ name: 'Test Voice', lang: 'en-US', local: true }], voice: 'Test Voice' });
+  let html = renderBoard(store);
+  assert.ok(html.includes('aria-label="play"'));
+  assert.ok(html.includes('Test Voice'));
+  assert.ok(!html.includes('id="play"'), 'there is only one player');
+  store.dispatch({ type: 'narratePlay', index: 1 });
+  store.dispatch({ type: 'narrateSectionStarted', index: 1 });
+  store.dispatch({ type: 'narrateWord', index: 1, offset: 0 });
+  html = renderBoard(store);
+  assert.ok(html.includes('aria-label="pause"'));
+  assert.ok(html.includes('class="w lit"'));
+  assert.ok(html.includes('saying'));
+});
+
 test('walking the flow redraws the stage with the step lit', () => {
   const store = fixtureStore(true);
   const before = stageRender(store.getSnapshot());

@@ -138,7 +138,7 @@ function stopPlaybackCmds(model: Model): { model: Model, cmds: Cmd[] } {
   const cmds: Cmd[] = [];
   let playback = model.playback;
   if (playback.tapePlaying || playback.tapeIndex >= 0 || playback.tapeEnded) {
-    playback = { ...playback, tapePlaying: false, tapeIndex: -1, tapeEnded: false };
+    playback = { ...playback, tapePlaying: false, tapeIndex: -1, tapeEnded: false, wordOffset: null };
     cmds.push({ type: 'narratorStop' });
   }
   if (playback.flowPlaying) {
@@ -160,6 +160,14 @@ function focusStep(model: Model, step: number | null): UpdateResult {
   }
   const updated = withFrameStep({ ...model, chapterStep: step });
   return noCmds(updated);
+}
+
+function manualFocus(model: Model, step: number | null): UpdateResult {
+  if (model.replay.active || !model.board) return noCmds(model);
+  if (!model.playback.tapePlaying || currentSurface(model)?.active === step) return focusStep(model, step);
+  const stopped = stopPlaybackCmds(model);
+  const [next, cmds] = focusStep(stopped.model, step);
+  return [next, [...stopped.cmds, ...cmds]];
 }
 
 function selectChapter(model: Model, rawChapter: ChapterRef, keepTape = false): UpdateResult {
@@ -220,7 +228,7 @@ function applySectionStart(model: Model, index: number): UpdateResult {
   if (!section) return noCmds(model);
   let nextModel: Model = {
     ...model,
-    playback: { ...model.playback, tapeIndex: index },
+    playback: { ...model.playback, tapeIndex: index, wordOffset: null },
   };
   const cmds: Cmd[] = [];
   if (section.kind === 'outline') {
@@ -437,14 +445,14 @@ export function update(model: Model, msg: Msg): UpdateResult {
       return noCmds({ ...model, saving: msg.status });
 
     case 'focusStep':
-      return focusStep(model, msg.step);
+      return manualFocus(model, msg.step);
 
     case 'stepNext': {
       const surface = currentSurface(model);
       const len = surface?.flow.length ?? 0;
       if (!len || model.replay.active) return noCmds(model);
       const next = surface?.active == null ? 0 : Math.min(len - 1, surface.active + 1);
-      return focusStep(model, next);
+      return manualFocus(model, next);
     }
 
     case 'stepPrev': {
@@ -452,7 +460,7 @@ export function update(model: Model, msg: Msg): UpdateResult {
       const len = surface?.flow.length ?? 0;
       if (!len || model.replay.active) return noCmds(model);
       const prev = Math.max(0, (surface?.active ?? 0) - 1);
-      return focusStep(model, prev);
+      return manualFocus(model, prev);
     }
 
     case 'clickLine': {
@@ -486,7 +494,7 @@ export function update(model: Model, msg: Msg): UpdateResult {
       const surface = currentSurface(model);
       const want = clickNode(surface ?? undefined, msg.nodeId, surface?.active ?? null);
       if (want === undefined) return noCmds(model);
-      return focusStep(model, want);
+      return manualFocus(model, want);
     }
 
     case 'selectChapter':
@@ -610,11 +618,16 @@ export function update(model: Model, msg: Msg): UpdateResult {
     case 'narrateSectionStarted':
       return applySectionStart(model, msg.index);
 
+    case 'narrateWord':
+      if (!model.playback.tapePlaying || model.playback.tapeIndex !== msg.index) return noCmds(model);
+      return noCmds({ ...model, playback: { ...model.playback, wordOffset: msg.offset } });
+
     case 'narrateSectionEnded': {
-      if (msg.index < model.playback.tape.length - 1) return noCmds(model);
+      if (msg.index !== model.playback.tapeIndex || !model.playback.tapePlaying) return noCmds(model);
+      if (msg.index < model.playback.tape.length - 1) return noCmds({ ...model, playback: { ...model.playback, wordOffset: null } });
       const finished: Model = {
         ...model,
-        playback: { ...model.playback, tapePlaying: false, tapeEnded: true },
+        playback: { ...model.playback, tapePlaying: false, tapeEnded: true, wordOffset: null },
       };
       if (model.playback.tape[0]?.kind === 'outline' && !model.mapOpen) {
         return openMap(finished, true);
@@ -737,7 +750,7 @@ export function update(model: Model, msg: Msg): UpdateResult {
         if (model.exportMenuOpen) return noCmds({ ...model, exportMenuOpen: false });
         if (model.replay.active) return stopReplay(model);
         if (model.mapOpen) return update(model, { type: 'closeMap' });
-        return focusStep(model, null);
+        return manualFocus(model, null);
       }
       return noCmds(model);
     }

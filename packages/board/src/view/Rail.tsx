@@ -19,11 +19,28 @@ import {
   activeStep,
   currentGroupRuns,
   currentLineStates,
+  currentRailMarks,
   currentSurface,
   type Model,
 } from '../app/model.js';
 import type { Msg } from '../app/msg.js';
 import { mdish } from './text.js';
+
+/* Keep the offset on the spoken (plain) text, while preserving the same code
+   and bold markup as the rest of the rail. */
+function spokenWords(text: string, offset: number) {
+  let position = 0;
+  const words = (part: string) => part.split(/(\s+)/).filter(Boolean).map((word, i) => {
+    const start = position;
+    position += word.length;
+    return /^\s+$/.test(word) ? word : <span key={i} className={`w${start <= offset && offset < position ? ' lit' : ''}`}>{word}</span>;
+  });
+  return text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).filter(Boolean).map((part, i) => {
+    if (part.startsWith('`') && part.endsWith('`')) return <code key={i}>{words(part.slice(1, -1))}</code>;
+    if (part.startsWith('**') && part.endsWith('**')) return <b key={i}>{words(part.slice(2, -2))}</b>;
+    return <Fragment key={i}>{words(part)}</Fragment>;
+  });
+}
 
 export function Rail({ model, dispatch }: {
   readonly model: Model,
@@ -33,6 +50,7 @@ export function Rail({ model, dispatch }: {
   const lines = currentSurface(model)?.transcript ?? [];
   const states = currentLineStates(model);
   const lit = activeStep(model);
+  const marks = currentRailMarks(model);
 
   /* Follow the step, not the tail: while a step is lit, its own lines are what
      the reader needs on screen, and in a long session they are far above the
@@ -40,14 +58,14 @@ export function Rail({ model, dispatch }: {
   useEffect(() => {
     const el = rail.current;
     if (!el) return;
-    const on = el.querySelector<HTMLElement>('.said.on');
+    const on = el.querySelector<HTMLElement>('.said.saying') ?? el.querySelector<HTMLElement>('.said.on');
     if (on) {
       const top = on.offsetTop - el.clientHeight / 2 + on.offsetHeight / 2;
       el.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
     } else {
       el.scrollTop = el.scrollHeight;
     }
-  }, [lit, lines.length]);
+  }, [lit, lines.length, model.playback.tapeIndex]);
 
   if (!lines.length) {
     return (
@@ -61,13 +79,15 @@ export function Rail({ model, dispatch }: {
   const phases = new Map(currentGroupRuns(model).map(run => [run.from, run]));
 
   return (
-    <aside className="rail" id="rail" ref={rail}>
+    <aside className={`rail${marks.some(Boolean) ? ' scrub' : ''}`} id="rail" ref={rail}>
       {lines.map((line, i) => {
         const run = phases.get(i);
         const { step, state } = states[i] ?? { step: null, state: 'idle' };
         const classes = ['said'];
         if (i === lines.length - 1) classes.push('latest');
         if (state !== 'idle') classes.push(state);
+        if (marks[i] === 'heard') classes.push('heard');
+        if (marks[i] === 'now') classes.push('saying');
         // A line that names a step is a way into that step: the reader has just
         // read the words, and the hop they are about is one click away.
         if (step != null) classes.push('go');
@@ -86,7 +106,9 @@ export function Rail({ model, dispatch }: {
               onClick={() => dispatch({ type: 'clickLine', line: i, step })}
             >
               {step == null ? null : <span className="tag">step {step + 1}</span>}
-              <span className="said-body" dangerouslySetInnerHTML={{ __html: mdish(line.text) }} />
+              {marks[i] === 'now' && model.playback.wordOffset != null
+                ? <span className="said-body">{spokenWords(line.text, model.playback.wordOffset)}</span>
+                : <span className="said-body" dangerouslySetInnerHTML={{ __html: mdish(line.text) }} />}
             </div>
           </Fragment>
         );
