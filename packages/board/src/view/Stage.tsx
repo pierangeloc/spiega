@@ -9,22 +9,28 @@
    cannot know — how big the stage is, and how big the drawing came out — and
    reports them; `update` does the fit arithmetic board.html's `fit()` does.
 
-   Not here, and deliberately: the pan and zoom gestures, the fit/follow/export
-   tools in the top right, and the narration caption. Those are #154 and #155.
+   Export and the narration caption belong to the remaining board work.
    ============================================================ */
 
 import { useEffect, useMemo, useRef } from 'react';
+import { litKeys } from '../../../../src/board/camera.js';
+import { animateIn, seedOf } from '../../../../src/board/draw-on.js';
 
-import { unsavedWarning, type Model } from '../app/model.js';
+import { currentSurface, unsavedWarning, type Model } from '../app/model.js';
 import type { Msg } from '../app/msg.js';
 import { Steps } from './Steps.js';
 import { panTransform, panTransition, stageRender } from './drawing.js';
+import { InkMemory } from './ink-memory.js';
 
 export function Stage({ model, dispatch }: {
   readonly model: Model,
   readonly dispatch: (msg: Msg) => unknown,
 }) {
   const stage = useRef<HTMLDivElement>(null);
+  const pan = useRef<HTMLDivElement>(null);
+  const ink = useRef(new InkMemory());
+  const drag = useRef<{ x: number, y: number, lastX: number, lastY: number, node: string | null, moved: boolean } | null>(null);
+  const hasSteps = (currentSurface(model)?.flow.length ?? 0) > 0;
 
   /* Memoised on what the drawing is of, not on the model: the camera moves far
      more often than the board changes, `renderSVG` is the most expensive thing
@@ -41,13 +47,29 @@ export function Stage({ model, dispatch }: {
   useEffect(() => {
     const el = stage.current;
     if (!el) return;
+    const bar = el.querySelector<HTMLElement>('.steps');
     const report = (): void => {
-      dispatch({ type: 'stageResized', size: { w: el.clientWidth, h: el.clientHeight } });
+      dispatch({ type: 'stageResized', size: { w: el.clientWidth, h: el.clientHeight }, stepsBarHeight: bar?.offsetHeight ?? 0 });
     };
     report();
     const observer = new ResizeObserver(report);
     observer.observe(el);
+    if (bar) observer.observe(bar);
     return () => observer.disconnect();
+  }, [dispatch, hasSteps]);
+
+  // React's delegated wheel listener is passive in Chrome, so it cannot stop
+  // the page scrolling while the reader zooms the drawing.
+  useEffect(() => {
+    const el = stage.current;
+    if (!el) return;
+    const wheel = (e: WheelEvent): void => {
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      dispatch({ type: 'zoom', factor: 1 - e.deltaY * .0016, origin: { x: e.clientX - r.left, y: e.clientY - r.top } });
+    };
+    el.addEventListener('wheel', wheel, { passive: false });
+    return () => el.removeEventListener('wheel', wheel);
   }, [dispatch]);
 
   // How big the drawing came out, and where its boxes landed: the camera needs
@@ -62,13 +84,58 @@ export function Stage({ model, dispatch }: {
     });
   }, [dispatch, drawing]);
 
+  // Keep the ink by surface: revisiting a chapter does not redraw it, but an
+  // amendment to that chapter still arrives stroke by stroke.
+  useEffect(() => {
+    const el = pan.current;
+    if (!el) return;
+    if (model.board) ink.current.update(model.board.chapters.length);
+    const key = model.replay.active ? `replay-${model.replay.chapterAt ?? 'live'}` : `chapter-${model.viewing ?? 'live'}`;
+    const seen = ink.current.surface(key);
+    if (!drawing) { seen.clear(); return; }
+    const leads = new Set((currentSurface(model)?.flow ?? []).flatMap(step => litKeys(step)));
+    el.querySelectorAll<SVGGElement>('g[data-node]').forEach(g => g.classList.toggle('go', leads.has(g.dataset.node ?? '')));
+    const groups = [...el.querySelectorAll<SVGGElement>('[data-node],[data-boundary],[data-edge]')]
+      .sort((a, b) => rank(a) - rank(b));
+    const pending = groups.filter(g => !seen.has(groupKey(g)));
+    const pace = pending.length > 6 ? .22 : pending.length > 2 ? .38 : .6;
+    let clock = 0;
+    for (const g of pending) {
+      const name = groupKey(g);
+      const duration = animateIn(g, clock, seedOf(name));
+      clock += Math.min(duration * pace, 480);
+      seen.add(name);
+    }
+  }, [drawing, model.viewing, model.replay.active, model.replay.chapterAt]);
+
   const unsaved = unsavedWarning(model);
 
   return (
-    <div className="stage" id="stage" ref={stage}>
+    <div className="stage" id="stage" ref={stage}
+      onPointerDown={e => {
+        const target = e.target as Element;
+        if (target.closest('.steps, .blank code, .warnings, .caption, .tools')) return;
+        drag.current = { x: e.clientX, y: e.clientY, lastX: e.clientX, lastY: e.clientY, moved: false, node: target.closest<SVGGElement>('g[data-node]')?.dataset.node ?? null };
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }}
+      onPointerMove={e => {
+        const d = drag.current;
+        if (!d) return;
+        if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) d.moved = true;
+        if (d.moved) dispatch({ type: 'pan', dx: e.clientX - d.lastX, dy: e.clientY - d.lastY });
+        d.lastX = e.clientX; d.lastY = e.clientY;
+      }}
+      onPointerUp={() => {
+        const d = drag.current;
+        if (d?.node && !d.moved) dispatch({ type: 'clickNode', nodeId: d.node });
+        drag.current = null;
+      }}
+      onPointerCancel={() => { drag.current = null; }}
+      onDoubleClick={e => { if (!(e.target as Element).closest('.tools')) dispatch({ type: 'fit', smooth: true }); }}>
       <div
         className="pan"
         id="pan"
+        ref={pan}
         style={{
           transform: panTransform(model.camera.view),
           transition: panTransition(model.camera.smooth),
@@ -96,6 +163,13 @@ export function Stage({ model, dispatch }: {
         ) : null}
       </div>
       <Steps model={model} dispatch={dispatch} />
+      <div className="tools" id="tools">
+        <button className="btn tool" id="fit" title="fit the whole board in view (f)" aria-label="fit the whole board in view" onClick={() => dispatch({ type: 'fit', smooth: true })}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" /></svg></button>
+        <button className={`btn tool${model.camera.following ? ' on' : ''}`} id="follow" title="keep the lit boxes in view while walking the flow" aria-label="follow the flow" aria-pressed={model.camera.following} onClick={() => dispatch({ type: 'toggleFollow' })}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2"/><path d="M8 1v2.4M8 12.6V15M1 8h2.4M12.6 8H15"/></svg></button>
+      </div>
     </div>
   );
 }
+
+function groupKey(g: SVGGElement): string { return g.dataset.node ?? g.dataset.boundary ?? g.dataset.edge ?? ''; }
+function rank(g: SVGGElement): number { return g.dataset.node ? 0 : g.dataset.boundary ? 1 : 2; }

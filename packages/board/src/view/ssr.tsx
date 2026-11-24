@@ -19,6 +19,8 @@ import type { BoardStore } from '../app/store.js';
 import { App } from './App.js';
 
 export { fixtureStore } from './fixture.js';
+export { readFollow, runBrowserCommand } from './browser.js';
+export { InkMemory } from './ink-memory.js';
 export { STAGE_MARGIN, stageRender } from './drawing.js';
 
 export const renderBoard = (store: BoardStore): string =>

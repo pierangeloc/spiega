@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { fixtureStore, renderBoard, stageRender, STAGE_MARGIN } from '../support/board-view.js';
+import { fixtureStore, InkMemory, readFollow, renderBoard, runBrowserCommand, stageRender, STAGE_MARGIN } from '../support/board-view.js';
 import { applyOps, emptyBoard } from '../src/board/state.js';
 import { specToOps } from '../src/spec.js';
 import { renderSVG } from '../src/render/render.js';
@@ -130,6 +130,111 @@ test('walking the flow redraws the stage with the step lit', () => {
   const after = stageRender(store.getSnapshot());
   assert.notEqual(before.svg, after.svg, 'lighting a step changes the drawing');
   assert.equal(renderBoard(store).includes(after.svg), true);
+});
+
+test('step controls, follow and fit expose the model transitions', () => {
+  const store = fixtureStore(true);
+  store.dispatch({ type: 'layoutMeasured', canvas: { w: 1200, h: 800 }, boxes: {}, offset: { x: 0, y: 0 } });
+  store.dispatch({ type: 'stageResized', size: { w: 520, h: 600 } });
+  const fit = store.getSnapshot().camera.view;
+  assert.ok(renderBoard(store).includes('id="follow"'));
+  assert.ok(renderBoard(store).includes('aria-pressed="true"'));
+  store.dispatch({ type: 'toggleFollow' });
+  assert.ok(renderBoard(store).includes('aria-pressed="false"'));
+  store.dispatch({ type: 'zoom', factor: 1.25 });
+  assert.notDeepEqual(store.getSnapshot().camera.view, fit);
+  store.dispatch({ type: 'fit' });
+  assert.deepEqual(store.getSnapshot().camera.view, fit);
+  store.dispatch({ type: 'keyDown', key: 'ArrowRight' });
+  assert.equal(store.getSnapshot().board.active, 0);
+  store.dispatch({ type: 'keyDown', key: 'Escape' });
+  assert.equal(store.getSnapshot().board.active, null);
+});
+
+test('follow preference survives reload and chapter navigation updates the address', () => {
+  const values = new Map();
+  const replaced = [];
+  const browser = {
+    localStorage: { getItem: k => values.get(k) ?? null, setItem: (k, v) => values.set(k, v) },
+    location: { pathname: '/next', search: '?fixture=1', hash: '' },
+    history: { replaceState: (_state, _title, url) => replaced.push(url) },
+  };
+  const make = () => fixtureStore(true, { following: readFollow(browser), runCmd: cmd => runBrowserCommand(browser, cmd) });
+  const store = make();
+  store.dispatch({ type: 'toggleFollow' });
+  assert.equal(values.get('spiega.follow'), 'off');
+  assert.equal(make().getSnapshot().camera.following, false);
+  runBrowserCommand(browser, { type: 'setHash', hash: '#1' });
+  assert.deepEqual(replaced, ['/next?fixture=1#1']);
+  const blocked = { ...browser, get localStorage() { throw new Error('storage blocked'); } };
+  assert.equal(readFollow(blocked), true);
+  assert.doesNotThrow(() => runBrowserCommand(blocked, { type: 'persistFollow', following: true }));
+});
+
+test('chapter tabs keep their own drawing and script when revisited', () => {
+  const store = fixtureStore(true);
+  const board = emptyBoard();
+  const { errors } = applyOps(board, [
+    { op: 'node', id: 'first', label: 'First' },
+    { op: 'say', text: 'First chapter script' },
+    { op: 'chapter', title: 'Second' },
+    { op: 'node', id: 'second', label: 'Second' },
+    { op: 'say', text: 'Second chapter script' },
+  ]);
+  assert.deepEqual(errors, []);
+  store.dispatch({ type: 'stateReceived', board, full: true });
+  store.dispatch({ type: 'selectChapter', chapter: 0 });
+  const first = renderBoard(store);
+  assert.ok(first.includes('First chapter script'));
+  assert.ok(first.includes('data-node="first"'));
+  assert.ok(!first.includes('data-node="second"'));
+  store.dispatch({ type: 'selectChapter', chapter: null });
+  const second = renderBoard(store);
+  assert.ok(second.includes('Second chapter script'));
+  assert.ok(second.includes('data-node="second"'));
+  store.dispatch({ type: 'selectChapter', chapter: 0 });
+  assert.equal(stageRender(store.getSnapshot()).svg, stageRender({ ...store.getSnapshot(), chapterStep: null }).svg);
+  assert.ok(renderBoard(store).includes('class="here tab"'));
+});
+
+test('the chapter map renders the surfaces and their first lines', () => {
+  const store = fixtureStore(true);
+  const board = emptyBoard();
+  applyOps(board, [
+    { op: 'chapter', title: 'First chapter' },
+    { op: 'node', id: 'shared', label: 'Shared' },
+    { op: 'say', text: 'First chapter script' },
+    { op: 'chapter', title: 'Second chapter' },
+    { op: 'node', id: 'shared', label: 'Shared' },
+    { op: 'say', text: 'Second chapter script' },
+  ]);
+  store.dispatch({ type: 'stateReceived', board, full: true });
+  store.dispatch({ type: 'openMap' });
+  const html = renderBoard(store);
+  assert.ok(html.includes('id="map"'), 'the map opens as a layer over the panes');
+  assert.equal(count(html, 'class="mapcard'), 2);
+  assert.ok(html.includes('First chapter script') && html.includes('Second chapter script'));
+  assert.ok(html.includes('class="thumb"'), 'each card shows its own miniature drawing');
+  assert.ok(html.includes('id="maplinks"'), 'links share the board’s ink');
+});
+
+test('a chapter break files its ink and leaves a fresh live surface', () => {
+  const ink = new InkMemory();
+  ink.update(0);
+  ink.surface('chapter-live').add('gateway');
+  ink.surface('chapter-live').add('gateway>api');
+  ink.update(1);
+  assert.deepEqual([...ink.surface('chapter-0')], ['gateway', 'gateway>api'],
+    'returning to the finished surface must not redraw what was already seen');
+  assert.deepEqual([...ink.surface('chapter-live')], [],
+    'even the same key on the next surface is new ink');
+  ink.surface('chapter-live').add('gateway');
+  ink.surface('chapter-0').add('ledger');
+  ink.update(1);
+  assert.ok(ink.surface('chapter-0').has('ledger'), 'amendments are remembered on their own surface');
+  ink.update(0);
+  assert.equal(ink.surface('chapter-0').size, 0, 'clearing chapters forgets the previous board');
+  assert.equal(ink.surface('chapter-live').size, 0);
 });
 
 test('a board with no flow has no steps strip', () => {

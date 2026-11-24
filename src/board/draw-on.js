@@ -13,7 +13,7 @@
    animations never run (a background tab, reduced motion, a headless capture)
    the board is simply already drawn. */
 
-const prefersStill = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const prefersStill = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* A small seeded generator, so a given stroke always draws the same way. */
 function rnd(seed) {

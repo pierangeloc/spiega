@@ -58,6 +58,7 @@ export type FixtureStoreOptions = {
   readonly ops?: readonly Op[],
   readonly init?: InitOptions,
   readonly hash?: string,
+  readonly runCmd?: CmdRunner,
 };
 
 export type FixtureStore = BoardStore & {
@@ -91,6 +92,7 @@ export function createFixtureStore(options: FixtureStoreOptions = {}): FixtureSt
         fresh: result.fresh,
       });
     }
+    options.runCmd?.(cmd, dispatch);
   });
 
   if (options.board || options.ops) {

@@ -7,13 +7,13 @@
    of this directory and nothing else.
 
    The panes are board.html's panes, in board.html's rows: the bar, the chapter
-   strip's row (empty here — chapters are #155), and `main` as a grid of the
+   strip's row, and `main` as a grid of the
    rail and the stage. The stylesheet is board.html's own, lifted at build time
    rather than copied, so the two pages cannot drift apart while both are
    served.
 
    What the bar does not carry yet: the narrator's transport, the voice picker
-   and replay. Those are #154 and #155.
+   and replay. Those belong to the remaining board work.
    ============================================================ */
 
 import { useEffect, useSyncExternalStore } from 'react';
@@ -23,6 +23,8 @@ import type { Msg } from '../app/msg.js';
 import type { BoardStore } from '../app/store.js';
 import { Rail } from './Rail.js';
 import { Stage } from './Stage.js';
+import { Chapters } from './Chapters.js';
+import { MapView } from './Map.js';
 
 const LINK_TITLE = {
   live: 'the agent just drew something',
@@ -67,9 +69,11 @@ export function Board({ model, dispatch }: {
           </svg>
         </button>
       </div>
+      <Chapters model={model} dispatch={dispatch} />
       <main id="main" className={model.railOpen ? undefined : 'norail'}>
         <Rail model={model} dispatch={dispatch} />
         <Stage model={model} dispatch={dispatch} />
+        <MapView model={model} dispatch={dispatch} />
       </main>
     </>
   );
