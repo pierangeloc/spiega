@@ -1191,14 +1191,14 @@ test('opening a board that is already in a window raises it instead of making an
   const note = (n, when = Date.now()) => { book[n] = when; };
   const show = (name, opts) => showBoard(U, name, { opened, note, ...opts });
 
-  const r = show('skills-2', { focus, open });
+  const r = await show('skills-2', { focus, open });
   assert.equal(r.raised, true, 'the window that exists is the one the person gets');
   assert.deepEqual(calls.open, [], 'and no second window is made');
   assert.deepEqual(calls.focus, [['skills-2', U]], 'asked for by name, which is the tag in the title');
 
   // nothing showing it — the window is opened, with the options asked for
   calls.focus = [];
-  const made = show('skills-2', { focus: missing, open, app: false, size: '1200x900' });
+  const made = await show('skills-2', { focus: missing, open, app: false, size: '1200x900' });
   assert.equal(made.raised, false);
   assert.equal(made.how, 'chrome app window');
   assert.deepEqual(calls.open.map(c => c[0]), [U]);
@@ -1210,19 +1210,19 @@ test('opening a board that is already in a window raises it instead of making an
      honestly reports nothing — which is how one board ended up with three
      windows, all opened within a second of each other. */
   calls.open = []; calls.focus = [];
-  const racing = show('skills-2', { focus: missing, open });
+  const racing = await show('skills-2', { focus: missing, open });
   assert.equal(racing.raised, true, 'a window that is still opening is a window');
   assert.deepEqual(calls.open, [], 'so nothing is opened on top of it');
 
   // once that grace period is past, a board nothing is showing is opened again
   book['skills-2'] = Date.now() - 60_000;
-  assert.equal(show('skills-2', { focus: missing, open }).raised, false,
+  assert.equal((await show('skills-2', { focus: missing, open })).raised, false,
     'and a window the person has since closed can still be reopened');
   assert.equal(calls.open.length, 1);
 
   // a board with no name cannot be found by title, so it is simply opened
   calls.open = []; calls.focus = [];
-  assert.equal(show('', { focus, open }).raised, false);
+  assert.equal((await show('', { focus, open })).raised, false);
   assert.deepEqual(calls.focus, [], 'and nothing is asked of the window server');
   assert.equal(calls.open.length, 1);
 });
@@ -2339,6 +2339,10 @@ await atest('an unknown flag stops the command before it runs, and names the one
       [['say', 'hello', '--sstep', '2'], '--sstep', '--step'],
       [['install', '--detct'], '--detct', '--detect'],
       [['snapshot', '--outt', 'x.html'], '--outt', '--out'],
+      // serve and open too (#158): the table above is checked before either
+      // reaches @spiega/cli, and an unknown flag must never get that far.
+      [['serve', '--por', '5000'], '--por', '--port'],
+      [['open', '--browse', 'chrome'], '--browse', '--browser'],
     ]) {
       await assert.rejects(() => cli(...args), e => {
         assert.equal(e.code, 1, `${args[0]} ${typed} must not exit zero`);
@@ -2564,6 +2568,202 @@ await atest('board_draw and board_tag take their list as a JSON string, as some 
     child.kill('SIGKILL');
     app.server.close();
     app.server.closeAllConnections?.();
+  }
+});
+
+/* #186: `open` finds a browser, then launches it, and the binary can go away
+   between those two moments — an upgrade, a PATH entry that stops resolving.
+   `child_process.spawn` does not throw for that; it reports the failure a
+   tick later as an `'error'` event, which Node rethrows as an uncaught
+   exception if nothing is listening. In a terminal that is a stack trace; in
+   the MCP server, one process holds every tool, so it used to take the whole
+   server down with it — every other board the session was talking about,
+   gone over an unrelated tool call.
+   This drives the real server over its real pipe, same as the test above,
+   with its PATH broken so the system opener it launches (reached with
+   `tab: true` to skip the Chromium search entirely — `open` on macOS,
+   `xdg-open` on Linux) resolves to nothing — the same ENOENT a vanished
+   binary would report, with no need to touch anything actually installed on
+   the machine running the suite. */
+await atest('a browser that vanishes between the check and the launch is a tool error, not a dead server (#186)', async () => {
+  const { spawn } = await import('node:child_process');
+  const { createServer } = await import('../src/board/server.js');
+  const app = createServer({ name: 'mcp186' });
+  await new Promise(r => app.server.listen(0, '127.0.0.1', r));
+  const board = `http://127.0.0.1:${app.server.address().port}/b/mcp186`;
+
+  // the system opener openBoard falls back to with no Chromium — the binary
+  // this test's broken PATH must fail to resolve, and the one the message
+  // must name. Mirrors openBoard in window.ts.
+  const opener = process.platform === 'darwin' ? 'open'
+    : process.platform === 'win32' ? 'start' : 'xdg-open';
+
+  const child = spawn(process.execPath, [path.join(ROOT, 'src/mcp/server.js')], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    // PATH has to resolve `node` for nothing here — the parent already found
+    // it and spawned this child with an absolute path — but it must not
+    // resolve `opener`, the command board_open reaches with tab:true.
+    env: { ...process.env, SPIEGA_URL: board, PATH: '/spiega-test-no-such-path' },
+  });
+  const waiting = new Map();
+  let out = '';
+  child.stdout.on('data', d => {
+    out += d;
+    for (let i; (i = out.indexOf('\n')) >= 0; ) {
+      const line = out.slice(0, i).trim(); out = out.slice(i + 1);
+      if (!line) continue;
+      const msg = JSON.parse(line);
+      waiting.get(msg.id)?.(msg);
+      waiting.delete(msg.id);
+    }
+  });
+  let id = 0;
+  const callTool = (name, args) => new Promise((res, rej) => {
+    const mine = ++id;
+    const t = setTimeout(() => rej(new Error(`no reply to ${name}`)), 8000);
+    waiting.set(mine, m => { clearTimeout(t); res(m.result); });
+    child.stdin.write(JSON.stringify(
+      { jsonrpc: '2.0', id: mine, method: 'tools/call', params: { name, arguments: args } }) + '\n');
+  });
+
+  try {
+    const opened = await callTool('board_open', { tab: true });
+    // the acceptance criterion: a tool error, not a dead process
+    assert.ok(opened.isError, 'a browser that could not be launched should fail the tool call, not the process');
+    assert.match(opened.content[0].text, new RegExp(`could not start ${opener}:`),
+      `the message should name what it tried to start: ${opened.content[0]?.text}`);
+
+    // and the process really is still there to ask again — before the fix,
+    // the uncaught 'error' event from the spawn above killed it, and this
+    // would reject with "no reply" or the pipe closing.
+    const url = await callTool('board_url', {});
+    assert.equal(url.content[0].text, board, 'the server answered a second call on the same pipe');
+    assert.equal(child.exitCode, null, 'and the process itself never exited');
+  } finally {
+    child.stdin.end();
+    child.kill('SIGKILL');
+    app.server.close();
+    app.server.closeAllConnections?.();
+  }
+});
+
+/* #158's acceptance criterion, checked rather than argued: `serve` and `open`
+   read their flags through @effect/cli now, and the flags must arrive with
+   the same names, the same values and the same observable behaviour they had
+   when src/cli.js's `flag()` read them. The parser is the seam — a flag that
+   effect/cli reads as the wrong type (an int as a string, a switch that
+   demands a value) is exactly the break a renamed flag would be, and none of
+   it throws; it just does the wrong thing. So drive the real CLI, not the
+   Effect. A board is served in-process for `open` to aim at, with PATH
+   stripped so the system opener it reaches with `--tab` is gone — the same
+   ENOENT a vanished binary reports, which lets the launcher half fail
+   deterministically without touching anything installed on this machine. */
+await atest('serve and open take the same flags and values through effect/cli (#158)', async () => {
+  const { createServer } = await import('../src/board/server.js');
+  const { execFile, spawn } = await import('node:child_process');
+  const { promisify } = await import('node:util');
+  const run = promisify(execFile);
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-parity-'));
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  for (const k of ['SPIEGA_URL', 'SPIEGA_BOARD', 'SPIEGA_PORT']) delete env[k];
+
+  const app = createServer({ name: 'parity' });
+  await new Promise(r => app.server.listen(0, '127.0.0.1', r));
+  const U = `http://127.0.0.1:${app.server.address().port}/b/parity`;
+  // a PATH with no system opener on it: the launcher `--tab` reaches is gone
+  const broken = { ...env, SPIEGA_URL: U, PATH: '/spiega-test-no-such-path' };
+  // the system opener openBoard falls back to with no Chromium — `open` on
+  // macOS, `xdg-open` on Linux — the binary the message must name.
+  const opener = process.platform === 'darwin' ? 'open'
+    : process.platform === 'win32' ? 'start' : 'xdg-open';
+
+  // two ports we know are free, for the solo serve below — the second is
+  // passed in hex to prove --port is coerced with Number(), not parsed as int
+  const probe = await import('node:http');
+  const freePort = async () => {
+    const s = probe.createServer();
+    await new Promise(r => s.listen(0, '127.0.0.1', r));
+    const p = s.address().port;
+    await new Promise(r => s.close(r));
+    return p;
+  };
+  const PORT = await freePort();
+  const HEX_PORT = await freePort();
+
+  const children = [];
+  try {
+    /* open: every flag it advertises is accepted in one call, and --tab
+       flows to the launcher — a tab skips the Chromium search, so the gone
+       system opener is the one that fails, named rather than thrown.
+       --size/--pos/--browser/--new ride the same parse: a parser that
+       swallowed any of them would refuse the whole command before it got this
+       far. `--tab=false` is the switch the old `flag()` read as truthy (the
+       string "false" is not empty), so it must reach the launcher exactly as
+       bare `--tab` does — #158 is "same flags and behaviour", and a boolean
+       switch is presence, not a value. */
+    for (const args of [
+      ['open', '--tab', '--size', '1200x900', '--pos', '60,60', '--browser', 'brave', '--new'],
+      ['open', '--tab'],                                  // the raise-or-open path, without --new
+      ['open', '--tab=false'],                            // an explicit value on a switch is still the switch
+    ]) {
+      await assert.rejects(
+        () => run(process.execPath, [path.join(ROOT, 'src/cli.js'), ...args], { env: broken }),
+        e => {
+          assert.equal(e.code, 1, `open ${args.slice(1).join(' ')} must exit non-zero, not ${e.code}`);
+          assert.match(e.stderr, new RegExp(`spiega open: could not start ${opener}:`),
+            `it should name the opener it tried: ${e.stderr}`);
+          return true;
+        });
+    }
+
+    /* serve: --port and --solo reach startBoard, and the line says so. */
+    const serveSolo = (board, portArg) => {
+      const child = spawn(process.execPath,
+        [path.join(ROOT, 'src/cli.js'), 'serve', '--board', board, '--solo', '--port', portArg],
+        { env, stdio: ['ignore', 'pipe', 'pipe'] });
+      children.push(child);
+      return new Promise((resolve, reject) => {
+        let out = '';
+        const t = setTimeout(() => reject(new Error(`serve never printed a URL line; saw ${JSON.stringify(out)}`)), 8000);
+        child.stdout.on('data', d => { out += d; if (/spiega serving /.test(out)) { clearTimeout(t); resolve(out); } });
+        child.stderr.on('data', d => { out += d; });
+        child.once('error', reject);
+      });
+    };
+    assert.match(await serveSolo('parity-solo', String(PORT)),
+      new RegExp(`spiega serving http://127\\.0\\.0\\.1:${PORT}/b/parity-solo  \\(its own process\\)`),
+      `--port and --solo land in the URL and the aside`);
+
+    /* --port is read as a string and coerced with Number(), exactly as the old
+       `Number(flag('port', PORT))` did — so "0x" + HEX_PORT.toString(16) is
+       HEX_PORT, not an int-parse failure. */
+    assert.match(await serveSolo('parity-hex', `0x${HEX_PORT.toString(16)}`),
+      new RegExp(`spiega serving http://127\\.0\\.0\\.1:${HEX_PORT}/b/parity-hex  \\(its own process\\)`),
+      `--port 0x${HEX_PORT.toString(16)} is Number()d back to ${HEX_PORT}`);
+
+    /* bare --port: the old flag() returned true and Number(true) was 1 — a
+       port nobody meant. effect/cli cannot express a bare value, so it fails
+       with "Missing value" instead of silently binding 1. */
+    await assert.rejects(
+      () => run(process.execPath, [path.join(ROOT, 'src/cli.js'), 'serve', '--board', 'parity', '--solo', '--port'], { env }),
+      e => {
+        assert.equal(e.code, 1, 'bare --port must fail');
+        assert.match(e.stderr, /Missing value for flag --port/, `it should say why: ${e.stderr}`);
+        return true;
+      });
+
+    /* serve --quiet on a board that is already up says nothing — and so does
+       --quiet=false, because a switch is presence, not a value. */
+    for (const q of ['--quiet', '--quiet=false']) {
+      const { stdout: quiet } = await run(process.execPath,
+        [path.join(ROOT, 'src/cli.js'), 'serve', '--board', 'parity-solo', q], { env });
+      assert.equal(quiet, '', `${q} silences the already-running line`);
+    }
+  } finally {
+    for (const c of children) c.kill('SIGKILL');
+    app.server.close();
+    app.server.closeAllConnections?.();
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 

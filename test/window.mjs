@@ -9,6 +9,11 @@
    whatever machine runs the suite — which checks what they would launch, and
    says nothing about whether a window then appears there. Nobody has looked
    at that on Linux.
+
+   `launch` is a `Promise` now (#186), so running an effect that calls it needs
+   `Effect.runPromise`; the other three halves of `Desktop` are still plain
+   synchronous calls, so effects that touch only those still run with
+   `Effect.runSync`, same as before.
    Run with `node dist/test/window.mjs` (or via vitest through window.spec.mjs). */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -52,8 +57,8 @@ const fakeDesktop = ({ platform = 'darwin', files = [], bins = [], ps = '', titl
     exists: file => files.includes(file),
     onPath: bin => bins.includes(bin),
     launch: (cmd, args, shell) => {
-      if (launchFails) throw launchFails;
       asked.launched.push([cmd, [...args], shell]);
+      return launchFails ? Promise.reject(launchFails) : Promise.resolve();
     },
     processes: () => { if (psFails) throw new Error('no ps'); return ps; },
     osascript: script => {
@@ -68,45 +73,72 @@ const fakeDesktop = ({ platform = 'darwin', files = [], bins = [], ps = '', titl
   return { desktop, asked, layer: Desktop.make(desktop) };
 };
 
+// `focusBoard` and `findChromium` never touch `launch`, so an effect built
+// from only those still finishes synchronously.
 const run = (effect, layer) => Effect.runSync(effect.pipe(Effect.provide(layer)));
+// `openBoard` always goes through `launch`, which now waits out the grace
+// period (#186) before it can report success, so running it needs the async
+// runner.
+const runP = (effect, layer) => Effect.runPromise(effect.pipe(Effect.provide(layer)));
 
-await test('macOS: a Chromium-family browser is launched in app mode, sized and placed as asked', () => {
+await test('macOS: a Chromium-family browser is launched in app mode, sized and placed as asked', async () => {
   const m = fakeDesktop({ files: [CHROME, BRAVE] });
-  const r = run(openBoard(U, { size: '1200x900', pos: '10:20' }), m.layer);
+  const r = await runP(openBoard(U, { size: '1200x900', pos: '10:20' }), m.layer);
   assert.deepEqual(r, { how: 'chrome app window', app: true });
   assert.deepEqual(m.asked.launched, [[CHROME, [`--app=${U}`, '--window-size=1200,900', '--window-position=10,20'], false]]);
   assert.deepEqual(run(findChromium('brave'), m.layer), { name: 'brave', cmd: BRAVE }, 'the one asked for comes first');
 });
 
-await test('macOS: no Chromium, or a tab asked for, goes to the default browser through `open`', () => {
+await test('macOS: no Chromium, or a tab asked for, goes to the default browser through `open`', async () => {
   const none = fakeDesktop();
-  assert.deepEqual(run(openBoard(U), none.layer), { how: 'default browser', app: false });
+  assert.deepEqual(await runP(openBoard(U), none.layer), { how: 'default browser', app: false });
   assert.deepEqual(none.asked.launched, [['open', [U], false]]);
   const tab = fakeDesktop({ files: [CHROME] });
-  run(openBoard(U, { app: false }), tab.layer);
+  await runP(openBoard(U, { app: false }), tab.layer);
   assert.deepEqual(tab.asked.launched, [['open', [U], false]], 'a tab stays a tab');
 });
 
-await test('Linux: the first browser on PATH is launched in app mode; none is xdg-open', () => {
+await test('Linux: the first browser on PATH is launched in app mode; none is xdg-open', async () => {
   const m = fakeDesktop({ platform: 'linux', bins: ['chromium-browser', 'brave'] });
   assert.deepEqual(run(findChromium(), m.layer), { name: 'brave', cmd: 'brave' }, 'brave is ahead of chromium in the order');
-  assert.deepEqual(run(openBoard(U, { browser: 'chromium' }), m.layer), { how: 'chromium app window', app: true });
+  assert.deepEqual(await runP(openBoard(U, { browser: 'chromium' }), m.layer), { how: 'chromium app window', app: true });
   assert.deepEqual(m.asked.launched, [['chromium-browser', [`--app=${U}`], false]]);
   const bare = fakeDesktop({ platform: 'linux' });
-  assert.deepEqual(run(openBoard(U), bare.layer), { how: 'default browser', app: false });
+  assert.deepEqual(await runP(openBoard(U), bare.layer), { how: 'default browser', app: false });
   assert.deepEqual(bare.asked.launched, [['xdg-open', [U], false]]);
 });
 
-await test('Windows: nothing installed is `start`, through the shell', () => {
+await test('Windows: nothing installed is `start`, through the shell', async () => {
   const m = fakeDesktop({ platform: 'win32' });
-  run(openBoard(U), m.layer);
+  await runP(openBoard(U), m.layer);
   assert.deepEqual(m.asked.launched, [['start', [U], true]]);
 });
 
-await test('a browser that cannot be started fails in the error channel, carrying what was thrown', () => {
+await test('a browser that cannot be started fails in the error channel, carrying what was thrown', async () => {
   const boom = new Error('spawn EACCES');
   const m = fakeDesktop({ files: [CHROME], launchFails: boom });
-  const e = run(Effect.flip(openBoard(U)), m.layer);
+  const e = await runP(Effect.flip(openBoard(U)), m.layer);
+  assert.equal(e._tag, 'LaunchFailed');
+  assert.equal(e.cmd, CHROME);
+  assert.equal(e.cause, boom);
+});
+
+/* The bug itself (#186): the binary existed when findChromium checked it and
+   is gone by the time launch actually spawns it. Real ENOENT/EACCES surface
+   asynchronously, as an `'error'` event a tick after `spawn` returns, never
+   as a throw from `spawn` itself — the fake above, which throws synchronously,
+   cannot reproduce that. This one answers the way the real
+   `child_process.spawn` does, and is what the live `Desktop.live.launch`
+   fix (window.ts) is for: before it, nothing attached a listener for this and
+   Node rethrew it as an uncaught exception. */
+await test('a browser that vanishes between the check and the launch fails the same way, not by crashing', async () => {
+  const boom = Object.assign(new Error(`spawn ${CHROME} ENOENT`), { code: 'ENOENT' });
+  const m = fakeDesktop({ files: [CHROME] });
+  m.desktop.launch = (cmd, args, shell) => new Promise((resolve, reject) => {
+    m.asked.launched.push([cmd, [...args], shell]);
+    queueMicrotask(() => reject(boom));
+  });
+  const e = await runP(Effect.flip(openBoard(U)), m.layer);
   assert.equal(e._tag, 'LaunchFailed');
   assert.equal(e.cmd, CHROME);
   assert.equal(e.cause, boom);
@@ -195,25 +227,29 @@ await test('a board with no name cannot be found by title, so it is opened witho
 
 /* ---------- the plain door the CLI and MCP still use ---------- */
 
-await test('the plain showBoard keeps its shape, and a launch that throws still throws what it threw', async () => {
+await test('the plain showBoard keeps its shape, and a launch that fails is reported, not thrown (#186)', async () => {
   const { showBoard: plainShow } = await import('../src/board/open.js');
   const book = {};
   const halves = {
     opened: name => book[name] || 0,
     note: name => { book[name] = Date.now(); },
   };
-  const raised = plainShow(U, 'skills-2', { ...halves, focus: () => ({ ok: true, how: 'raised in Google Chrome' }),
+  const raised = await plainShow(U, 'skills-2', { ...halves, focus: () => ({ ok: true, how: 'raised in Google Chrome' }),
     open: () => assert.fail('opened a second window') });
   assert.deepEqual(raised, { ok: true, how: 'raised in Google Chrome', raised: true });
 
-  const opened = plainShow(U, 'fresh', { ...halves, focus: () => ({ ok: false, how: 'none' }),
+  const opened = await plainShow(U, 'fresh', { ...halves, focus: () => ({ ok: false, how: 'none' }),
     open: (url, opts) => ({ how: `opened ${url} app=${opts.app}`, app: opts.app }) });
-  assert.deepEqual(opened, { how: `opened ${U} app=true`, app: true, raised: false });
+  assert.deepEqual(opened, { ok: true, how: `opened ${U} app=true`, app: true, raised: false });
   assert.ok(book.fresh, 'and the open was recorded');
 
+  // this is the shape #186 is about: before the fix, this rejected the
+  // promise with the bare Error, and an unawaited caller — board_open over
+  // MCP, serve --open — took the whole process down with it.
   const boom = new Error('spawn ENOENT');
-  assert.throws(() => plainShow(U, 'broken', { ...halves, focus: () => ({ ok: false, how: 'none' }),
-    open: () => { throw boom; } }), e => e === boom, 'the very error, not an Effect wrapper around it');
+  const broken = await plainShow(U, 'broken', { ...halves, focus: () => ({ ok: false, how: 'none' }),
+    open: () => { throw boom; } });
+  assert.deepEqual(broken, { ok: false, how: 'could not start open: spawn ENOENT', raised: false });
 });
 
 fs.rmSync(home, { recursive: true, force: true });
