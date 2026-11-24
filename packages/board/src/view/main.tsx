@@ -3,8 +3,7 @@
 import { createRoot } from 'react-dom/client';
 
 import { App } from './App.js';
-import { fixtureStore } from './fixture.js';
-import { readFollow, runBrowserCommand } from './browser.js';
+import { browserStore } from './browser.js';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('the React board has no #root to mount in');
@@ -14,15 +13,13 @@ if (!root) throw new Error('the React board has no #root to mount in');
    over the drawing. A reader can still open it from the bar. */
 const railOpen = !matchMedia('(max-width:820px)').matches;
 
-const store = fixtureStore(railOpen, {
-  following: readFollow(window),
-  hash: location.hash,
-  runCmd: cmd => runBrowserCommand(window, cmd),
-});
-addEventListener('keydown', e => {
-  if ((e.target as Element)?.closest('input, textarea, select, [contenteditable]')) return;
-  if (['ArrowRight', 'ArrowLeft', 'f', '0', '+', '=', '-', '_', 'Escape'].includes(e.key)) e.preventDefault();
-  store.dispatch({ type: 'keyDown', key: e.key });
+const store = browserStore(railOpen);
+window.addEventListener('keydown', (event) => {
+  const target = event.target;
+  if (target instanceof Element && target.closest('input, textarea, select, button, [contenteditable]')) return;
+  if (['ArrowRight', 'ArrowLeft', 'f', '0', '+', '=', '-', '_', 'Escape'].includes(event.key)
+    || (store.getSnapshot().playback.narratorAvailable && [' ', 'ArrowDown', 'ArrowUp', '[', ']'].includes(event.key))) event.preventDefault();
+  store.dispatch({ type: 'keyDown', key: event.key });
 });
 addEventListener('hashchange', () => store.dispatch({ type: 'hashChanged', hash: location.hash }));
 createRoot(root).render(<App store={store} />);

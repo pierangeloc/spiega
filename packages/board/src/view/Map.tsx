@@ -7,6 +7,7 @@ import { arrowHead, hashSeed, roughLine, stroke } from '../../../../src/render/i
 import type { Model } from '../app/model.js';
 import type { Msg } from '../app/msg.js';
 import { mdish } from './text.js';
+import { spokenWords } from './SpokenWords.js';
 
 export function MapView({ model, dispatch }: { readonly model: Model, readonly dispatch: (msg: Msg) => unknown }) {
   const wrap = useRef<HTMLDivElement>(null);
@@ -16,6 +17,9 @@ export function MapView({ model, dispatch }: { readonly model: Model, readonly d
   const [going, setGoing] = useState<number | null>(null);
   const board = model.board;
   const map = useMemo(() => boardMap(board), [board]);
+  const section = model.playback.tape[model.playback.tapeIndex];
+  const outline = section?.kind === 'outline' ? section : undefined;
+  const word = model.playback.wordOffset;
 
   useEffect(() => () => { if (timer.current !== null) clearTimeout(timer.current); }, []);
   useEffect(() => {
@@ -39,6 +43,11 @@ export function MapView({ model, dispatch }: { readonly model: Model, readonly d
     schedule();
     return () => { observer.disconnect(); removeEventListener('resize', schedule); cancelAnimationFrame(frame); };
   }, [model.mapOpen, map]);
+  useEffect(() => {
+    if (model.mapOpen && outline?.card != null) {
+      cardsRef.current?.querySelector<HTMLElement>(`.mapcard[data-n="${outline.card}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [model.mapOpen, outline?.card]);
 
   if (!model.mapOpen || !board) return null;
   const enter = (index: number | null, n: number): void => {
@@ -52,7 +61,7 @@ export function MapView({ model, dispatch }: { readonly model: Model, readonly d
   };
 
   return <div className={`map${going === null ? '' : ' leaving'}`} id="map">
-    <p className="lede" id="maplede">{ledeText(board.title, map.cards.length)}</p>
+    <p className="lede" id="maplede">{outline?.part === 'lede' && word != null ? spokenWords(ledeText(board.title, map.cards.length), word) : ledeText(board.title, map.cards.length)}</p>
     <div className="mapwrap" id="mapwrap" ref={wrap}>
       <svg className="maplinks" id="maplinks" ref={svg} />
       <div className="cards" id="mapcards" ref={cardsRef}>
@@ -65,12 +74,14 @@ export function MapView({ model, dispatch }: { readonly model: Model, readonly d
           const bits = [`${card.nodes} boxes`, `${card.edges} lines`];
           if (card.steps) bits.push(`${card.steps} steps`);
           return <button key={card.n} data-n={card.n}
-            className={`mapcard${card.live ? ' islive' : ''}${card.i === model.viewing ? ' here' : ''}${going === card.n ? ' going' : ''}`}
+            className={`mapcard${card.live ? ' islive' : ''}${card.i === model.viewing ? ' here' : ''}${going === card.n ? ' going' : ''}${outline?.card === card.n ? ' speaking' : ''}`}
             title={card.live ? 'the chapter being drawn now — click to open it' : `chapter ${card.n} — click to open it`}
             onClick={() => enter(card.i, card.n)}>
-            <span className="head"><span className="n">{card.n}</span><span className="t">{card.title}</span></span>
+            <span className="head"><span className="n">{card.n}</span><span className="t">{outline?.card === card.n && outline.part === 'title' && word != null ? spokenWords(card.title, word) : card.title}</span></span>
             <span className="thumb" dangerouslySetInnerHTML={{ __html: thumbnail }} />
-            {card.line ? <span className="line" dangerouslySetInnerHTML={{ __html: mdish(card.line) }} /> : null}
+            {card.line ? outline?.card === card.n && outline.part === 'line' && word != null
+              ? <span className="line">{spokenWords(card.line, word)}</span>
+              : <span className="line" dangerouslySetInnerHTML={{ __html: mdish(card.line) }} /> : null}
             <span className="meta">{bits.join(' · ')}</span>
           </button>;
         })}

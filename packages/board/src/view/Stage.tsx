@@ -9,7 +9,7 @@
    cannot know — how big the stage is, and how big the drawing came out — and
    reports them; `update` does the fit arithmetic board.html's `fit()` does.
 
-   Export and the narration caption belong to the remaining board work.
+   Export belongs to the remaining board work.
    ============================================================ */
 
 import { useEffect, useMemo, useRef } from 'react';
@@ -21,6 +21,7 @@ import type { Msg } from '../app/msg.js';
 import { Steps } from './Steps.js';
 import { panTransform, panTransition, stageRender } from './drawing.js';
 import { InkMemory } from './ink-memory.js';
+import { mdish } from './text.js';
 
 export function Stage({ model, dispatch }: {
   readonly model: Model,
@@ -142,7 +143,7 @@ export function Stage({ model, dispatch }: {
         }}
         dangerouslySetInnerHTML={{ __html: drawing?.svg ?? '' }}
       />
-      {drawing ? null : (
+      {drawing || model.replay.active ? null : (
         <div className="blank" id="blank">
           <div className="k">the board is empty</div>
           <div><code>{`spiega draw '{"op":"node","label":"API Gateway","kind":"gateway"}'`}</code></div>
@@ -162,6 +163,7 @@ export function Stage({ model, dispatch }: {
           </div>
         ) : null}
       </div>
+      {model.caption ? <div className={`caption on${model.caption.problem ? ' problem' : ''}`} id="caption" dangerouslySetInnerHTML={{ __html: mdish(model.caption.text) }} /> : null}
       <Steps model={model} dispatch={dispatch} />
       <div className="tools" id="tools">
         <button className="btn tool" id="fit" title="fit the whole board in view (f)" aria-label="fit the whole board in view" onClick={() => dispatch({ type: 'fit', smooth: true })}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" /></svg></button>

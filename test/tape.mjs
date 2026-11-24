@@ -264,6 +264,16 @@ await test('the playhead can be parked, and rewound when the tape is about somet
   assert.equal(spoken.at(-1), 'x', 'a replaced tape starts at its own beginning');
 });
 
+await test('a cancelled voice sample cannot start after the tape has restarted', async () => {
+  const spoken = fakeVoice();
+  const nar = createNarrator();
+  nar.load([{ text: 'the script' }]);
+  nar.sample('sample');
+  nar.play();
+  await until(() => !nar.playing);
+  assert.deepEqual(spoken, ['the script']);
+});
+
 await test('changing speed restarts the sentence at the new speed, and is clamped', async () => {
   fakeVoice();
   const nar = createNarrator();

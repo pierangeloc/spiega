@@ -5,12 +5,11 @@
    two arrows. It is not here when the board has no flow, which is what
    board.html's `hidden` says.
 
-   The silent flow timer — board.html's `play` — is not here. It is playback,
-   which is #154's, and the old page hides it too whenever the browser has a
-   narrator to drive the board instead.
+   The silent timer is available only when the narrator cannot drive the board,
+   so the steps and the script never compete as two simultaneous players.
    ============================================================ */
 
-import { currentSurface, type Model } from '../app/model.js';
+import { currentSurface, narratorDrives, type Model } from '../app/model.js';
 import type { Msg } from '../app/msg.js';
 
 export function Steps({ model, dispatch }: {
@@ -41,6 +40,7 @@ export function Steps({ model, dispatch }: {
         {at == null ? `${flow.length} steps` : `${at + 1}/${flow.length}`}
       </span>
       <span className="txt" id="steptxt" title={text}>{text}</span>
+      {!narratorDrives(model) ? <button className="btn" id="play" onClick={() => dispatch({ type: 'flowPlayToggle' })}>{model.playback.flowPlaying ? 'stop' : 'play'}</button> : null}
       <button
         className="btn"
         id="next"
