@@ -1,0 +1,175 @@
+{
+ "board": {
+  "title": "Orders flow",
+  "chapter": "Second",
+  "chapters": [
+   {
+    "title": "",
+    "nodes": [
+     {
+      "id": "gw",
+      "kind": "gateway",
+      "label": "Gateway"
+     },
+     {
+      "id": "svc",
+      "kind": "service",
+      "label": "Orders"
+     },
+     {
+      "id": "db",
+      "kind": "datastore",
+      "label": "Ledger"
+     }
+    ],
+    "edges": [
+     {
+      "from": "gw",
+      "to": "svc",
+      "label": "gRPC"
+     },
+     {
+      "from": "svc",
+      "to": "db",
+      "label": "SQL"
+     }
+    ],
+    "boundaries": [],
+    "flow": [
+     {
+      "edge": "gw>svc",
+      "step": "the gateway calls orders"
+     },
+     {
+      "edge": "svc>db",
+      "step": "orders writes the row"
+     }
+    ],
+    "callouts": [],
+    "transcript": [
+     {
+      "text": "Opening line, about the whole board.",
+      "at": 1795564373538
+     },
+     {
+      "text": "The gateway speaks gRPC to orders.",
+      "at": 1795564373538,
+      "step": 0
+     },
+     {
+      "text": "Then a row lands in the ledger.",
+      "at": 1795564373538,
+      "step": 1
+     }
+    ],
+    "groups": {},
+    "active": null,
+    "placed": {},
+    "settled": false
+   }
+  ],
+  "nodes": [
+   {
+    "id": "q",
+    "kind": "queue",
+    "label": "Events"
+   }
+  ],
+  "edges": [],
+  "boundaries": [],
+  "flow": [],
+  "callouts": [],
+  "transcript": [],
+  "groups": {},
+  "active": null,
+  "placed": {},
+  "log": [
+   {
+    "op": "title",
+    "text": "Orders flow",
+    "at": 1795564373538
+   },
+   {
+    "op": "node",
+    "id": "gw",
+    "kind": "gateway",
+    "label": "Gateway",
+    "at": 1795564373538
+   },
+   {
+    "op": "node",
+    "id": "svc",
+    "kind": "service",
+    "label": "Orders",
+    "at": 1795564373538
+   },
+   {
+    "op": "node",
+    "id": "db",
+    "kind": "datastore",
+    "label": "Ledger",
+    "at": 1795564373538
+   },
+   {
+    "op": "edge",
+    "from": "gw",
+    "to": "svc",
+    "label": "gRPC",
+    "at": 1795564373538
+   },
+   {
+    "op": "edge",
+    "from": "svc",
+    "to": "db",
+    "label": "SQL",
+    "at": 1795564373538
+   },
+   {
+    "op": "step",
+    "edge": "gw>svc",
+    "step": "the gateway calls orders",
+    "at": 1795564373538
+   },
+   {
+    "op": "step",
+    "edge": "svc>db",
+    "step": "orders writes the row",
+    "at": 1795564373538
+   },
+   {
+    "op": "say",
+    "text": "Opening line, about the whole board.",
+    "at": 1795564373538
+   },
+   {
+    "op": "say",
+    "text": "The gateway speaks gRPC to orders.",
+    "step": 1,
+    "at": 1795564373538
+   },
+   {
+    "op": "say",
+    "text": "Then a row lands in the ledger.",
+    "step": 2,
+    "at": 1795564373538
+   },
+   {
+    "op": "chapter",
+    "title": "Second",
+    "at": 1795564373538
+   },
+   {
+    "op": "node",
+    "id": "q",
+    "kind": "queue",
+    "label": "Events",
+    "at": 1795564373538
+   }
+  ],
+  "rev": 13,
+  "settled": false
+ },
+ "viewing": 0,
+ "active": null,
+ "chapterOnly": false
+}

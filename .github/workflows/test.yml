@@ -109,6 +109,24 @@ jobs:
             | node node_modules/spiega/src/mcp/server.js | tee /tmp/fresh/mcp.out
           grep -q '"name":"board_draw"' /tmp/fresh/mcp.out
 
+  size:
+    runs-on: ubuntu-latest
+    name: export size
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # An export is a file people mail each other, and nothing throws when it
+      # gets heavier: a module that pulled in a library would build and pass.
+      # This puts the page's weight, raw and gzipped, in the job summary so a
+      # regression is a number somebody can read, and fails over the ceiling in
+      # tools/size.js.
+      - run: pnpm run size
+
   lint:
     runs-on: ubuntu-latest
     name: lint
