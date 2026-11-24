@@ -197,6 +197,27 @@ test('chapter tabs keep their own drawing and script when revisited', () => {
   assert.ok(renderBoard(store).includes('class="here tab"'));
 });
 
+test('the chapter map renders the surfaces and their first lines', () => {
+  const store = fixtureStore(true);
+  const board = emptyBoard();
+  applyOps(board, [
+    { op: 'chapter', title: 'First chapter' },
+    { op: 'node', id: 'shared', label: 'Shared' },
+    { op: 'say', text: 'First chapter script' },
+    { op: 'chapter', title: 'Second chapter' },
+    { op: 'node', id: 'shared', label: 'Shared' },
+    { op: 'say', text: 'Second chapter script' },
+  ]);
+  store.dispatch({ type: 'stateReceived', board, full: true });
+  store.dispatch({ type: 'openMap' });
+  const html = renderBoard(store);
+  assert.ok(html.includes('id="map"'), 'the map opens as a layer over the panes');
+  assert.equal(count(html, 'class="mapcard'), 2);
+  assert.ok(html.includes('First chapter script') && html.includes('Second chapter script'));
+  assert.ok(html.includes('class="thumb"'), 'each card shows its own miniature drawing');
+  assert.ok(html.includes('id="maplinks"'), 'links share the board’s ink');
+});
+
 test('a board with no flow has no steps strip', () => {
   const store = fixtureStore(true);
   const board = emptyBoard();
