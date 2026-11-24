@@ -29,7 +29,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { fixtureStore, readFollow, renderBoard, runBrowserCommand, stageRender, STAGE_MARGIN } from '../support/board-view.js';
+import { fixtureStore, InkMemory, readFollow, renderBoard, runBrowserCommand, stageRender, STAGE_MARGIN } from '../support/board-view.js';
 import { applyOps, emptyBoard } from '../src/board/state.js';
 import { specToOps } from '../src/spec.js';
 import { renderSVG } from '../src/render/render.js';
@@ -216,6 +216,25 @@ test('the chapter map renders the surfaces and their first lines', () => {
   assert.ok(html.includes('First chapter script') && html.includes('Second chapter script'));
   assert.ok(html.includes('class="thumb"'), 'each card shows its own miniature drawing');
   assert.ok(html.includes('id="maplinks"'), 'links share the board’s ink');
+});
+
+test('a chapter break files its ink and leaves a fresh live surface', () => {
+  const ink = new InkMemory();
+  ink.update(0);
+  ink.surface('chapter-live').add('gateway');
+  ink.surface('chapter-live').add('gateway>api');
+  ink.update(1);
+  assert.deepEqual([...ink.surface('chapter-0')], ['gateway', 'gateway>api'],
+    'returning to the finished surface must not redraw what was already seen');
+  assert.deepEqual([...ink.surface('chapter-live')], [],
+    'even the same key on the next surface is new ink');
+  ink.surface('chapter-live').add('gateway');
+  ink.surface('chapter-0').add('ledger');
+  ink.update(1);
+  assert.ok(ink.surface('chapter-0').has('ledger'), 'amendments are remembered on their own surface');
+  ink.update(0);
+  assert.equal(ink.surface('chapter-0').size, 0, 'clearing chapters forgets the previous board');
+  assert.equal(ink.surface('chapter-live').size, 0);
 });
 
 test('a board with no flow has no steps strip', () => {

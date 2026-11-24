@@ -20,6 +20,7 @@ import { currentSurface, unsavedWarning, type Model } from '../app/model.js';
 import type { Msg } from '../app/msg.js';
 import { Steps } from './Steps.js';
 import { panTransform, panTransition, stageRender } from './drawing.js';
+import { InkMemory } from './ink-memory.js';
 
 export function Stage({ model, dispatch }: {
   readonly model: Model,
@@ -27,7 +28,7 @@ export function Stage({ model, dispatch }: {
 }) {
   const stage = useRef<HTMLDivElement>(null);
   const pan = useRef<HTMLDivElement>(null);
-  const ink = useRef(new Map<string, Set<string>>());
+  const ink = useRef(new InkMemory());
   const drag = useRef<{ x: number, y: number, lastX: number, lastY: number, node: string | null, moved: boolean } | null>(null);
   const hasSteps = (currentSurface(model)?.flow.length ?? 0) > 0;
 
@@ -88,9 +89,9 @@ export function Stage({ model, dispatch }: {
   useEffect(() => {
     const el = pan.current;
     if (!el) return;
+    if (model.board) ink.current.update(model.board.chapters.length);
     const key = model.replay.active ? `replay-${model.replay.chapterAt ?? 'live'}` : `chapter-${model.viewing ?? 'live'}`;
-    let seen = ink.current.get(key);
-    if (!seen) { seen = new Set(); ink.current.set(key, seen); }
+    const seen = ink.current.surface(key);
     if (!drawing) { seen.clear(); return; }
     const leads = new Set((currentSurface(model)?.flow ?? []).flatMap(step => litKeys(step)));
     el.querySelectorAll<SVGGElement>('g[data-node]').forEach(g => g.classList.toggle('go', leads.has(g.dataset.node ?? '')));
