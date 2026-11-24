@@ -17,9 +17,17 @@
    wrapper in src/board/open.ts, and the tests behind it) still goes through
    the one decision rather than a copy of it.
 
-   Everything here is synchronous on purpose: the CLI and MCP still call the
-   wrapper as a function that returns, and `Effect.runSync` is how it does.
-   ============================================================ */
+   `Desktop.live.launch` is asynchronous, and the one place here that has to
+   be: `findChromium` can see a binary that is gone by the time `launch` spawns
+   it — an upgrade swapping the bundle, a PATH entry that stops resolving — and
+   `child_process.spawn` does not throw for that. It returns a `ChildProcess`
+   and reports the failure a tick later as an `'error'` event, which Node
+   rethrows as an uncaught exception if nothing is listening (#186). So launch
+   attaches that listener and waits out `SPAWN_GRACE_MS` before declaring the
+   process started: long enough for ENOENT/EACCES to surface, short beside the
+   time a browser takes to actually paint a window. Everything else here stays
+   synchronous underneath — raising a window is a synchronous AppleScript call
+   — so `Effect.runPromise`, not `Effect.runSync`, is how a caller runs these. */
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,9 +40,10 @@ export interface DesktopShape {
   readonly platform: string;
   readonly exists: (file: string) => boolean;
   readonly onPath: (bin: string) => boolean;
-  /* Start a process detached from this one and let it go. Throws only if it
-     cannot be started at all. */
-  readonly launch: (cmd: string, args: ReadonlyArray<string>, shell: boolean) => void;
+  /* Start a process detached from this one and let it go. Resolves once the
+     process has survived `SPAWN_GRACE_MS` without reporting that it could not
+     start at all; rejects with what it reported if it does. */
+  readonly launch: (cmd: string, args: ReadonlyArray<string>, shell: boolean) => Promise<void>;
   /* Every running process's command, one per line, as `ps -Ao comm=` prints it. */
   readonly processes: () => string;
   readonly osascript: (script: string) => string;
@@ -47,9 +56,14 @@ export class Desktop extends Context.Service<Desktop, DesktopShape>()('@spiega/s
     platform: process.platform,
     exists: (file) => fs.existsSync(file),
     onPath: (bin) => spawnSync('which', [bin], { stdio: 'ignore' }).status === 0,
-    launch: (cmd, args, shell) => {
-      spawn(cmd, [...args], { detached: true, stdio: 'ignore', shell }).unref();
-    },
+    launch: (cmd, args, shell) => new Promise((resolve, reject) => {
+      const child = spawn(cmd, [...args], { detached: true, stdio: 'ignore', shell });
+      // Only this tick's failure is ours to report: once the grace period
+      // passes the process is on its own, same as before #186.
+      const onError = (cause: Error): void => { clearTimeout(timer); reject(cause); };
+      const timer = setTimeout(() => { child.removeListener('error', onError); child.unref(); resolve(); }, SPAWN_GRACE_MS);
+      child.once('error', onError);
+    }),
     processes: () => execFileSync('ps', ['-Ao', 'comm='],
       { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'pipe'] }),
     // stderr is piped, not inherited: a browser that is half-installed makes
@@ -58,6 +72,12 @@ export class Desktop extends Context.Service<Desktop, DesktopShape>()('@spiega/s
       { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] }),
   });
 }
+
+/* How long to let a spawn announce that it could not start at all. ENOENT and
+   EACCES land on the next tick; a browser that is actually starting is still
+   running long past this, so waiting longer only delays reporting a real
+   failure. */
+export const SPAWN_GRACE_MS = 250;
 
 const MAC: Record<string, string> = {
   chrome:   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
@@ -112,7 +132,7 @@ export type Opened = { how: string, app: boolean };
 const launch = (cmd: string, args: ReadonlyArray<string>, shell: boolean): Effect.Effect<void, LaunchFailed, Desktop> =>
   Effect.gen(function* () {
     const desktop = yield* Desktop;
-    yield* Effect.try({ try: () => desktop.launch(cmd, args, shell), catch: (cause) => new LaunchFailed({ cmd, cause }) });
+    yield* Effect.tryPromise({ try: () => desktop.launch(cmd, args, shell), catch: (cause) => new LaunchFailed({ cmd, cause }) });
   });
 
 /* Open `url` and say how it was opened, so the caller can say so.

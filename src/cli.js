@@ -418,29 +418,12 @@ const main = async () => {
     return;
   }
   switch (cmd) {
+    /* The flags are read by @spiega/cli, on effect/cli (#158). The table
+       above has already refused anything it does not know, so what reaches
+       there is only ever `serve`'s own flags, exactly as before. */
     case 'serve': {
-      const { startBoard, boardName, findBoard, alive: up, PORT } = await import('./board/server.js');
-      const name = boardName();
-      // Refuse to start a second board under one name: the first would keep
-      // running, unreachable, and the ops would go to whichever won the race.
-      const existing = findBoard(name);
-      if (existing && await up(existing)) {
-        if (!flag('quiet')) console.log(`spiega: "${name}" is already running on ${existing}`);
-        return;
-      }
-      const solo = !!flag('solo');
-      const { url, serving } = await startBoard({ name, port: Number(flag('port', PORT)), solo });
-      if (!flag('quiet')) {
-        console.log(serving
-          ? `spiega serving ${url}${solo ? '  (its own process)' : ''}`
-          : `spiega: board "${name}" is on the server already running \u2014 ${url}`);
-      }
-      if (flag('open')) {
-        const { openBoard } = await import('./board/open.js');
-        openBoard(url, { app: !flag('tab'), size: flag('size'), browser: flag('browser') });
-      }
-      // On `serving` the http server holds the loop open; otherwise there is
-      // nothing left to do and this process is done.
+      const { runServe } = await import('../packages/cli/src/index.js');
+      await runServe(argv.slice(1));
       return;
     }
 
@@ -576,19 +559,12 @@ const main = async () => {
       return;
     }
 
+    /* The flags are read by @spiega/cli, on effect/cli (#158); the board-name
+       refusal stays here because it is about positional(), not a flag. */
     case 'open': {
       if (positional().length) die('spiega open: board names require --board NAME (try spiega open --help); nothing was opened.');
-      const u = await boardURL({ autostart: true });
-      const { showBoard, openBoard } = await import('./board/open.js');
-      /* Raise the window this board is already in, rather than adding another.
-         "Open the board" from anyone — a person at a prompt, an agent shelling
-         out — means put it where I can see it, and three windows of one board
-         all draw in lockstep, which reads as three boards. Reported that way
-         twice. `--new` is there for the rare second view, side by side. */
-      const name = u.split('/b/')[1]?.replace(/\/$/, '') || '';
-      const opts = { app: !flag('tab'), size: flag('size'), pos: flag('pos'), browser: flag('browser') };
-      const r = flag('new') ? { ...openBoard(u, opts), raised: false } : showBoard(u, name, opts);
-      console.log(`${u}  (${r.raised ? `already open, ${r.how}` : r.how})`);
+      const { runOpen } = await import('../packages/cli/src/index.js');
+      await runOpen(argv.slice(1));
       return;
     }
 
@@ -900,11 +876,15 @@ const main = async () => {
       if (!url) url = await boardURL({ autostart: true });
 
       if (!started) {
-        const r = focusBoard(name, url);
+        const r = await focusBoard(name, url);
         if (r.ok) return void console.log(`${name}  ${url}  (${r.how})`);
       }
       // no window to raise: give it one
-      const o = openBoard(url, { app: !flag('tab'), size: flag('size'), browser: flag('browser') });
+      const o = await openBoard(url, { app: !flag('tab'), size: flag('size'), browser: flag('browser') });
+      // The launcher focus and open share (window.ts) is the same one serve
+      // and open go through, so a browser gone between the check and the
+      // launch (#186) is reported here too, rather than left to crash this.
+      if (!o.ok) die(`spiega focus: ${o.how}`);
       return void console.log(`${name}  ${url}  (new ${o.how})`);
     }
 

@@ -367,7 +367,12 @@ async function call(name, args = {}) {
       const { showBoard } = await import('../board/open.js');
       // the board's own name, which is the tag in its window title
       const name = u.split('/b/')[1]?.replace(/\/$/, '') || '';
-      const r = showBoard(u, name, { app: !args.tab, size: args.size });
+      const r = await showBoard(u, name, { app: !args.tab, size: args.size });
+      // A browser that vanished between the check and the launch (#186) is
+      // reported like any other tool failure — the catch in handle() below
+      // turns this into an isError result — not thrown through an open
+      // JSON-RPC connection, which took the whole server down with it.
+      if (!r.ok) throw new Error(r.how);
       return `${u} — ${r.raised ? `already open, ${r.how}` : `opened in ${r.how}`}`;
     }
 
