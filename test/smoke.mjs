@@ -1699,10 +1699,13 @@ test('doctor does not mistake an enclosing repo for its own checkout', async () 
     // the package, copied in with no .git of its own — an npm install
     const pkg = path.join(tmp, 'lib', 'node_modules', 'spiega');
     fs.mkdirSync(pkg, { recursive: true });
-    for (const d of ['src', 'bin', 'skills', 'integrations']) {
+    for (const d of ['src', 'bin', 'skills', 'integrations', 'packages/cli']) {
       if (fs.existsSync(path.join(ROOT, d))) fs.cpSync(path.join(ROOT, d), path.join(pkg, d), { recursive: true });
     }
     fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(pkg, 'package.json'));
+    // The CLI now imports effect/cli and its compiled command module. Keep
+    // the fake install inside the enclosing repo, but supply its dependencies.
+    fs.symlinkSync(path.join(ROOT, '..', 'node_modules'), path.join(pkg, 'node_modules'));
 
     const home = path.join(tmp, 'home');
     fs.mkdirSync(home, { recursive: true });
@@ -1728,6 +1731,100 @@ test('doctor does not mistake an enclosing repo for its own checkout', async () 
       'nor its dirty working tree');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('doctor names a missing checkout build rather than failing to import its CLI', async () => {
+  const cp = await import('node:child_process');
+  const sourceCli = path.join(ROOT, '..', 'src', 'cli.js');
+  let out;
+  try {
+    out = cp.execFileSync(process.execPath, [sourceCli, 'doctor'], { encoding: 'utf8' });
+  } catch (error) {
+    out = String(error.stdout || '');
+  }
+  assert.match(out, /compiled CLI is missing/);
+  assert.match(out, /pnpm install && pnpm run build/);
+});
+
+test('doctor diagnoses a built CLI whose dependencies are missing', async () => {
+  const cp = await import('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-doctor-deps-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'packages/cli/src'), { recursive: true });
+    for (const name of ['cli.js', 'doctor.js', 'agents-block.js', 'term.js', 'pi.js', 'home.js']) {
+      fs.copyFileSync(path.join(ROOT, 'src', name), path.join(dir, 'src', name));
+    }
+    fs.writeFileSync(path.join(dir, 'packages/cli/src/index.js'), 'throw new Error("should not import")');
+    fs.writeFileSync(path.join(dir, 'package.json'), '{"name":"spiega","type":"module","engines":{"node":">=24"}}');
+    let out;
+    try {
+      out = cp.execFileSync(process.execPath, [path.join(dir, 'src/cli.js'), 'doctor'], {
+        env: isolatedEnv(dir), encoding: 'utf8',
+      });
+    } catch (error) {
+      out = String(error.stdout || '');
+    }
+    assert.match(out, /effect\/cli is not installed/);
+    assert.match(out, /pnpm install/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('effect/cli install keeps project hand edits across repeated runs', async () => {
+  const cp = await import('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-cli-install-'));
+  const file = path.join(dir, 'AGENTS.md');
+  const cli = path.join(ROOT, 'src', 'cli.js');
+  const run = (args) => cp.execFileSync(process.execPath, [cli, 'install', ...args], {
+    cwd: dir, env: { ...isolatedEnv(dir), HOME: dir }, encoding: 'utf8',
+  });
+  try {
+    fs.writeFileSync(file, 'Hand-written instructions.\n');
+    assert.match(run(['project', '--no-path']), /1 installed/);
+    const first = fs.readFileSync(file, 'utf8');
+    assert.match(first, /^Hand-written instructions\./);
+    assert.match(first, /<!-- SPIEGA_START -->/);
+    assert.match(run(['project', '--no-path']), /1 already current/);
+    assert.equal(fs.readFileSync(file, 'utf8'), first);
+    assert.match(run(['--list']), /project/);
+    assert.match(run(['--detect']), /spiega install — what would happen/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('effect/cli install preserves agent configs and accepts both bin-dir spellings', async () => {
+  const cp = await import('node:child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-cli-targets-'));
+  const config = path.join(home, 'profile');
+  const bin = path.join(home, 'bin');
+  const cli = path.join(ROOT, 'src/cli.js');
+  const env = { ...isolatedEnv(home), XDG_CONFIG_HOME: config };
+  const run = args => cp.execFileSync(process.execPath, [cli, 'install', ...args], {
+    env, cwd: home, encoding: 'utf8',
+  });
+  try {
+    const instructions = path.join(config, 'opencode', 'AGENTS.md');
+    const settings = path.join(config, 'opencode', 'opencode.json');
+    fs.mkdirSync(path.dirname(instructions), { recursive: true });
+    fs.writeFileSync(instructions, 'Before\n\nAfter\n');
+    fs.writeFileSync(settings, JSON.stringify({ theme: 'hand edit', mcp: { other: { enabled: true } } }));
+    assert.match(run(['opencode', `--bin-dir=${bin}`, '--no-path']), /1 installed/);
+    const first = fs.readFileSync(instructions, 'utf8');
+    assert.match(first, /^Before\n\nAfter\n/);
+    assert.equal(first.split(START).length, 2);
+    assert.equal(first.split(END).length, 2);
+    assert.equal(JSON.parse(fs.readFileSync(settings, 'utf8')).theme, 'hand edit');
+    assert.deepEqual(JSON.parse(fs.readFileSync(settings, 'utf8')).mcp.other, { enabled: true });
+    assert.match(run(['opencode', '--bin-dir', bin, '--no-path']), /1 already current/);
+    assert.equal(fs.readFileSync(instructions, 'utf8'), first);
+    assert.ok(fs.lstatSync(path.join(bin, 'spiega')).isSymbolicLink());
+    assert.ok(!fs.existsSync(path.join(home, '.config', 'opencode', 'AGENTS.md')));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
   }
 });
 

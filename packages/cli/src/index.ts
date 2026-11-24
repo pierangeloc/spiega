@@ -1,13 +1,13 @@
 /* ============================================================
-   @spiega/cli — serve and open, on effect/cli.
+   @spiega/cli — serve, open, install and doctor, on effect/cli.
 
    src/cli.js stays the entry point and keeps owning the command table, the
    unknown-flag check and the --help text (see the comment above FLAGS
    there); a line reaches here only once that check has already passed, and
-   `--help`/`-h` on `serve` or `open` never reach here at all, which is why
+   `--help`/`-h` on these commands never reach here at all, which is why
    nothing below renders help of its own and the `version` passed to
    `Command.runWith` is a placeholder — effect/cli's own `--help`/`--version`
-   handling for these two commands is dead code from src/cli.js's point of
+   handling for these commands is dead code from src/cli.js's point of
    view, present only because the type signature asks for a version string.
 
    `serve` and `open` are the two commands #150 already moved onto Effect
@@ -27,7 +27,7 @@
 
 import process from 'node:process';
 import { Effect, Option } from 'effect';
-import { Command, Flag } from 'effect/cli';
+import { Argument, Command, Flag } from 'effect/cli';
 import * as NodeServices from '@effect/platform-node/NodeServices';
 
 /* Never shown: see the header comment. */
@@ -162,3 +162,93 @@ async function openHandler(cfg: OpenConfig): Promise<void> {
 const openCommand = Command.make('open', openConfig, (cfg) => Effect.promise(() => openHandler(cfg)));
 
 export const runOpen = run(openCommand);
+
+/* ---------- install and doctor ---------- */
+
+const doctorCommand = Command.make('doctor', {
+  board: Flag.String('board').pipe(Flag.optional),
+  name: Flag.String('name').pipe(Flag.optional),
+}, () => Effect.promise(async () => {
+  const { doctor, format } = await import('../../../src/doctor.js');
+  const rows = doctor();
+  console.log(format(rows));
+  if (rows.some((row) => row.level === 'bad')) process.exitCode = 1;
+}));
+
+export const runDoctor = run(doctorCommand);
+
+const installConfig = {
+  targets: Argument.String('targets').pipe(Argument.variadic),
+  detect: Switch('detect'),
+  list: Switch('list'),
+  path: Switch('path'),
+  noPath: Switch('no-path'),
+  binDir: Flag.String('bin-dir').pipe(Flag.optional),
+  board: Flag.String('board').pipe(Flag.optional),
+  name: Flag.String('name').pipe(Flag.optional),
+} satisfies Command.Command.Config;
+
+type InstallConfig = Command.Command.Config.Infer<typeof installConfig>;
+
+async function installHandler(cfg: InstallConfig): Promise<void> {
+  const { install, TARGET_NAMES, TARGETS, detect } = await import('../../../src/install.js');
+  const { c, sym, pad, shortPath, heading } = await import('../../../src/term.js');
+  const g = sym();
+  const want = [...cfg.targets];
+  const nameW = Math.max(...TARGET_NAMES.map((n) => n.length)) + 2;
+  const getsW = Math.max(...Object.values(TARGETS).map((t) => t.gets.length)) + 2;
+
+  if (want[0] === 'list' || cfg.list) {
+    console.log(heading('spiega install — targets'));
+    for (const n of Object.keys(TARGETS) as Array<keyof typeof TARGETS>) {
+      const t = TARGETS[n];
+      console.log(`  ${c.bold(pad(n, nameW))}${pad(c.muted(t.gets), getsW + 10)}${c.dim(t.app)}`);
+    }
+    console.log(`\n  ${c.dim('spiega install')} with no arguments does whatever is on this machine.\n`);
+    return;
+  }
+
+  if (cfg.detect) {
+    const here = detect();
+    console.log(heading('spiega install — what would happen'));
+    for (const n of Object.keys(TARGETS) as Array<keyof typeof TARGETS>) {
+      const t = TARGETS[n], found = here.includes(n);
+      const mark = found ? c.good(g.ok) : c.dim(g.idle);
+      const row = `  ${mark} ${c.bold(pad(n, nameW))}${pad(c.muted(t.gets), getsW + 10)}`;
+      // `project` is opt-in: it writes into the current directory.
+      const why = n === 'project' ? 'ask for it by name' : 'not on this machine';
+      console.log(row + c.dim(found ? t.app : `${t.app} — ${why}`));
+    }
+    console.log(`\n  ${c.good(g.ok)} ${c.dim('would be installed')}   ${c.dim(g.idle)} ${c.dim('skipped — name it to install anyway')}\n`);
+    return;
+  }
+
+  console.log(heading('spiega install'));
+  // Without either PATH flag, let the existing interactive prompt decide.
+  const touchShell = cfg.noPath ? false : cfg.path ? true : 'ask';
+  const results = install(want, { touchShell, binDir: Option.getOrElse(cfg.binDir, () => false) });
+  for (const r of results) {
+    const mark = !r.ok ? c.accent(g.bad) : r.state === 'unchanged' ? c.dim(g.idle) : c.good(g.ok);
+    const gets = r.gets ? pad(c.muted(r.gets), getsW + 10) : pad('', getsW + 10);
+    const tail = r.ok
+      ? c.dim(r.state === 'unchanged' ? 'already there' : shortPath(r.where, 46))
+      : c.accent(r.note);
+    console.log(`  ${mark} ${c.bold(pad(r.name, nameW))}${gets}${tail}`);
+  }
+
+  const wrote = results.filter((r) => r.ok && r.state === 'written').length;
+  const same = results.filter((r) => r.ok && r.state === 'unchanged').length;
+  const failed = results.filter((r) => !r.ok);
+  const parts = [];
+  if (wrote) parts.push(`${wrote} installed`);
+  if (same) parts.push(`${same} already current`);
+  if (failed.length) parts.push(c.accent(`${failed.length} failed`));
+  console.log(`\n  ${parts.join(c.dim(` ${g.dot} `)) || 'nothing to do'}`);
+  if (wrote) console.log(`  ${c.dim('Start a fresh agent session — a running one keeps the server it launched.')}`);
+  console.log(`  ${c.dim(`Check it any time with ${c.plain('spiega doctor')}.`)}\n`);
+  if (failed.length) process.exitCode = 1;
+}
+
+const installCommand = Command.make('install', installConfig, (cfg) => Effect.promise(() => installHandler(cfg)));
+
+export const runInstall = run(installCommand);
