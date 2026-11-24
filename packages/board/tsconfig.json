@@ -1,9 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    // The view is React (#153). `react-jsx` so a component file needs no
+    // import of React itself, and the runtime it names is resolved by the
+    // bundler — see vite.config.ts for why React is a devDependency.
+    "jsx": "react-jsx"
   },
   "include": [
-    "src"
+    "src",
+    "vite.config.ts"
   ]
 }

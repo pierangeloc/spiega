@@ -129,6 +129,17 @@ export const ReadRoutes = HttpRouter.use((router) =>
       }),
     );
 
+    /* The React board (#153), beside the old one rather than instead of it.
+       One file, assembled by tools/next.js, carrying its own stylesheet, its
+       own bundle and a fixture board — so it needs no assets route of its own
+       and nothing here has to know which bundle the build named. It draws a
+       fixture, not a board held by this server; #156 is the cutover. */
+    yield* router.add(
+      'GET',
+      '/next',
+      serveStaticFile(path.join(config.rootDir, 'src', 'next', 'index.html')),
+    );
+
     // Index page (or redirect when there is a single live board and no saved logs).
     const indexHandler = Effect.sync(() => renderIndex(store));
     yield* router.add('GET', '/', indexHandler);

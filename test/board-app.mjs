@@ -3,7 +3,10 @@
    Run with `node dist/test/board-app.mjs`, or `pnpm test`.
 
    What is being protected:
-   - packages/board/src/ carries no React, DOM, or node: runtime imports.
+   - The compiled board app carries no React, DOM, or node: runtime imports.
+     Its view does, and is meant to: packages/board/src/view is React, bundled
+     by Vite rather than compiled into the artefact (#153), and what it draws
+     is checked in react-board.mjs.
    - Stepping, chapter switching, map navigation, follow/fit camera framing,
      narrator tape playback, voice/rate controls, silent flow playback, and
      replay all run as pure (Model, Msg) -> [Model, Cmd[]] transitions.
@@ -78,7 +81,7 @@ const multiChapterOps = () => [
   { op: 'say', text: 'After three tries it lands in the DLQ.', step: 1 },
 ];
 
-await test('packages/board/src has zero React, DOM, or node: imports', () => {
+await test('the compiled board app has zero React, DOM, or node: imports', () => {
   const dir = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../packages/board/src');
   const files = fs.globSync('**/*.js', { cwd: dir });
   assert.ok(files.length >= 5, 'compiled board app modules exist');
