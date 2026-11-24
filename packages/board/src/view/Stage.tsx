@@ -2,12 +2,12 @@
    The stage: the drawing, and the things laid over it.
 
    The SVG arrives from `renderSVG` as a string and goes in as-is — the same
-   string board.html mounts, which the suite checks byte for byte. The pan
-   wrapper carries the camera's transform, exactly as `applyView()` does.
+   string `stageRender` returns, which the suite checks byte for byte. The pan
+   wrapper carries the camera's transform.
 
    The camera itself belongs to the model. This measures two things the model
    cannot know — how big the stage is, and how big the drawing came out — and
-   reports them; `update` does the fit arithmetic board.html's `fit()` does.
+   reports them; `update` does the fit arithmetic.
 
    Export belongs to the remaining board work.
    ============================================================ */
@@ -168,6 +168,18 @@ export function Stage({ model, dispatch }: {
       <div className="tools" id="tools">
         <button className="btn tool" id="fit" title="fit the whole board in view (f)" aria-label="fit the whole board in view" onClick={() => dispatch({ type: 'fit', smooth: true })}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 6V2h4M10 2h4v4M14 10v4h-4M6 14H2v-4" /></svg></button>
         <button className={`btn tool${model.camera.following ? ' on' : ''}`} id="follow" title="keep the lit boxes in view while walking the flow" aria-label="follow the flow" aria-pressed={model.camera.following} onClick={() => dispatch({ type: 'toggleFollow' })}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2"/><path d="M8 1v2.4M8 12.6V15M1 8h2.4M12.6 8H15"/></svg></button>
+        {/* One icon, two scopes. An icon can say "export" and cannot say
+            "export which", so the choice is a sheet rather than a second glyph
+            nobody can tell apart from the first. A file is already an export. */}
+        {model.exported ? null : (
+          <div className={`menu${model.exportMenuOpen ? ' open' : ''}`} id="exports">
+            <button className="btn tool" id="snap" title="download this board as one interactive file" aria-label="export this board" aria-haspopup="true" aria-expanded={model.exportMenuOpen} onClick={() => dispatch({ type: 'toggleExportMenu' })}><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v7.2M5 6.4 8 9.6l3-3.2M3 11v2.2h10V11"/></svg></button>
+            <div className="sheet">
+              <button className="btn" id="snap-all" onClick={() => dispatch({ type: 'requestExport', scope: 'all' })}>whole board</button>
+              <button className="btn" id="snap-chapter" onClick={() => dispatch({ type: 'requestExport', scope: 'chapter' })}>this chapter</button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

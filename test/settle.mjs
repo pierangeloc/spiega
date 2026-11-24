@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import vm from 'node:vm';
 import { emptyBoard, applyOps as applyStateOps, boardOps } from '../src/board/state.js';
 import { applySettlingOps as applyOps } from '../src/board/settle.js';
 import { assign, layout } from '../src/render/layout.js';
@@ -191,35 +190,27 @@ applyOps(removed, [{ op: 'node', id: 'a' }, { op: 'remove', id: 'a' }, { op: 'se
 assert.deepEqual(removed.log.at(-1).positions, {}, 'settle sees pending removes');
 console.log('  ok  cycles, disconnected nodes, dangling edges and pending removes settle safely');
 
-const page = fs.readFileSync(new URL('../src/board/board.html', import.meta.url), 'utf8');
+const { init, update } = await import('../packages/board/src/index.js');
+const { settleBoard } = await import('../support/board-view.js');
 for (const failure of [async () => ({ ok: false }), async () => { throw new Error('offline'); },
   async () => ({ ok: true, json: async () => { throw new Error('bad JSON'); } })]) {
-  let actions = 0, requests = 0;
-  const captions = [], button = {};
-  const b = { nodes: [{}], settled: false };
-  const handlers = new vm.Script([
-    page.match(/async function finish\(\) \{[\s\S]*?\n}/)[0],
-    page.match(/async function narrate\([\s\S]*?\n\$\('narrate'\)\.onclick = [^\n]*/)[0],
-    page.match(/async function replay\(\) \{[\s\S]*?\n}/)[0],
-    '({ click: () => $("narrate").onclick(), next: () => narrate(() => narrator.next()),',
-    'prev: () => narrate(() => narrator.prev()), replay })',
-  ].join('\n')).runInNewContext({
-    board: b, replaying: false, API: '/', Error,
-    fetch: async () => { requests++; return failure(); },
-    $: () => button, say: text => captions.push(text),
-    narrator: { available: true, toggle: () => actions++, next: () => actions++, prev: () => actions++ },
-  });
-  await handlers.click();
-  await handlers.next();
-  await handlers.prev();
-  await handlers.replay();
-  assert.equal(actions, 0, 'failed settle does not start a transport action');
-  assert.equal(captions.length, 4);
-  assert.match(captions[0], /could not tidy this board/);
-  b.settled = true;
-  await handlers.next();
-  assert.equal(requests, 4, 'settled transport keys make no network request');
-  assert.equal(actions, 1);
+  let requests = 0;
+  const live = structuredClone(board);
+  live.settled = false;
+  const [ready] = update(init(), { type: 'stateReceived', board: live, full: true });
+  for (const gesture of ['narrateToggle', 'narrateNext', 'narratePrev', 'replayStart']) {
+    const [waiting, cmds] = update(ready, { type: gesture });
+    assert.equal(cmds[0]?.type, 'settleBoard');
+    let result = waiting;
+    await settleBoard(async () => { requests++; return failure(); }, '/b/example/', cmds[0].then,
+      msg => { [result] = update(result, msg); });
+    assert.match(result.caption?.text ?? '', /could not tidy this board/);
+    assert.equal(result.replay.active, false);
+    assert.equal(result.playback.tapePlaying, false);
+  }
+  assert.equal(requests, 4);
+  const [settled] = update(ready, { type: 'settled', board: { ...live, settled: true }, then: { type: 'narrateNext' } });
+  assert.notEqual(settled.caption?.problem, true);
 }
 console.log('  ok  narration and replay handle HTTP, network and JSON settle failures without rejection');
 

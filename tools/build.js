@@ -30,7 +30,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { buildNextBoard } from './next.js';
+import { buildBoardPage } from './board.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
@@ -84,7 +84,7 @@ function manifest() {
  * from its own file, exactly as every other module in this artefact does.
  */
 /* The one source root tsdown does not compile: the React view is bundled by
- * Vite instead (tools/next.js), and a second copy compiled module by module
+ * Vite instead (tools/board.js), and a second copy compiled module by module
  * would ship dead code — one module of it reading a constant that exists only
  * inside the bundle. Named here as well as in tsdown.config.ts because this is
  * the check that every .ts landed where it is imported from, and a file nobody
@@ -135,10 +135,9 @@ const REQUIRED = [
   'src/index.js',
   'src/mcp/server.js',
   'src/board/server.js',
-  'src/board/board.html',
+  // the board page, one file — tools/board.js assembles it
+  'src/board/index.html',
   'src/render/render.js',
-  // the React board served beside it at /next — tools/next.js assembles this
-  'src/next/index.html',
   'docs/logo/spiega-mark.svg',
 ];
 
@@ -157,12 +156,12 @@ for (const name of ASSETS) {
 
 compile();
 
-/* The React board (#153), bundled rather than copied: it is the one part of
- * the artefact that is not read off disk by a browser one module at a time.
- * Its own step, in tools/next.js, because it is two Vite builds and then one
- * file — and because React stays a devDependency by being bundled here.
+/* The board page, bundled rather than copied: nothing in it is read off disk
+ * by a browser one module at a time. Its own step, in tools/board.js, because
+ * it is two Vite builds and then one file — and because React stays a
+ * devDependency by being bundled here.
  */
-const next = buildNextBoard();
+const page = buildBoardPage();
 
 fs.writeFileSync(path.join(DIST, 'package.json'), manifest());
 
@@ -173,4 +172,4 @@ if (missing.length) {
   process.exit(1);
 }
 
-say(`spiega build: dist/ assembled (the React board is ${Math.round(next.bytes / 1024)} KB, one file)`);
+say(`spiega build: dist/ assembled (the board page is ${Math.round(page.bytes / 1024)} KB, one file)`);

@@ -6,12 +6,11 @@
 <title>spiega</title>
 <!--spiega:stylesheet-->
 <style>
-  /* The inherited stylesheet puts the bar, the chapter strip and the board in
-     named rows of a grid on `body`. React mounts into a div, and a div in the
-     middle would be one grid item holding all three — the board would collapse
-     to the height of its own content, which is the failure the comment on that
-     grid describes. `display:contents` hands the panes straight to body's grid,
-     so the layout is the old page's layout and not a copy of it. */
+  /* board.css puts the bar, the chapter strip and the board in named rows of
+     a grid on `body`. React mounts into a div, and a div in the middle would be
+     one grid item holding all three — the board would collapse to the height
+     of its own content, which is the failure the comment on that grid
+     describes. `display:contents` hands the panes straight to body's grid. */
   #root{display:contents}
 </style>
 </head>

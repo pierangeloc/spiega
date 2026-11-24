@@ -13,7 +13,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -204,90 +203,29 @@ await test('an amendment can name a phase in a chapter already taught', async ()
   assert.deepEqual(b.groups, {}, 'and nothing happened to the chapter being drawn on');
 });
 
-/* ---------- the rail, run out of the page ---------- */
+/* The React rail places group headings before their runs, including repeated
+   runs after an interruption. Render the actual component, not an extracted
+   function from the deleted page. */
+const { renderBoard } = await import('../support/board-view.js');
+const { createFixtureStore } = await import('../packages/board/src/index.js');
+const rendered = board => renderBoard(createFixtureStore({ board }));
 
-/* The real renderRail against stubs, the way smoke.mjs runs the play button
-   and the chapter strip. The header is the whole visible half of this change,
-   and the page is the one consumer the suite otherwise never sees. */
-function rendered(board) {
-  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
-  const src = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
-  const m = src.match(/function renderRail\(\)[\s\S]*?\n}\n/);
-  assert.ok(m, 'board.html should define renderRail()');
-
-  const kids = [];
-  const matches = (el, sel) => sel.split('.').filter(Boolean)
-    .every(c => String(el.className).split(/\s+/).includes(c));
-  const rail = {
-    kids,
-    get innerHTML() { return this._raw + kids.map(k => k.innerHTML).join(''); },
-    set innerHTML(v) { kids.length = 0; this._raw = v; },
-    _raw: '',
-    appendChild(el) { kids.push(el); },
-    insertBefore(el, ref) {
-      const i = kids.indexOf(ref);
-      kids.splice(i < 0 ? kids.length : i, 0, el);
-    },
-    querySelector(sel) { return kids.find(k => matches(k, sel)) || null; },
-    querySelectorAll(sel) { return kids.filter(k => matches(k, sel)); },
-    scrollTo() {}, scrollTop: 0, scrollHeight: 0, clientHeight: 300,
-  };
-  const context = {
-    $: () => rail,
-    document: { createElement: () => {
-      const el = { className: '', title: '', dataset: {}, innerHTML: '',
-        querySelector: () => null, remove() { kids.splice(kids.indexOf(el), 1); } };
-      return el;
-    } },
-    view_of: () => board,
-    lineStates,
-    groupRuns,
-    mdish: s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'),
-    wrapWords: () => {},
-    loadTape: () => {},
-  };
-  vm.createContext(context);
-  new vm.Script(`${m[0]}\nrenderRail();`).runInContext(context, { displayErrors: true });
-  return kids;
-}
-
-await test('the rail puts the header over the run of lines it is about', async () => {
-  const kids = rendered(drawn(taught));
-  assert.deepEqual(kids.map(k => k.className.split(' ')[0]),
-    ['said', 'phase', 'said', 'said'],
-    'the opening remark first, then the header, then the two lines of the phase');
-  assert.match(kids[1].innerHTML, /Verbranding/);
-  assert.equal(kids[1].dataset.group, 'combustion');
-  assert.deepEqual(kids.filter(k => k.className === 'phase').length, 1);
-});
-
-await test('the rail repeats the header on a phase that is interrupted', async () => {
-  const kids = rendered(drawn([
+await test('the React rail heads each contiguous group run', async () => {
+  const html = rendered(drawn(taught));
+  assert.equal((html.match(/class="phase"/g) ?? []).length, 1);
+  assert.ok(html.indexOf('Two things happen') < html.indexOf('class="phase"'));
+  assert.ok(html.indexOf('class="phase"') < html.indexOf('crosses the membrane'));
+  const interrupted = rendered(drawn([
     { op: 'group', id: 'burn', label: 'Verbranding' },
     { op: 'step', edge: 'a>b', step: 'one', group: 'burn' },
     { op: 'step', edge: 'b>c', step: 'two' },
     { op: 'step', edge: 'c>d', step: 'three', group: 'burn' },
-    { op: 'say', text: 'the first hop', step: 1 },
-    { op: 'say', text: 'an aside about the pipe', step: 2 },
-    { op: 'say', text: 'and the burn again', step: 3 },
+    { op: 'say', text: 'first', step: 1 },
+    { op: 'say', text: 'aside', step: 2 },
+    { op: 'say', text: 'again', step: 3 },
   ]));
-  assert.deepEqual(kids.map(k => k.className.split(' ')[0]),
-    ['phase', 'said', 'said', 'phase', 'said']);
-  assert.match(kids[0].innerHTML, /Verbranding/);
-  assert.match(kids[3].innerHTML, /Verbranding/);
-});
-
-/* Headers are rebuilt where the lines are not. A rail rendered twice must not
-   grow a second set of them — and the lines themselves must be the same
-   elements, or every one of them restarts its fade-in on each step change. */
-await test('rendering the rail again does not stack up headers', async () => {
-  const board = drawn(taught);
-  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
-  const src = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
-  assert.ok(/\.phase'\)\.forEach\(h => h\.remove\(\)\)/.test(src),
-    'renderRail should take the headers out before putting them back');
-  const once = rendered(board);
-  assert.equal(once.filter(k => k.className === 'phase').length, 1);
+  assert.equal((interrupted.match(/data-group="burn"/g) ?? []).length, 2);
+  assert.equal(rendered(drawn(taught)), html, 'rendering again does not stack headings');
 });
 
 /* A snapshot is the still you paste into the PR. If it lost the phases, the

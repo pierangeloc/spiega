@@ -61,13 +61,8 @@ export const isReadRoute = (method: string, pathname: string): boolean => {
     pathname === '/' ||
     pathname === '/index.html' ||
     pathname === '/icon.svg' ||
-    pathname === '/boards' ||
-    // the React board, served beside the old one (#153)
-    pathname === '/next'
+    pathname === '/boards'
   ) {
-    return true;
-  }
-  if (pathname.startsWith('/src/')) {
     return true;
   }
   const m = /^\/b\/([^/]+)(\/.*)?$/.exec(pathname);

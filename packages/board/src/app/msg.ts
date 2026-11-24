@@ -28,6 +28,10 @@ export type Msg =
     }
   | { readonly type: 'linkChanged', readonly status: LinkStatus }
   | { readonly type: 'savingChanged', readonly status: SavingStatus }
+  | { readonly type: 'boardTagged', readonly tag: string }
+  // The server finished tidying the board; `then` is the gesture that waited on it.
+  | { readonly type: 'settled', readonly board: Board | null, readonly then: SettleGated }
+  | { readonly type: 'settleFailed' }
 
   // Stepping & clicks
   | { readonly type: 'focusStep', readonly step: number | null }
@@ -86,3 +90,10 @@ export type Msg =
   | { readonly type: 'closeExportMenu' }
   | { readonly type: 'requestExport', readonly scope: 'all' | 'chapter' }
   | { readonly type: 'setCaption', readonly caption: Caption | null };
+
+/* The gestures that start reading or replaying the board. A live board is
+   settled before any of them runs, so the tape is not spoken over a layout
+   that is about to move. */
+export type SettleGated = Extract<Msg, {
+  readonly type: 'narrateToggle' | 'narrateNext' | 'narratePrev' | 'replayToggle' | 'replayStart',
+}>;

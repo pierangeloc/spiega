@@ -25,6 +25,7 @@ import {
   createBoardEvents,
   createReadNodeServer,
   createReadWebHandler,
+  isReadRoute,
 } from '../packages/server/src/index.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -147,7 +148,7 @@ try {
     assert.deepEqual(await missing.json(), { ok: false, error: 'no board named "nope"' });
   });
 
-  await test('GET /b/:name redirects to /b/:name/ and serves board.html or 404 HTML', async () => {
+  await test('GET /b/:name redirects to /b/:name/ and serves the built board page or 404 HTML', async () => {
     const redir = await req('/b/my%20board');
     assert.equal(redir.status, 302);
     assert.equal(redir.headers.get('location'), '/b/my%20board/');
@@ -155,7 +156,10 @@ try {
     const page = await req('/b/alpha/');
     assert.equal(page.status, 200);
     assert.match(page.headers.get('content-type') || '', /^text\/html/);
-    assert.match(await page.text(), /renderSVG/);
+    const html = await page.text();
+    assert.match(html, /<div id="root"><\/div>/, 'the React board mounts here');
+    assert.match(html, /<script type="module">/, 'with its bundle inline');
+    assert.doesNotMatch(html.slice(0, html.indexOf('<script type="module">')), /\bsrc="|from ['"]\/src\//, 'and nothing to fetch off the server');
 
     const missing = await req('/b/nope/');
     assert.equal(missing.status, 404);
@@ -187,22 +191,19 @@ try {
     }
   });
 
-  await test('static assets serve /icon.svg and /src/* and refuse traversal', async () => {
+  await test('the icon is served, and the source tree is not', async () => {
     const icon = await req('/icon.svg');
     assert.equal(icon.status, 200);
     assert.equal(icon.headers.get('content-type'), 'image/svg+xml');
     assert.match(await icon.text(), /<svg/);
 
-    const js = await req('/src/render/render.js');
-    assert.equal(js.status, 200);
-    assert.equal(js.headers.get('content-type'), 'text/javascript');
-    assert.match(await js.text(), /renderSVG/);
-
-    const traversal = await req('/src/..%2fpackage.json');
-    assert.equal(traversal.status, 404);
-
-    const missing = await req('/src/does-not-exist.js');
-    assert.equal(missing.status, 404);
+    /* The board page used to import the renderer off disk through /src/*. It
+       is one built file now, so nothing needs that route, and a route nobody
+       needs that reads files off disk is only a way in. */
+    for (const p of ['/src/render/render.js', '/src/board/index.html', '/src/..%2fpackage.json']) {
+      assert.equal((await req(p)).status, 404, p);
+    }
+    assert.equal(isReadRoute('GET', '/src/render/render.js'), false);
   });
 
   /* ---------- security middleware over real Node HTTP ---------- */

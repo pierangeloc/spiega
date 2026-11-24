@@ -309,26 +309,13 @@ await test('the export, off disk with no server running, resolves every module i
   assert.equal(state.board.transcript.length, 3);
   assert.equal(state.board.flow.length, 2);
 
-  const map = html.match(/<script type="importmap">(.*?)<\/script>/)?.[1];
-  assert.ok(map, 'an export carries its import map');
-  const { imports } = JSON.parse(map);
-  const page = html.match(/<script type="module">([\s\S]*?)<\/script>/)?.[1] ?? '';
-  const roots = specifiers(page);
-  assert.ok(roots.length > 0 && roots.every(s => s.startsWith('spiega:/src/')), 'the page imports through the map');
-  const seen = new Set();
-  const visit = spec => {
-    if (seen.has(spec)) return;
-    seen.add(spec);
-    const url = imports[spec];
-    assert.ok(url, `nothing in the map for ${spec}`);
-    assert.ok(url.startsWith('data:text/javascript;base64,'), `${spec} is not inlined`);
-    for (const child of specifiers(Buffer.from(url.slice(url.indexOf(',') + 1), 'base64').toString('utf8'))) {
-      assert.ok(child.startsWith('spiega:'), `${spec} imports ${child}, which only the server has`);
-      visit(child);
-    }
-  };
-  for (const s of roots) visit(s);
-  assert.ok(seen.has('spiega:/src/render/render.js') && seen.has('spiega:/src/board/state.js'));
+  /* The bundle is the whole page: one inline module that imports nothing, so
+     there is no specifier left for a file:// URL to fail to resolve. */
+  const modules = [...html.matchAll(/<script type="module">([\s\S]*?)<\/script>/g)].map(m => m[1]);
+  assert.equal(modules.length, 1, 'one inline bundle');
+  assert.deepEqual(specifiers(modules[0]), [], 'the bundle imports nothing');
+  assert.ok(html.indexOf('__SPIEGA_EXPORT__') < html.indexOf('<script type="module">'),
+    'the state is there before the bundle that reads it');
 });
 
 fs.rmSync(dir, { recursive: true, force: true });

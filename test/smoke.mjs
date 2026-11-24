@@ -65,8 +65,8 @@ test('interactive exports carry the live page, modules, and only the requested c
   assert.match(one, /"First"/);
   assert.doesNotMatch(one, /"Second"/);
   for (const html of [whole, one]) {
-    assert.match(html, /<script type="importmap">/);
-    assert.match(html, /spiega:\/src\/render\/render.js/);
+    assert.match(html, /<script type="module">/);
+    assert.doesNotMatch(html, /<script type="importmap">/);
     assert.doesNotMatch(html, /href="\/icon.svg"/);
     assert.doesNotMatch(html, /from '\/src\//);
   }
@@ -118,15 +118,6 @@ test('source pulling respects the earliest consumer, manual placement, and row r
   assert.equal(p.beside.col, p.anchor.col + 1);
   const rows = [p.c.row, p.many.row, p.other.row, 1];
   assert.equal(new Set(rows).size, rows.length, 'moved sources claim free rows, including edge lanes');
-});
-
-test('removing the header tally leaves no replay-time reference to it', () => {
-  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
-  assert.ok(!/id="count"|\.count\s*\{|\$\('count'\)/.test(html));
-  assert.ok(html.includes('`${c.nodes} boxes`') && html.includes('`${c.edges} lines`'),
-    'chapter-map counts still distinguish thumbnails');
-  assert.ok(!fs.readFileSync(path.join(ROOT, 'docs/gallery/title.svg'), 'utf8').includes('2 boxes'),
-    'the gallery title bar matches the real header');
 });
 
 test('an op list builds a board, and ids come from labels', () => {
@@ -502,138 +493,6 @@ const parses = (src, what) => {
   catch (e) { throw new Error(`${what} does not parse: ${e.message}`); }
 };
 
-test('the board page module parses', () => {
-  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
-  const m = html.match(/<script type="module">([\s\S]*?)<\/script>/);
-  assert.ok(m, 'board.html should have a module script');
-  parses(m[1], 'board.html <script type=module>');
-});
-
-/* The page is one grid: a row for the bar, a row for the chapter strip, and
-   the rest for the board. Adding a pane to the markup without adding its row
-   is silent and total — the new pane takes the `1fr` and the board collapses
-   to the height of its own content, which is how the chapter strip first
-   shipped into a window with the drawing squeezed into a band at the bottom.
-   Nothing throws, nothing fails, and the page looks destroyed. */
-test('every pane on the board page has a row in the body grid', () => {
-  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
-  const rows = html.match(/grid-template-rows:\s*([^;}]+)/);
-  assert.ok(rows, 'body should lay its panes out in a grid');
-  const tracks = rows[1].trim().split(/\s+/).length;
-
-  // top-level elements between <body> and the page's script, by depth
-  const markup = html.slice(html.indexOf('<body>') + 6, html.indexOf('<script type="module">'));
-  const panes = [];
-  let depth = 0;
-  for (const m of markup.matchAll(/<(\/?)([a-z0-9]+)\b[^>]*?(\/?)>/g)) {
-    const [, close, tag, self] = m;
-    if (self || tag === 'br' || tag === 'img') continue;
-    if (close) { depth--; continue; }
-    if (depth === 0) panes.push(tag);
-    depth++;
-  }
-  assert.equal(tracks, panes.length,
-    `the body grid has ${tracks} rows for ${panes.length} panes (${panes.join(', ')})`);
-
-  /* And each pane says which row it is, rather than being placed by order.
-     A pane that is `hidden` stops being a grid item, so auto-placement moves
-     every pane below it up one row: hiding the chapter strip during a replay
-     handed the board the strip's `auto` row and collapsed the drawing to the
-     height of its own content. Naming the rows is what makes a pane that
-     comes and goes safe. */
-  const placed = [...html.matchAll(/grid-row:\s*\d+/g)].length;
-  assert.equal(placed, panes.length,
-    `${placed} of the ${panes.length} panes name their row; a pane that can be hidden must`);
-});
-
-/* The chapter strip, run out of the page against stubs.
-
-   The marks on it are the only thing that says a chapter changed while the
-   reader was somewhere else — an amendment lands in a chapter nobody is
-   looking at, and a board that changes quietly behind someone is the failure
-   chapters exist to prevent. Nothing throws when the mark is missing; the tab
-   simply looks like every other tab. */
-function strip({ chapters, chapter, viewing = null, changed = [], replaying = false, replayAt = null,
-  shown = null, mapOpen = false }) {
-  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
-  const src = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
-  const m = src.match(/const surfaces = [\s\S]*?\n}\n/);
-  assert.ok(m, 'board.html should define surfaces() and renderChapters()');
-
-  const strip = { hidden: false, innerHTML: '', kids: [],
-    appendChild(el) { this.kids.push(el); this.innerHTML += el.innerHTML; } };
-  const context = {
-    $: () => strip,
-    document: { createElement: () => ({ innerHTML: '', className: '', title: '', onclick: null,
-      scrollIntoView() {} }) },
-    requestAnimationFrame: () => {},
-    board: { chapters, chapter },
-    viewing,
-    changed: new Set(changed),
-    replaying,
-    replayAt,
-    shown,
-    mapOpen,
-    showChapter: () => {},
-    showMap: () => {},
-  };
-  vm.createContext(context);
-  new vm.Script(`${m[0]}\nrenderChapters();`).runInContext(context, { displayErrors: true });
-  /* The map rides at the head of the strip and is not a chapter, so it is
-     handed back separately: everything below counts chapters from the left. */
-  const [map, ...tabs] = strip.kids;
-  return { hidden: strip.hidden, map, tabs, html: strip.innerHTML };
-}
-
-test('the chapter strip marks the chapter that changed while you were elsewhere', () => {
-  const chapters = [{ title: 'Nutrients' }, { title: 'Spoilage' }];
-  const live = { chapters, chapter: 'Enzymes' };
-
-  // reading the live chapter, and chapter 1 was amended behind you
-  const marked = strip({ ...live, viewing: null, changed: [0] });
-  assert.equal(marked.tabs.length, 3, 'two finished chapters and the one being drawn');
-  assert.match(marked.tabs[0].innerHTML, /growing/, 'the amended chapter is marked');
-  assert.doesNotMatch(marked.tabs[1].innerHTML, /growing/);
-  assert.doesNotMatch(marked.tabs[2].innerHTML, /growing/, 'the one you are reading is not');
-  assert.match(marked.tabs[0].title, /something was added to it/);
-  assert.equal(marked.tabs[2].className.includes('here'), true, 'the live tab is the one you are on');
-
-  // reading chapter 1 while the live chapter grows: the mark is on the live tab
-  const away = strip({ ...live, viewing: 0, changed: [null] });
-  assert.match(away.tabs[2].innerHTML, /growing/);
-  assert.doesNotMatch(away.tabs[0].innerHTML, /growing/);
-  assert.equal(away.tabs[0].className.includes('here'), true);
-
-  // nothing changed anywhere: no marks at all
-  assert.doesNotMatch(strip(live).html, /growing/);
-  // and one surface is a board, not a chaptered explanation
-  assert.equal(strip({ chapters: [], chapter: '' }).hidden, true);
-
-  /* A replay walks the chapters itself, so the strip follows it rather than
-     going blank for the length of the movie — which would hide the structure
-     exactly while the movie is explaining it. It also stays *there*: a pane
-     that disappears is not a grid item, and the panes below it slide up a row.
-     See the body-grid test above. */
-  const mid = strip({ ...live, replaying: true, replayAt: null, shown: { chapters: [{ title: 'Nutrients' }] } });
-  assert.equal(mid.hidden, false, 'the strip stays through a replay');
-  assert.equal(mid.tabs[1].className.includes('here'), true, 'marking the chapter the replay has reached');
-  const back = strip({ ...live, replaying: true, replayAt: 0, changed: [0, null],
-    shown: { chapters: [{ title: 'Nutrients' }] } });
-  assert.equal(back.tabs[0].className.includes('here'), true, 'and the one it has stepped back into');
-  assert.doesNotMatch(back.html, /growing/, 'with no change-marks: a replay is not news about the live board');
-
-  /* The map is the first tab and the one tab that is about the whole
-     explanation. A reader standing on it is in no chapter, so no chapter tab
-     may claim to be where they are — two tabs marked `here` is a strip that
-     says the reader is in two places. */
-  assert.match(marked.map.className, /maptab/, 'the map leads the strip');
-  assert.equal(marked.map.className.includes('here'), false);
-  const above = strip({ ...live, mapOpen: true });
-  assert.equal(above.map.className.includes('here'), true, 'the map is where the reader is');
-  assert.equal(above.tabs.some(t => t.className.includes('here')), false,
-    'and no chapter claims them at the same time');
-});
-
 /* The map is the answer to a strip of tabs being a list: it says there are
    four parts and nothing about how they hang together. What makes it worth
    drawing is the links, and those are read off what was drawn rather than
@@ -684,41 +543,6 @@ test('the map links the chapters that are about the same box', () => {
   assert.deepEqual(boardMap(null), { cards: [], links: [] });
 });
 
-/* A run of amendments to one chapter is one visit, not one per op. Played
-   literally, a replay leaves the chapter being drawn and comes back for each
-   — six round trips to say one thing, which reads as the board thrashing. */
-test('a replay visits an amended chapter once per run of amendments', () => {
-  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
-  const src = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
-  const m = src.match(/export function replayEntries\(log\)[\s\S]*?\n}\n/);
-  assert.ok(m, 'board.html should define replayEntries');
-  const replayEntries = new vm.Script(`${m[0].replace('export ', '')}\nreplayEntries`)
-    .runInNewContext({}, { displayErrors: true });
-
-  const walked = replayEntries([
-    { op: 'chapter', title: 'Nutrients' },
-    { op: 'node', id: 'fat' },
-    { op: 'focus', step: 0 },
-    { op: 'chapter', title: 'Enzymes' },
-    { op: 'node', id: 'lipase' },
-    { op: 'amend', chapter: 1, ops: [{ op: 'node', id: 'protein' }] },
-    { op: 'amend', chapter: 1, ops: [{ op: 'edge', from: 'protein', to: 'energy' }] },
-    { op: 'amend', chapter: 1, ops: [{ op: 'say', text: 'Protein too.' }] },
-    { op: 'node', id: 'bile' },
-    { op: 'amend', chapter: 1, ops: [{ op: 'node', id: 'iron' }] },
-  ]);
-
-  // Array.from, not .map: the arrays come out of the vm's realm, and strict
-  // deepEqual compares prototypes before it compares contents.
-  assert.deepEqual(Array.from(walked, e => e.op),
-    ['chapter', 'node', 'chapter', 'node', 'amend', 'node', 'amend'],
-    'focus is not drawn, and the run of three amendments is one visit');
-  assert.deepEqual(Array.from(walked[4].ops, o => o.op), ['node', 'edge', 'say'],
-    'carrying everything that run did');
-  assert.equal(walked[6].ops.length, 1, 'but an amendment after other work is its own visit');
-  assert.equal(walked[4].chapter, 1, 'and still aimed where it was aimed');
-});
-
 test('the browser-side modules parse', () => {
   for (const f of ['src/board/draw-on.js', 'src/board/narrate.js', 'src/render/render.js', 'src/render/ink.js',
                    'src/render/glyphs.js', 'src/render/edges.js', 'src/render/layout.js']) {
@@ -727,60 +551,11 @@ test('the browser-side modules parse', () => {
 });
 
 test('a speaking map card leaves the line-clamp layout before wrapping words', () => {
-  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
-  const css = html.match(/<style>([\s\S]*?)<\/style>/)[1];
+  const css = fs.readFileSync(path.join(ROOT, 'src/board/index.html'), 'utf8').match(/<style>([\s\S]*?)<\/style>/)[1];
   assert.match(css, /\.mapcard \.line\s*\{[^}]*display:-webkit-box/s,
     'the idle card uses a three-line preview');
   assert.match(css, /\.mapcard\.speaking \.line\s*\{[^}]*display:block/s,
     'wrapped word spans in -webkit-box lose their intervening spaces in Chrome');
-});
-
-/* The play button toggles a timer, and a toggle that stops itself by clicking
-   its own button is re-entrant: it once recursed to a stack overflow when
-   pressed on the last step, leaving the control stuck on "stop" and dead to
-   every later press. So run the real handler out of the page against stubs. */
-function playControl(flow, active) {
-  const html = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
-  const src = html.match(/<script type="module">([\s\S]*?)<\/script>/)[1];
-  const m = src.match(/function stopPlay\(\)[\s\S]*?\$\('play'\)\.onclick = [^\n]*\n/);
-  assert.ok(m, 'board.html should define stopPlay/startPlay and wire the button');
-
-  const btn = { textContent: 'play', classList: { add() {}, remove() {} } };
-  const timers = new Map();
-  let next = 1, playing = null, clicks = 0;
-  const env = {
-    $: () => btn,
-    get board() { return { flow, active }; },
-    focus: i => { active = i; },
-    setInterval: fn => { const id = next++; timers.set(id, fn); return id; },
-    clearInterval: id => timers.delete(id),
-  };
-  const run = new vm.Script(
-    `${m[0]}\n({ click: () => (clicks++, $('play').onclick()), tick: () => [...timers.values()][0]?.() })`
-  ).runInNewContext({ ...env, playing, timers, clicks,
-    // `playing` and `clicks` must live in the context, not be copied in
-  }, { displayErrors: true });
-  return { btn, timers, run };
-}
-
-test('the play control stops when told to, from any step', () => {
-  for (const active of [null, 0, 2]) {       // including parked on the last step
-    const { btn, timers, run } = playControl([{ step: 'a' }, { step: 'b' }, { step: 'c' }], active);
-    run.click();                              // play
-    assert.equal(btn.textContent, 'stop', `active=${active}: play should arm the timer`);
-    assert.equal(timers.size, 1, `active=${active}: exactly one timer`);
-    run.click();                              // stop
-    assert.equal(btn.textContent, 'play', `active=${active}: stop should disarm it`);
-    assert.equal(timers.size, 0, `active=${active}: no timer left running`);
-  }
-});
-
-test('the play control runs the flow to the end and stops itself', () => {
-  const { btn, timers, run } = playControl([{ step: 'a' }, { step: 'b' }], null);
-  run.click();
-  for (let i = 0; i < 6 && timers.size; i++) run.tick();
-  assert.equal(timers.size, 0, 'it should clear its own timer at the end');
-  assert.equal(btn.textContent, 'play', 'and put the label back');
 });
 
 /* The script half of the board has to follow the step being walked, or the
@@ -2238,7 +2013,7 @@ await atest('one server holds several boards and keeps them apart', async () => 
     assert.equal((await (await fetch(B('beta') + '/whoami')).json()).name, 'beta');
 
     // the renderer is served once, from the root, and shared by all of them
-    assert.ok((await fetch(root + '/src/render/render.js')).ok);
+    assert.equal((await fetch(root + '/src/render/render.js')).status, 404);
 
     // a name nobody is serving is gone, not broken: that is what sends a
     // client with a stale registry entry off to start a board
@@ -4955,12 +4730,12 @@ await atest('the state directory follows HOME, not the runtime\'s cached home', 
   }
 });
 
-/* The browser loads these modules off disk, unbundled, so anything they import
-   must exist in a browser. A `node:` builtin anywhere in that graph does not
+/* The browser runs these modules, bundled into the board page, so anything
+   they import must exist in a browser. A `node:` builtin anywhere in that graph does not
    fail a test or a lint — it fails silently at runtime, the module graph never
    evaluates, and every board renders empty with nothing in the terminal to say
    why. That is exactly what happened once persistence put `node:fs` into
-   state.js, which board.html imports. Hence this. */
+   state.js, which the board page imports. Hence this. */
 /* The link once landed in ~/Library/Android/sdk/platform-tools, because that
    was the first writable directory on someone's PATH — a directory the SDK
    manager replaces on update. A toolchain's directory must never be chosen,
@@ -5157,77 +4932,6 @@ await atest('install pi writes a skill, a direct MCP server and the instruction 
   assert.equal(hidden.state, 'written', 'install puts the exposure back');
 
   fs.rmSync(home, { recursive: true, force: true });
-});
-
-/* What is left of the walk that used to start here. Whether a module reachable
-   from the board page imports something a browser cannot fetch is now a lint
-   rule, scoped to the browser-safe globs — see eslint.config.js, and run
-   `pnpm run lint`. These two are not about any one file, so no per-file rule
-   states them, and they are the half of the walk worth keeping: that the page's
-   roots are really there, and where the page stops. */
-const boardRoots = () => {
-  const entry = fs.readFileSync(path.join(ROOT, 'src/board/board.html'), 'utf8');
-  return [...entry.matchAll(/^import[^'"\n]*from\s*['"](\/[^'"]+)['"]/gm)].map(m => m[1]);
-};
-
-test('every module the board page imports is on disk', () => {
-  const roots = boardRoots();
-  // The number is the renderer being loaded off disk at all: if the page ever
-  // goes back to a bundle, or to inline script, the lint rule is still green
-  // while covering modules the page no longer runs, and this is what notices.
-  assert.ok(roots.length >= 5, 'the board page should import the renderer modules off disk');
-  assert.ok(roots.some(spec => spec.startsWith('/src/render/')),
-    'the board page should import the renderer off disk, not a bundle');
-
-  const missing = roots.filter(spec => !fs.existsSync(path.join(ROOT, spec.replace(/^\//, ''))));
-  assert.deepEqual(missing, [],
-    'imported by the board page and not there:\n  ' + missing.join('\n  '));
-});
-
-/* Dagre is installed for `settle`, which orders a finished board once, in the
-   server process. A board that is still being drawn must not pay for it, and
-   the page is the one consumer that would pay by trying to fetch it.
-
-   The op Schema is here for the same reason, differently: it is browser-safe
-   code that a browser cannot *fetch*, because it imports `effect` by name and
-   the page loads its modules off disk unbundled. The server decodes with it at
-   POST /op and MCP advertises its tools from it; the page knows the same ops
-   through type imports, which are erased. That exemption is named in
-   eslint.config.js, and this is the test that bounds it — a module the page
-   reaches may import the Schema's types, never the Schema. */
-test('the board page does not reach dagre, or the Schema', () => {
-  const seen = new Set();
-  const bare = [];
-  const walk = spec => {
-    const file = path.join(ROOT, spec.replace(/^\//, ''));
-    if (seen.has(file)) return;
-    seen.add(file);
-    let src;
-    try { src = fs.readFileSync(file, 'utf8'); } catch { return; }
-    // Walk relative specifiers a browser would fetch, and flag any bare import
-    // of dagre directly; other bare specifiers are the lint rule's business.
-    for (const m of src.matchAll(/^\s*(?:import|export)[^'"\n]*from\s*['"]([^'"]+)['"]/gm)) {
-      const dep = m[1];
-      if (/^[./]/.test(dep)) walk(dep.startsWith('/') ? dep : path.join(path.dirname(spec), dep));
-      else if (dep === '@dagrejs/dagre' || dep.startsWith('@dagrejs/dagre/')) {
-        bare.push(`${path.relative(ROOT, file)} -> ${dep}`);
-      }
-    }
-  };
-  boardRoots().forEach(walk);
-
-  assert.ok(seen.size >= 8, 'the walk should reach the whole renderer, not stop at the first file');
-  const reached = [
-    ...[...seen]
-      .filter(file => file.endsWith('/board/settle.js')
-        || file.includes('/packages/core/src/schema/'))
-      .map(file => path.relative(ROOT, file)),
-    ...bare,
-  ];
-  assert.deepEqual(reached, [],
-    'the board page must not fetch or evaluate these — dagre is for a finished ' +
-    'board in the server, and the Schema names `effect`, which the page cannot ' +
-    'resolve off disk:\n  ' + reached.join('\n  '));
 });
 
 /* The one way this suite can shrink without anyone noticing. Suites used to be

@@ -1,8 +1,8 @@
 /* The transcript's one typographic liberty: backticks become code, double
    asterisks become bold, and `&` and `<` are escaped first so a line about
-   software cannot write markup into the rail. board.html has this, and so does
-   the snapshot — three lines each, because what reads them is three different
-   kinds of output. This is the React page's. */
+   software cannot write markup into the rail. The snapshot has this too —
+   three lines each, because what reads them is two different kinds of
+   output. This is the board page's. */
 
 export const mdish = (s: string): string => s
   .replace(/&/g, '&amp;')

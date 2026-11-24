@@ -90,7 +90,7 @@ export function MapView({ model, dispatch }: { readonly model: Model, readonly d
   </div>;
 }
 
-/* The same hand and routing as board.html: short hops cross the gutter, while
+/* The same hand and routing as the snapshot's map: short hops cross the gutter, while
    links skipping a card bow around it instead of through its picture. */
 function drawLinks(wrap: HTMLElement, cards: HTMLElement, svg: SVGSVGElement, links: MapLink[], schedule: () => void): void {
   wrap.querySelectorAll('.maplabel').forEach(el => el.remove());

@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-/* The React board's half of the build (#153).
+/* The board page's half of the build.
  *
  * Two Vite builds out of packages/board, and then one file.
  *
- * The page people open is dist/src/next/index.html, and it is self-contained:
- * stylesheet in a <style>, bundle in an inline <script type="module">, nothing
- * fetched. That is not tidiness. A board has to be screenshottable with no
- * server behind it — that is how this issue is judged, and how the snapshot
- * path verified in #150 works — and a browser on a file:// URL refuses to
- * fetch an external module script. An inline one it runs happily, which is the
- * same trick the old page's export has always used.
+ * The page every board opens is dist/src/board/index.html, and it is
+ * self-contained: stylesheet in a <style>, bundle in an inline
+ * <script type="module">, nothing fetched. That is not tidiness. An export is
+ * this page with the board's state in front of the bundle (src/board/export.ts),
+ * and a browser on a file:// URL refuses to fetch an external module script.
+ * An inline one it runs happily. It is also why the server needs no route that
+ * reads modules off disk: there is nothing left for the page to ask for.
  *
  * The second build is for the Node suite: dist/support/board-view.js renders
  * the same components under react-dom/server, because the suites run inside
@@ -22,11 +22,11 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = path.join(ROOT, 'dist/src/next');
+const OUT = path.join(ROOT, 'dist/src/board');
 const CONFIG = 'packages/board/vite.config.ts';
 
 const die = (msg) => {
-  console.error('spiega next: ' + msg);
+  console.error('spiega board: ' + msg);
   process.exit(1);
 };
 
@@ -43,12 +43,14 @@ function vite(args) {
  * blank board and says nothing — the failure this repository knows best — so
  * every branch here exits rather than warns.
  */
-function fold() {
+function fold(before) {
   const index = path.join(OUT, 'index.html');
   if (!fs.existsSync(index)) die('the client build wrote no index.html');
   let html = fs.readFileSync(index, 'utf8');
 
-  const assets = fs.readdirSync(OUT).filter(f => f !== 'index.html');
+  // Vite writes beside the compiled server modules in dist/src/board, so what
+  // it wrote is whatever was not there before it ran.
+  const assets = fs.readdirSync(OUT).filter(f => f !== 'index.html' && !before.has(f));
   const scripts = assets.filter(f => f.endsWith('.js'));
   const sheets = assets.filter(f => f.endsWith('.css'));
   const rest = assets.filter(f => !scripts.includes(f) && !sheets.includes(f));
@@ -82,17 +84,18 @@ function fold() {
   return { bytes: Buffer.byteLength(html), script: Buffer.byteLength(code) };
 }
 
-export function buildNextBoard() {
+export function buildBoardPage() {
+  const before = new Set(fs.existsSync(OUT) ? fs.readdirSync(OUT) : []);
   vite(['build']);
   /* The entry is in vite.config.ts and is named here again on purpose: a bare
    * `--ssr` is a boolean, and it overrides the configured entry with `true` —
    * at which point Vite falls back to index.html and refuses it. */
   vite(['build', '--ssr', 'src/view/ssr.tsx']);
-  return fold();
+  return fold(before);
 }
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const { bytes, script } = buildNextBoard();
-  console.log(`spiega next: dist/src/next/index.html, ${Math.round(bytes / 1024)} KB` +
+  const { bytes, script } = buildBoardPage();
+  console.log(`spiega board: dist/src/board/index.html, ${Math.round(bytes / 1024)} KB` +
     ` (${Math.round(script / 1024)} KB of it the bundle)`);
 }

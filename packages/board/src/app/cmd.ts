@@ -8,9 +8,11 @@
    ============================================================ */
 
 import type { Op } from '../../../../src/board/state.js';
+import type { SettleGated } from './msg.js';
 
 export type Cmd =
   | { readonly type: 'postOps', readonly ops: readonly Op[] }
+  | { readonly type: 'settleBoard', readonly then: SettleGated }
   | { readonly type: 'setHash', readonly hash: string }
   | { readonly type: 'persistFollow', readonly following: boolean }
   | { readonly type: 'persistVoice', readonly name: string }

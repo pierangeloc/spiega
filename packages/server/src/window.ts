@@ -203,7 +203,7 @@ export const focusBoard = (name: string, url: string): Effect.Effect<Raised, Not
     const live = runningBrowsers(procs);
     if (!live.length) return yield* new NoBrowserRunning();
 
-    // the board name is in the window title; see board.html
+    // the board name is in the window title; see packages/board/src/view/App.tsx
     const tag = `[${name}]`;
     for (const app of live) {
       const script = `tell application ${JSON.stringify(app)}

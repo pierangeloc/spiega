@@ -2,8 +2,7 @@
    The numbered steps, over the bottom of the drawing.
 
    The strip the flow is walked with: where you are, what this hop is, and the
-   two arrows. It is not here when the board has no flow, which is what
-   board.html's `hidden` says.
+   two arrows. It is not here when the board has no flow.
 
    The silent timer is available only when the narrator cannot drive the board,
    so the steps and the script never compete as two simultaneous players.

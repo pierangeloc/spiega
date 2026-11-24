@@ -84,8 +84,15 @@ jobs:
           npx spiega --version
           npx spiega draw '[{"op":"node","id":"gw","kind":"gateway","label":"API Gateway"},{"op":"node","id":"svc","kind":"service","label":"Orders"},{"op":"edge","from":"gw","to":"svc","label":"gRPC"}]'
           npx spiega say 'the gateway forwards to orders'
-          curl -sf http://127.0.0.1:7391/b/ci/ | grep -q "/src/render/render.js"
-          curl -sf http://127.0.0.1:7391/src/render/render.js >/dev/null
+          # The page is the built React app, one file with its bundle inline:
+          # a page that asked the server for a module it no longer serves would
+          # render an empty board and say nothing.
+          curl -sf http://127.0.0.1:7391/b/ci/ -o /tmp/fresh/page.html
+          grep -q '<div id="root"></div>' /tmp/fresh/page.html
+          grep -q '<script type="module">' /tmp/fresh/page.html
+          if grep -Eq '<script[^>]+src=|<link[^>]+href=|/src/render/' /tmp/fresh/page.html; then exit 1; fi
+          # and the route that let a browser read modules off disk is gone
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7391/src/render/render.js)" = 404
           curl -sf http://127.0.0.1:7391/b/ci/state | grep -q 'API Gateway'
           npx spiega snapshot -o /tmp/fresh/board.html
           grep -q '<svg' /tmp/fresh/board.html
@@ -114,7 +121,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # The browser rule, and a job of its own for the same reason typecheck is
-      # one: this answers "can the page still load its modules", which is not
+      # one: this answers "can the page's modules still run in a browser", which is not
       # the question the suite answers, and a run that cannot tell you which of
       # the two broke is worth less than two runs that can. It needs no build —
       # it reads the source tree, not dist/.

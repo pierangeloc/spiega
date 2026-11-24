@@ -23,10 +23,10 @@ pnpm run typecheck   # root plus every package, strict
 pnpm run pack        # the tarball npm would publish
 ```
 
-The layout inside `dist/` is the repository's own, deliberately: the board page
-imports the renderer off disk as `/src/render/render.js`, and every module here
-finds its neighbours by walking up from its own file. Flattening the artefact
-would move all of those at once.
+The layout inside `dist/` is the repository's own, deliberately: every module
+here finds its neighbours by walking up from its own file, and the server finds
+the board page at `dist/src/board/index.html` the same way. Flattening the
+artefact would move all of those at once.
 
 **The thing to internalise: nothing you edit runs until it is built.** The
 suite runs inside `dist/` (ADR 0002 — `docs/adr/0002-port-the-suite-gradually.md`),
@@ -74,24 +74,25 @@ in front of it. `tsdown.config.ts` already relies on it.
 
 ## The browser is a consumer, and the test suite barely sees it
 
-`src/board/board.html` imports the renderer **off disk, unbundled**:
+The board page is the React app in `packages/board`, bundled by Vite into one
+self-contained file — `dist/src/board/index.html`, stylesheet and script inline
+— by `tools/board.js`. Every board at `/b/<name>/` is served that file, and an
+export is the same file with the board's state in front of the bundle. Nothing
+is read off disk by the browser, and the server has no route that would let it.
 
-```js
-import { renderSVG }        from '/src/render/render.js';
-import { emptyBoard, applyOps } from '/src/board/state.js';
-```
-
-So every module reachable from that page must run in a browser. **Never import
-a `node:` builtin, or any bare specifier, into one of them.** If you need the
-filesystem, put that half in a node-only module — `src/board/log.js` exists
-because persistence put `import fs from 'node:fs'` into `state.js` and took
-every board down with it.
+The bundle reaches into `src/board` and `src/render` — the reducer, the
+renderer, narration — so every module it reaches must still run in a browser.
+**Never import a `node:` builtin, or any bare specifier, into one of them.** If
+you need the filesystem, put that half in a node-only module — `src/board/log.js`
+exists because persistence put `import fs from 'node:fs'` into `state.js` and
+took every board down with it.
 
 The failure mode is what makes this worth a rule: nothing throws where you can
-see it. The module graph never evaluates, no handler is registered, and the
-board renders `THE BOARD IS EMPTY` while the server happily holds the nodes and
-streams them to a page that is not listening. No terminal error. No failing
-test — `node:fs` resolves fine in the test runner.
+see it. Vite swaps a `node:` import for a stub with nothing but a build
+warning, the stub throws when the page uses it, no handler is registered, and
+the board renders `THE BOARD IS EMPTY` while the server happily holds the
+nodes and streams them to a page that is not listening. No terminal error. No
+failing test — `node:fs` resolves fine in the test runner.
 
 `pnpm run lint` enforces that, and fails naming the file and the specifier. It
 is `eslint.config.js`, and it is a rule per file rather than a walk from the
@@ -105,14 +106,14 @@ source tree while the suite reads `dist/`.
 
 One thing the rule does allow, and the ports depend on it: a **type-only**
 import of a bare specifier. `import type { Op } from '@spiega/core'` is erased
-at compile time, so nothing is fetched and no board goes dark; that is how a
-browser-side module speaks the typed domain while `effect` stays out of the
-page's import graph. Drop the `type` and it fails, as it should.
+at compile time, so nothing reaches the bundle; that is how a browser-side
+module speaks the typed domain while `effect` stays out of the page. Drop the
+`type` and it fails, as it should.
 
-Two things the page-walk asserted are not about any one file, so they are still
-tests in `smoke.mjs`: that the page's root imports exist on disk, and that
-nothing it reaches is `settle.js` or `@dagrejs/dagre` — an unsettled board must
-not fetch dagre.
+`test/react-board.mjs` renders the real components under `react-dom/server`
+and drives the page's own transport (`connectLive`) with a stubbed
+EventSource, and checks that the built page is one file that carries no
+dagre — an unsettled board must not pay for it.
 
 **A green suite does not mean a working board.** The suite runs in node. The
 browser is a second consumer with almost no coverage, and it is the one that
@@ -126,7 +127,7 @@ was called finished on the strength of its own source — a glyph whose comment
 claimed it was distinct from the datastore cylinder while reading as a flat
 tray, and a warning banner that ran off the edge of the pane mid-sentence.
 
-If you changed a glyph, the layout, or anything in `board.html`'s stylesheet,
+If you changed a glyph, the layout, or anything in `packages/board/board.css`,
 render it and put your eyes on it before saying it works.
 
 ### A board that broke once is kept
@@ -193,9 +194,10 @@ Headless Chrome **hangs** on a live board: the SSE stream never goes idle, so
 `--virtual-time-budget` never resolves and `--screenshot` writes nothing. Do
 not conclude from that that the page is broken.
 
-Instead build a standalone page from the real stylesheet and the real markup,
-with the banners unhidden and no server behind it, and shoot that at several
-widths:
+An export (`GET /b/<name>/export`) is the real page with no stream behind it,
+so it screenshots off disk. For a banner, build a standalone page from the real
+stylesheet and the real markup, with the banners unhidden and no server behind
+it, and shoot that at several widths:
 
 ```sh
 # extract <style> and the markup you changed into /tmp/x.html, then:

@@ -57,20 +57,6 @@ const serveStaticFile = (
     Effect.catch(() => Effect.succeed(notFound())),
   );
 
-const serveUnder = (
-  rootDir: string,
-  subDir: 'src',
-  rel: string | undefined,
-): Effect.Effect<HttpServerResponse.HttpServerResponse> => {
-  if (!rel || rel.includes('..')) return Effect.succeed(notFound());
-  const baseDir = path.resolve(rootDir, subDir);
-  const resolved = path.resolve(baseDir, rel);
-  if (resolved !== baseDir && !resolved.startsWith(baseDir + path.sep)) {
-    return Effect.succeed(notFound());
-  }
-  return serveStaticFile(resolved);
-};
-
 const renderIndex = (
   store: BoardStore['Service'],
 ): HttpServerResponse.HttpServerResponse => {
@@ -113,31 +99,11 @@ export const ReadRoutes = HttpRouter.use((router) =>
     const config = yield* SpiegaConfig;
     const store = yield* BoardStore;
 
-    // Static assets: icon and renderer modules under /src/.
+    // The icon. The board page itself is one built file with nothing to fetch.
     yield* router.add(
       'GET',
       '/icon.svg',
       serveStaticFile(path.join(config.rootDir, 'docs', 'logo', 'spiega-mark.svg')),
-    );
-
-    yield* router.add(
-      'GET',
-      '/src/*',
-      Effect.gen(function* () {
-        const params = yield* HttpRouter.params;
-        return yield* serveUnder(config.rootDir, 'src', params['*']);
-      }),
-    );
-
-    /* The React board (#153), beside the old one rather than instead of it.
-       One file, assembled by tools/next.js, carrying its own stylesheet, its
-       own bundle and a fixture board — so it needs no assets route of its own
-       and nothing here has to know which bundle the build named. It draws a
-       fixture, not a board held by this server; #156 is the cutover. */
-    yield* router.add(
-      'GET',
-      '/next',
-      serveStaticFile(path.join(config.rootDir, 'src', 'next', 'index.html')),
     );
 
     // Index page (or redirect when there is a single live board and no saved logs).
@@ -198,7 +164,7 @@ export const ReadRoutes = HttpRouter.use((router) =>
         const entry = store.get(name) ?? store.reopen(name, `${base}/b/${name}`);
         if (!entry) return missingBoardHtml(name);
         return yield* serveStaticFile(
-          path.join(config.rootDir, 'src', 'board', 'board.html'),
+          path.join(config.rootDir, 'src', 'board', 'index.html'),
         );
       }),
     );
