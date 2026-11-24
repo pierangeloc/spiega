@@ -1858,6 +1858,102 @@ test('install runs against a SpiegaHome layer, not the process environment', asy
   }
 });
 
+/* A config whose JSON is a valid value but not an object is a file we do not
+   understand. install must refuse it — report the target failed and leave the
+   bytes alone — rather than silently swap in a fresh {} and add the MCP key on
+   top of somebody else's file. */
+test('install refuses a config whose root is not a JSON object', async () => {
+  const { installEffect } = await import('../src/install.js');
+  const { SpiegaHome } = await import('../packages/cli/src/config.js');
+  const { Effect } = await import('effect');
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-nonroot-'));
+  const config = path.join(home, 'profile');
+  try {
+    fs.mkdirSync(path.join(config, 'opencode'), { recursive: true });
+    const file = path.join(config, 'opencode', 'opencode.json');
+    for (const body of ['[]', 'null', '"hand-edited"', '42']) {
+      fs.writeFileSync(file, body);
+      const results = await Effect.runPromise(
+        installEffect(['opencode'], { touchShell: false }).pipe(
+          Effect.provide(SpiegaHome.fromPath(home, config)),
+        ),
+      );
+      assert.equal(results[0].ok, false, `${body} must be refused, not replaced`);
+      assert.equal(fs.readFileSync(file, 'utf8'), body, 'the original bytes are untouched');
+      assert.ok(!fs.readdirSync(path.join(config, 'opencode')).some(n => n.includes('.bak')),
+        'no backup is taken of a file that was refused');
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/* The nested container the entry lives in — opencode's `mcp`, every other
+   harness's `mcpServers` — has to be an object too. A string or array there is
+   someone's own content, and the same refusal, untouched, applies. */
+test('install refuses a config whose MCP container is not a JSON object', async () => {
+  const { installEffect } = await import('../src/install.js');
+  const { SpiegaHome } = await import('../packages/cli/src/config.js');
+  const { Effect } = await import('effect');
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-nonmcp-'));
+  const config = path.join(home, 'profile');
+  try {
+    fs.mkdirSync(path.join(config, 'opencode'), { recursive: true });
+    const oc = path.join(config, 'opencode', 'opencode.json');
+    const ocBody = JSON.stringify({ mcp: 'hand-edited' });
+    fs.writeFileSync(oc, ocBody);
+    const a = await Effect.runPromise(
+      installEffect(['opencode'], { touchShell: false }).pipe(
+        Effect.provide(SpiegaHome.fromPath(home, config)),
+      ),
+    );
+    assert.equal(a[0].ok, false, 'a string mcp container must be refused');
+    assert.equal(fs.readFileSync(oc, 'utf8'), ocBody, 'opencode.json is untouched');
+
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    const cl = path.join(home, '.claude.json');
+    const clBody = JSON.stringify({ mcpServers: ['not', 'a', 'table'] });
+    fs.writeFileSync(cl, clBody);
+    const b = await Effect.runPromise(
+      installEffect(['claude'], { touchShell: false }).pipe(
+        Effect.provide(SpiegaHome.fromPath(home, config)),
+      ),
+    );
+    assert.equal(b[0].ok, false, 'an array mcpServers container must be refused');
+    assert.equal(fs.readFileSync(cl, 'utf8'), clBody, '.claude.json is untouched');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/* doctor is read-only by construction, but the same shapes reach it: a config
+   whose MCP container is not an object must be diagnosed (not registered), not
+   trip a crash, and never rewritten. */
+test('doctor diagnoses a config it does not understand without rewriting it', async () => {
+  const { doctorEffect } = await import('../src/doctor.js');
+  const { SpiegaHome } = await import('../packages/cli/src/config.js');
+  const { Effect } = await import('effect');
+
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-doctor-shape-'));
+  try {
+    const file = path.join(home, '.claude.json');
+    const body = JSON.stringify({ mcpServers: 'not a table' });
+    fs.writeFileSync(file, body);
+    const rows = await Effect.runPromise(
+      doctorEffect().pipe(Effect.provide(SpiegaHome.fromPath(home, path.join(home, '.config')))),
+    );
+    const claude = rows.filter(r => r.what === 'claude MCP');
+    assert.equal(claude.length, 1, 'the claude MCP row is present');
+    assert.equal(claude[0].level, 'warn', 'diagnosed as a warning, not a crash');
+    assert.match(claude[0].detail, /not registered/);
+    assert.equal(fs.readFileSync(file, 'utf8'), body, 'doctor never rewrites what it reads');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 /* A node that fans out sends several edges through the same gutter. Each tag
    lifts itself clear of the same box, independently, and lands in the same
    place — and nothing downstream notices, because each pill draws over the

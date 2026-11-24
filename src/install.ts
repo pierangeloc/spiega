@@ -89,7 +89,7 @@ interface InstallOptions {
 /* ---------- small helpers ---------- */
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null;
+  typeof v === 'object' && v !== null && !Array.isArray(v);
 
 const backup = (file: string): string | null => {
   if (!fs.existsSync(file)) return null;
@@ -98,12 +98,38 @@ const backup = (file: string): string | null => {
   return b;
 };
 
-const readJSON = (file: string): Record<string, unknown> => {
+/* Read a config file, or {} when it is not there or empty. Malformed JSON
+   throws, and a valid-but-unexpected shape (null, an array, a bare value) is
+   the caller's to refuse: returning {} here would silently replace somebody's
+   file, which is exactly what "leave a file we do not understand alone" exists
+   to prevent. */
+const readJSON = (file: string): unknown => {
   if (!fs.existsSync(file)) return {};
   const raw = fs.readFileSync(file, 'utf8').trim();
   if (!raw) return {};
-  const parsed: unknown = JSON.parse(raw);   // throws on a file we should not touch; caller reports it
-  return isObject(parsed) ? parsed : {};
+  return JSON.parse(raw);   // throws on malformed; caller reports it
+};
+
+/* The root of a config, or a named container inside one, has to be a JSON
+   object. Anything else is a file we do not understand, so it is refused
+   rather than rewritten — the caller turns the throw into a failed install
+   result and leaves the original bytes alone. */
+const expectObject = (v: unknown, what: string): Record<string, unknown> => {
+  if (!isObject(v)) throw new Error(`${what} is not a JSON object \u2014 not touching it`);
+  return v;
+};
+
+/* The container our MCP entry lives in (e.g. `mcpServers`, `mcp`). Missing or
+   null means "not registered yet" and gets a fresh object; a value that is
+   already there has to be an object, or the file is refused. */
+const container = (node: Record<string, unknown>, key: string, what: string): Record<string, unknown> => {
+  const existing = node[key];
+  if (existing === undefined || existing === null) {
+    const fresh: Record<string, unknown> = {};
+    node[key] = fresh;
+    return fresh;
+  }
+  return expectObject(existing, `${what}: ${key}`);
 };
 
 const writeJSON = (file: string, obj: Record<string, unknown>): void => {
@@ -416,19 +442,11 @@ const reportBin = (home: string, info: BinInfo, rec: NodeRecord | null): void =>
    three shapes below are not guesses: each was read off a working codegraph
    entry in that harness's own config on a real machine. */
 const mcpJSON = (file: string, key: string, value: unknown): [string, string, string] => {
-  const cfg = readJSON(file);
+  const name = path.basename(file);
+  const cfg = expectObject(readJSON(file), name);
   const parts = key.split('.');
   let node: Record<string, unknown> = cfg;
-  for (const k of parts) {
-    const existing = node[k];
-    if (isObject(existing)) {
-      node = existing;
-    } else {
-      const fresh: Record<string, unknown> = {};
-      node[k] = fresh;
-      node = fresh;
-    }
-  }
+  for (const k of parts) node = container(node, k, name);
   const before = JSON.stringify(node.spiega);
   node.spiega = value;
   if (before === JSON.stringify(value)) return [file, 'already registered', 'unchanged'];
@@ -547,8 +565,8 @@ const makeTargets = (home: string, config: string): Record<string, Target> => ({
     detect: () => fs.existsSync(path.join(config, 'opencode')),
     run: () => {
       const file = path.join(config, 'opencode', 'opencode.json');
-      const cfg = readJSON(file);
-      const mcp = isObject(cfg.mcp) ? cfg.mcp : (cfg.mcp = {});
+      const cfg = expectObject(readJSON(file), path.basename(file));
+      const mcp = container(cfg, 'mcp', path.basename(file));
       const want = { type: 'local', command: ['node', MCP_ENTRY], enabled: true };
       let note: string, wrote = false;
       if (JSON.stringify(mcp.spiega) === JSON.stringify(want)) note = 'MCP already registered';

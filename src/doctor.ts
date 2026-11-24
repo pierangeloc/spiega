@@ -50,7 +50,8 @@ interface Row {
 
 type Json = Record<string, unknown>;
 
-const isObject = (v: unknown): v is Json => typeof v === 'object' && v !== null;
+const isObject = (v: unknown): v is Json =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
 
 const sh = (cmd: string, args: string[], opts: Record<string, unknown> = {}): string | null => {
   try {
