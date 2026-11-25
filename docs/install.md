@@ -149,12 +149,18 @@ both places, at about twice the bytes.
 
 | client | gets | tested |
 |---|---|---|
-| Claude Code | `$defs` and `$ref` | not yet |
+| Claude Code | `$defs` and `$ref` | **yes**, 2026-11-26 — lists all 13 tools, draws from one array of ops |
+| opencode | `$defs` and `$ref` | **yes**, 2026-11-26 — resolves the union into its own typed signature, draws |
 | Claude Desktop | `$defs` and `$ref` | not yet |
 | Cursor | `$defs` and `$ref` | not yet |
-| opencode | `$defs` and `$ref` | not yet |
 | Pi | `$defs` and `$ref` | not yet |
 | anything else | `$defs` and `$ref` | not yet |
+
+No client has needed the flat shape so far. The two that have been driven are
+the two with a headless mode, which is why they are the two: a fresh
+`claude -p` and a fresh `opencode run` each start a real session, load the
+schema the same way an interactive one does, and can be asked for the tool's
+exact reply. The rest of the table needs hands on a GUI.
 
 If a client fails to list spiega's tools, refuses `board_draw`, or sends ops
 that come back as a schema error the board itself would not give, try the flat
