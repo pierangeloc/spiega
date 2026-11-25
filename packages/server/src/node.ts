@@ -9,7 +9,7 @@
      Response handlers for direct in-process Effect testing without binding a
      socket, over the read routes alone and over every route.
    - `createReadBridge`: `handle(req, res): Promise<boolean>` used by
-     `src/board/server.js` so every security check, every read route, the
+     `src/board/server.ts` so every security check, every read route, the
      write routes (draw, settle, close) and the routes that draw a board into
      a file (export, snapshot, snapshot.svg) run through Effect's HttpRouter.
      What it declines — creating a board and /replay — is for the legacy
@@ -53,7 +53,7 @@ export const createBoardWebHandler = (
 
 /* Which requests belong to the Effect read router.
    Creating a board (/boards POST) and /replay return false so
-   src/board/server.js handles them; the routes that draw a board into a file
+   src/board/server.ts handles them; the routes that draw a board into a file
    are claimed by `isRenderRoute`. */
 export const isReadRoute = (method: string, pathname: string): boolean => {
   if (method !== 'GET') return false;

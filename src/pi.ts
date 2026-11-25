@@ -9,7 +9,7 @@ import path from 'node:path';
 import { home } from './home.js';
 
 /* Honoured rather than assumed, for the same reason as XDG_CONFIG_HOME in
-   install.js: a second pi profile is a second agent directory, and an install
+   install.ts: a second pi profile is a second agent directory, and an install
    that wrote to the default would register spiega where that profile never
    looks. */
 export const piDir = () => process.env.PI_CODING_AGENT_DIR || path.join(home(), '.pi', 'agent');

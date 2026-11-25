@@ -28,7 +28,7 @@ import { c, sym, pad, shortPath } from './term.js';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const MCP_ENTRY = path.join(ROOT, 'src', 'mcp', 'server.js');
-/* The sh launcher, not cli.js: it resolves a node that clears the engines
+/* The sh launcher, not cli.ts: it resolves a node that clears the engines
    floor instead of trusting whatever `env node` happens to be. */
 const LAUNCHER = path.join(ROOT, 'bin', 'spiega');
 
@@ -183,7 +183,7 @@ const linkSkill = (home: string, dir: string, name = 'spiega'): [string, string,
 
 /* Which node installed this, remembered for the launcher.
 
-   install only reaches this line on a node the guard at the top of cli.js has
+   install only reaches this line on a node the guard at the top of cli.ts has
    already checked against the engines floor, so `process.execPath` is a node
    known to be good. Without the record the launcher has to re-derive one on
    every run, and its guesses are nvm-shaped: a node from brew, asdf, volta,
@@ -461,7 +461,7 @@ const mcpJSON = (file: string, key: string, value: unknown): [string, string, st
    opencode tasks and four Claude Code tasks at once, each its own problem.
    Pinning `SPIEGA_BOARD=opencode` would have forced all four onto one board
    and overridden the per-task naming that makes them separate. The name is
-   worked out per session instead — see boardName() in board/server.js.
+   worked out per session instead — see boardName() in board/server.ts.
 
    It would not have worked anyway: an opencode MCP server is a child of one
    long-lived daemon and inherits the environment that daemon started with, so
@@ -528,7 +528,7 @@ const makeTargets = (home: string, config: string): Record<string, Target> => ({
       /* Add our table, or repoint it. Add-only was the first version, on the
          grounds that rewriting someone's TOML eats their comments — but it
          also left a table pointing at a checkout that had since moved, while
-         install reported success. See toml.js for why this is not a regex
+         install reported success. See toml.ts for why this is not a regex
          written inline. */
       const body = `[mcp_servers.spiega]\ncommand = "node"\nargs = ["${MCP_ENTRY}"]\n`;
       const up = upsertTable(raw, 'spiega', body);

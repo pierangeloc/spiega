@@ -1,7 +1,7 @@
 /* ============================================================
    What the narrator reads, and where it is up to.
 
-   The narrator (narrate.js) is a player: it takes a list of sections, speaks
+   The narrator (narrate.ts) is a player: it takes a list of sections, speaks
    them in order, and says which one it is on. It has no idea what the sections
    are. What they are is decided here — one chapter's script, or the whole
    board's — kept out of the page so it can be tested without a DOM, the way

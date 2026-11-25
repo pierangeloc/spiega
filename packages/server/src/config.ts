@@ -19,7 +19,7 @@ export const DEFAULT_BOARD = 'default';
 export const DEFAULT_PORT = 4777;
 
 /* The log file path for a board name inside a boards directory.
-   Matches `boardLogFile` in src/board/log.js so both halves name the same
+   Matches `boardLogFile` in src/board/log.ts so both halves name the same
    file while the log module itself is still being ported. */
 export const boardFileIn = (boardsDir: string, name: string): string =>
   path.join(boardsDir, `${String(name).replace(/[^a-z0-9._-]+/gi, '-')}.jsonl`);
@@ -49,7 +49,7 @@ export const makeHome = (homeDir: string): SpiegaHomeShape => {
 };
 
 /* HOME first, then USERPROFILE for Windows, then the syscall when neither is
-   set — the same precedence as src/home.js so the server agrees with the
+   set — the same precedence as src/home.ts so the server agrees with the
    shell rather than a cached runtime answer. */
 export const resolveHomeDir = (
   env: Readonly<Record<string, string | undefined>> = process.env,

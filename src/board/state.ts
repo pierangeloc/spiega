@@ -9,7 +9,7 @@
    The ops are also what a board is made of on disk: one JSON line per op,
    appended to ~/.spiega/boards/<id>.jsonl. Restore is this same applyOps over
    the lines read back, so there is no second representation to keep in step.
-   That half lives in ./log.js, because THIS FILE RUNS IN THE BROWSER — it is
+   That half lives in ./log.ts, because THIS FILE RUNS IN THE BROWSER — it is
    bundled into the board page — and a browser cannot resolve `node:fs`.
    Importing one here takes the whole page down with it.
 

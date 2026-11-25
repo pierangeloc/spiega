@@ -83,7 +83,7 @@ is read off disk by the browser, and the server has no route that would let it.
 The bundle reaches into `src/board` and `src/render` — the reducer, the
 renderer, narration — so every module it reaches must still run in a browser.
 **Never import a `node:` builtin, or any bare specifier, into one of them.** If
-you need the filesystem, put that half in a node-only module — `src/board/log.js`
+you need the filesystem, put that half in a node-only module — `src/board/log.ts`
 exists because persistence put `import fs from 'node:fs'` into `state.js` and
 took every board down with it.
 
@@ -216,11 +216,13 @@ Strict means strict: **never buy a green check with `any`, `@ts-ignore` or a
 loosened flag.** That rule predates the migration and is the only reason the
 modules that opted in early are worth having opted in.
 
-The JavaScript that has not been ported is checked file by file. `checkJs` is
-off; a module opts in by saying `// @ts-check` and being listed in
-`tsconfig.json` — do both, or it is checked by nobody. Render is no longer the
-reason for that: the whole package is TypeScript since #145, and what is left
-unchecked is the JavaScript outside it, which #160 finishes.
+There is no JavaScript left in `src/` or `packages/` (#160), and `allowJs` is
+off in `tsconfig.base.json` — said explicitly, so turning it back on is a
+visible decision rather than a default. A module is checked by being in a
+source tree; nothing opts in, and nothing is listed one by one. What still runs
+as JavaScript is outside the checker on purpose: `test/*.mjs` and `tools/*.js`
+(whether the suites follow is #170), and `eslint.config.js`, which ESLint reads
+as TypeScript only behind an unstable flag.
 
 It is a separate job from `pnpm test` on purpose. The suite answers "does it
 work", the checker answers "do the types hold", and a run that cannot tell you

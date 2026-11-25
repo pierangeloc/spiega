@@ -62,7 +62,7 @@ const cmd = argv[0];
 const isFlag = (a: string): boolean => /^--?[A-Za-z]/.test(a);
 
 /* One name, two dialects. The CLI says `--keep-title` and the MCP tool says
-   `keepTitle` for the same option (src/mcp/server.js), so somebody who has
+   `keepTitle` for the same option (src/mcp/server.ts), so somebody who has
    read one and is typing at the other is not wrong, only in the wrong dialect
    — and until both spellings answer, the two vocabularies are free to drift
    apart one option at a time. Comparing on the kebab form makes them the same
