@@ -48,7 +48,9 @@ TypeScript and the picture sets remain byte-checked.
 the Effect router, stream, log flush, snapshot/export/window, the `serve`,
 `open`, `install` and `doctor` commands, and the last of `src/` in strict
 TypeScript. #186's vanished-browser failure is now a tool error rather than a
-dead MCP server. The human-gated #146, #136 and #151 remain separate.
+dead MCP server. Of the human-gated three, #146 and #151 are now answered —
+the MCP server is deliberately not rebuilt,
+[ADR 0003](adr/0003-keep-the-hand-rolled-mcp-server.md) — and #136 remains.
 
 **Phase 4 (board app) is finished.** #152–#157 landed: the React app is the
 board, narration plays on it, and an export is one self-contained file whose
@@ -230,16 +232,24 @@ cannot afford; the log is now closed whatever the verdict.
 
 ## Deliberately left undone
 
-None of these is a port. The first three are decisions somebody still has to
-make; the last two are decisions already made, recorded so the JavaScript they
-leave behind reads as intended rather than as a loose end.
+None of these is a port. Only the first is still a decision somebody has to
+make; the rest are decisions already made, recorded so the JavaScript and the
+hand-written code they leave behind read as intended rather than as loose ends.
 
 - **#136** — `board_draw` advertises a real schema to MCP clients.
-  `ready-for-human`: it needs four real clients.
-- **#146** — the MCP spike, Effect's MCP module or the official SDK wrapped.
-  `ready-for-human`.
-- **#151** — MCP as a thin Effect adapter over the board API. Waits on #136 and
-  #146. #160 ported `src/mcp/server` straight across and built none of it.
+  `ready-for-human`: it needs real clients, and it is the only one of these
+  with a symptom a user can feel. Going ahead.
+- **#146** — the MCP spike. **Decided: neither option.** Effect's `McpServer`
+  now ships inside `effect` itself, so it adds no dependency — but unbundled it
+  answers `initialize` in 228 ms against today's 38 ms, and it only matches
+  today's number as a 317 KB bundle, a shape this build does not otherwise
+  produce. Nothing we have asked for needs what it would buy.
+  [ADR 0003](adr/0003-keep-the-hand-rolled-mcp-server.md).
+- **#151** — MCP as a thin Effect adapter over the board API. **Declined**, as
+  the consequence of #146: `src/mcp/server.ts` already *is* that adapter, and
+  #160 ported it straight across. The migration ends with one module
+  deliberately not rebuilt, and 38 ms is a property of its importing no Effect
+  at all.
 - **#170** — whether the suites follow into TypeScript. **Decided: they do
   not.** `test/*.mjs` and `tools/*.js` stay JavaScript and stay outside the
   checker. The gradual port this ADR 0002 planned for ported nothing in ten
@@ -253,13 +263,15 @@ leave behind reads as intended rather than as a loose end.
 
 ### The human track, startable now
 
-**#146, the MCP spike**, and **#136** (`board_draw` advertises a real schema,
-which needs four real MCP clients). #151 waits on both.
+**#136** (`board_draw` advertises a real schema), and only that. #146 is
+answered and #151 is declined — [ADR 0003](adr/0003-keep-the-hand-rolled-mcp-server.md).
 
-**#146** is Effect's MCP module versus the official SDK wrapped, decided on
-cold start. It is gated on nothing, it is the one unstable-module risk in the
-plan, and it produces the ADR that de-risks #151 long before phase 3 arrives.
-The best use of your own hands while agents port the core.
+**#136** is the one with a symptom a user can feel: a client is told `ops` is
+an `object` and nothing more, so a model guesses and malformed ops arrive. The
+schema is generated from the op union at build time; what needs your own hands
+is driving the real clients — Claude Code, opencode, Cursor and Pi — because
+clients differ in how much JSON Schema they digest and no unit test here can
+tell you which ones choke.
 
 ## What to check before calling any of these done
 

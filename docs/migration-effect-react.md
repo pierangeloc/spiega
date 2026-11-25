@@ -156,6 +156,8 @@ From this single definition:
 
 ### D4. MCP server
 
+**Resolved, and not as either option below: neither — [ADR 0003](adr/0003-keep-the-hand-rolled-mcp-server.md).** Effect's `McpServer` moved into the `effect` package, so it adds no dependency, but it answers `initialize` in 228 ms unbundled against today's 38 ms, and matches today only as a 317 KB bundle. The hand-rolled server stays and #151 is declined. The rest of this section is kept as the question that was asked.
+
 Two options, decided by a one-day spike at the start of phase 3:
 
 1. **Effect's `McpServer`** (`effect/unstable/ai` in v4, `@effect/ai` in v3). Tools are defined from Schema and the stdio transport comes from `@effect/platform-node`. Risk: it's marked *unstable*.
@@ -234,6 +236,6 @@ Estimates are focused working days, AI-assisted, rough.
 
 ## 9. Open questions
 
-1. ~~**Effect v3 or v4?**~~ Settled: v4 — [ADR 0001](adr/0001-effect-v4.md). Whether its MCP module is the one we use is a separate question, spiked in #146.
+1. ~~**Effect v3 or v4?**~~ Settled: v4 — [ADR 0001](adr/0001-effect-v4.md). ~~Whether its MCP module is the one we use~~ is settled too, in the direction neither option expected: we keep the hand-rolled server — [ADR 0003](adr/0003-keep-the-hand-rolled-mcp-server.md).
 2. ~~**Port `test/smoke.mjs` wholesale, or gradually?**~~ Settled: gradually, against the built output — [ADR 0002](adr/0002-port-the-suite-gradually.md).
 3. **Does the hosted viewer** (from the product proposal) reuse `packages/board` directly? If so, design phase 4's store to work with both SSE (local) and a static, saved board (hosted).
