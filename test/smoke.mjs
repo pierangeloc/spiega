@@ -2461,7 +2461,7 @@ await atest('the MCP server exits when its client closes the pipe', async () => 
   // talk to it first, so we know we are killing a live server and not a corpse
   child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
   /* Read to the first newline rather than parsing one chunk: the tools/list
-     reply is some 12 KB of descriptions and a pipe hands it over in whatever
+     reply is some 23 KB of descriptions and a pipe hands it over in whatever
      pieces it likes, which on one runner was a first chunk of 8 KB and an
      "Unterminated string in JSON" that had nothing to do with the server. */
   const reply = await new Promise((res, rej) => {
@@ -2574,6 +2574,239 @@ await atest('board_draw and board_tag take their list as a JSON string, as some 
     child.kill('SIGKILL');
     app.server.close();
     app.server.closeAllConnections?.();
+  }
+});
+
+/* #136: board_draw used to tell a client that `ops` was a bare `object`, so a
+   model drawing mid-sentence was told nothing about what an op looks like.
+   What it is told now is the op union itself, turned into JSON Schema by
+   tools/op-schema.js and committed as src/mcp/op-schema.json.
+
+   "Derived" is the claim that needs proving, because a committed file that is
+   merely equal to the union today drifts the first time somebody adds a field
+   to op.ts and forgets the schema. So the generator is handed a union with an
+   op added and an op changed, and the advertisement has to follow both; the
+   committed file has to be what the generator writes; and the real server,
+   over its real pipe, has to advertise exactly that file — in both of the
+   shapes it can advertise it in, and with every `$ref` landing somewhere,
+   since a dangling pointer is worse than no schema at all.
+
+   And the server has to do it without Effect. Generating at startup would have
+   been the obvious version, and importing `effect` costs three times what the
+   whole of `initialize` does without it — the reason the schema is generated
+   at build time is a property of the import graph, so the import graph is what
+   is checked. */
+await atest('board_draw and board_amend advertise the op union, derived from it (#136)', async () => {
+  const { spawn } = await import('node:child_process');
+  const { Schema } = await import('effect');
+  const { OPS, KINDS: CORE_KINDS } = await import('../packages/core/src/schema/op.js');
+  const { advertised, generated, OWN_TOOL } = await import('../tools/op-schema.js');
+
+  const names = s => s.anyOf.map(b => b.properties.op.enum[0]);
+  const union = advertised();
+  assert.deepEqual(names(union),
+    ['node', 'note', 'edge', 'boundary', 'callout', 'step', 'group', 'flow', 'say', 'tag', 'title', 'remove'],
+    'board_draw advertises the twelve ops that have no tool of their own, and say and tag');
+  for (const op of Object.keys(OWN_TOOL))
+    assert.ok(!names(union).includes(op), `${op} has ${OWN_TOOL[op]}, and is not advertised a second time`);
+
+  // An op added to the union is advertised without anyone listing it, and a
+  // field changed in it changes what the client is told.
+  const changed = advertised({
+    ...OPS,
+    node: Schema.Struct({ ...OPS.node.fields, id: Schema.String }),
+    glow: Schema.Struct({ op: Schema.Literal('glow'), hue: Schema.String }),
+  });
+  assert.deepEqual(names(changed), [...names(union), 'glow'], 'a new op is advertised by default');
+  const glow = changed.anyOf.at(-1);
+  assert.deepEqual(glow.required, ['op', 'hue']);
+  assert.deepEqual(glow.properties.hue, { type: 'string' });
+  assert.ok(!union.anyOf[0].required.includes('id'), 'node ids are optional today');
+  assert.ok(changed.anyOf[0].required.includes('id'), 'and the advertisement follows the union when they are not');
+
+  const committed = fs.readFileSync(path.join(ROOT, 'src/mcp/op-schema.json'), 'utf8');
+  assert.equal(committed, JSON.stringify(generated(), null, 2) + '\n',
+    'src/mcp/op-schema.json is not what the op union generates — run `pnpm run op-schema` and commit it');
+
+  /* The kinds a model is told, in the prose and in the schema, are the kinds
+     there are glyphs for. The prose kept its own list once and it lost
+     `field` — a real kind, hidden from every agent — and this PR put the
+     stale list and the right one side by side in one tool. */
+  assert.deepEqual([...CORE_KINDS], KINDS,
+    'the kinds op.ts advertises are not the kinds src/render/glyphs.ts draws');
+
+  /* Resolve-time rather than a walk of the import statements, because the
+     board server reaches Effect through a lazy `require` that no static walk
+     sees — which is exactly the door it would come back in by. */
+  const watch = 'data:text/javascript,' + encodeURIComponent(
+    'import { registerHooks } from "node:module";' +
+    'registerHooks({ resolve(s, c, next) {' +
+    '  if (/^effect(\\/|$)/.test(s)) throw new Error("the MCP server imported " + s);' +
+    '  return next(s, c);' +
+    '} });');
+  const list = env => new Promise((res, rej) => {
+    const child = spawn(process.execPath, ['--import', watch, path.join(ROOT, 'src/mcp/server.js')], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, SPIEGA_URL: 'http://127.0.0.1:1/b/none', ...env },
+    });
+    const t = setTimeout(() => { child.kill('SIGKILL'); rej(new Error('no reply to tools/list')); }, 8000);
+    let out = '', err = '';
+    child.stderr.on('data', d => { err += d; });
+    child.stdout.on('data', d => {
+      out += d;
+      for (let i; (i = out.indexOf('\n')) >= 0; ) {
+        const line = out.slice(0, i); out = out.slice(i + 1);
+        const msg = JSON.parse(line);
+        if (msg.id !== 2) continue;
+        clearTimeout(t);
+        child.stdin.end();
+        res({ line, tools: msg.result.tools });
+      }
+    });
+    child.on('exit', code => { if (code) { clearTimeout(t); rej(new Error(err || `exited ${code}`)); } });
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) + '\n' +
+      JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n');
+  });
+
+  // a JSON pointer, read the way a validator reads one: against the document root
+  const resolve = (root, ref) => ref.replace(/^#\//, '').split('/')
+    .reduce((at, key) => at?.[key.replace(/~1/g, '/').replace(/~0/g, '~')], root);
+  const refs = (s, found = []) => {
+    if (s && typeof s === 'object') for (const [k, v] of Object.entries(s)) k === '$ref' ? found.push(v) : refs(v, found);
+    return found;
+  };
+
+  const shared = await list({});
+  const flat = await list({ SPIEGA_MCP_FLAT_SCHEMA: '1' });
+  for (const name of ['board_draw', 'board_amend']) {
+    const s = shared.tools.find(t => t.name === name).inputSchema;
+    assert.deepEqual(s.$defs.op, union, `${name} carries the generated union under $defs`);
+    assert.deepEqual(s.properties.ops.anyOf,
+      [{ $ref: '#/$defs/op' }, { type: 'array', items: { $ref: '#/$defs/op' } }],
+      `${name} takes one op or an array of them`);
+    for (const ref of refs(s))
+      assert.ok(resolve(s, ref), `${name} points at ${ref}, which is not in its inputSchema`);
+
+    const f = flat.tools.find(t => t.name === name).inputSchema;
+    assert.equal(f.$defs, undefined, `the flat ${name} carries no $defs`);
+    assert.deepEqual(f.properties.ops.anyOf, [union, { type: 'array', items: union }],
+      `the flat ${name} inlines the union in both places`);
+  }
+  assert.deepEqual(shared.tools.find(t => t.name === 'board_amend').inputSchema.required, ['chapter', 'ops']);
+  const draw = shared.tools.find(t => t.name === 'board_draw');
+  assert.equal(draw.inputSchema.$defs.op.anyOf[0].properties.kind.description, `one of: ${KINDS.join(', ')}`);
+  assert.ok(draw.description.includes(`kinds: ${KINDS.join(', ')}\n`),
+    'board_draw\'s prose names the same kinds as its schema, in the same order');
+  assert.ok(!flat.line.includes('"$ref"'), 'SPIEGA_MCP_FLAT_SCHEMA=1 leaves no $ref anywhere in tools/list');
+});
+
+/* #136, the other half: the tool advertising a schema must not change what
+   the tool does. MCP is a wrapper over POST /op, so the same ops sent both
+   ways have to leave the same board — every field of it, chapters, transcript
+   and log included — and the reply an agent reads has to carry the same
+   warnings and the same audit the HTTP caller gets. Two boards, one drawn
+   through the real MCP server over its real pipe, the other with the same ops
+   posted by hand, in the same batches. Two servers rather than two boards on
+   one, because creating a second board writes it into the registry under the
+   home directory of whoever runs the suite. */
+await atest('a board drawn through MCP is identical to the same ops over HTTP (#136)', async () => {
+  const { spawn } = await import('node:child_process');
+  const { createServer } = await import('../src/board/server.js');
+  const listen = async name => {
+    const app = createServer({ name });
+    await new Promise(r => app.server.listen(0, '127.0.0.1', r));
+    return [app, `http://127.0.0.1:${app.server.address().port}/b/${name}`];
+  };
+  const [[mcpApp, viaMcp], [httpApp, viaHttp]] = [await listen('same'), await listen('same')];
+
+  const child = spawn(process.execPath, [path.join(ROOT, 'src/mcp/server.js')], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, SPIEGA_URL: viaMcp },
+  });
+  const waiting = new Map();
+  let out = '';
+  child.stdout.on('data', d => {
+    out += d;
+    for (let i; (i = out.indexOf('\n')) >= 0; ) {
+      const line = out.slice(0, i).trim(); out = out.slice(i + 1);
+      if (!line) continue;
+      const msg = JSON.parse(line);
+      waiting.get(msg.id)?.(msg);
+      waiting.delete(msg.id);
+    }
+  });
+  let id = 0;
+  const callTool = (name, args) => new Promise((res, rej) => {
+    const mine = ++id;
+    const t = setTimeout(() => rej(new Error(`no reply to ${name}`)), 8000);
+    waiting.set(mine, m => { clearTimeout(t); res(m.result); });
+    child.stdin.write(JSON.stringify(
+      { jsonrpc: '2.0', id: mine, method: 'tools/call', params: { name, arguments: args } }) + '\n');
+  });
+  const post = async (ops, audit) => (await fetch(viaHttp + '/op', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ops, ...(audit ? { audit: true } : {}) }),
+  })).json();
+  // When an op arrived is the one thing two boards drawn a moment apart cannot
+  // share. A callout's `at` is the box it points at, and stays.
+  const timeless = v => Array.isArray(v) ? v.map(timeless)
+    : v && typeof v === 'object'
+      ? Object.fromEntries(Object.entries(v).filter(([k, x]) => !(k === 'at' && typeof x === 'number'))
+        .map(([k, x]) => [k, timeless(x)]))
+      : v;
+  const state = async u => timeless(await (await fetch(u + '/state')).json());
+
+  // Every advertised op, as one object and as arrays, through both tools.
+  const calls = [
+    ['board_draw', { ops: [
+      { op: 'title', text: 'Placing an order' },
+      { op: 'node', id: 'gw', kind: 'gateway', label: 'API Gateway', sub: 'authn' },
+      { op: 'node', id: 'orders', label: 'Orders' },
+      { op: 'edge', from: 'gw', to: 'orders', label: 'gRPC' },
+      { op: 'note', id: 'n1', label: 'retries are capped at 3' },
+    ] }, ops => ops],
+    ['board_draw', { ops: { op: 'callout', at: 'orders', label: 'owns the order', side: 'below' } }, ops => [ops]],
+    ['board_draw', { ops: [
+      { op: 'say', text: 'The gateway checks the token first.' },
+      { op: 'group', id: 'checkout', label: 'Checkout' },
+      { op: 'step', edge: 'gw>orders', step: 'The gateway forwards the call', group: 'checkout' },
+      { op: 'tag', match: 'checks the token', step: 1 },
+    ] }, ops => ops],
+    ['board_draw', { ops: [
+      { op: 'node', id: 'db', kind: 'datastore', label: 'Orders DB' },
+      { op: 'edge', from: 'orders', to: 'db', async: true },
+      { op: 'boundary', label: 'our VPC', members: ['orders', 'db'] },
+      { op: 'flow', steps: [{ edge: 'gw>orders', step: 'forward' }, { edge: 'orders>db', step: 'store' }] },
+      { op: 'remove', id: 'n1' },
+    ] }, ops => ops],
+    ['board_chapter', { title: 'Part two' }, () => [{ op: 'chapter', title: 'Part two' }]],
+    ['board_draw', { ops: { op: 'node', id: 'pay', kind: 'external', label: 'Stripe' } }, ops => [ops]],
+    ['board_amend', { chapter: 1, ops: [{ op: 'node', id: 'cache', kind: 'cache', label: 'Cache' },
+      { op: 'edge', from: 'orders', to: 'cache' }] },
+    ops => [{ op: 'amend', chapter: 1, ops }]],
+  ];
+
+  try {
+    for (const [tool, args, asHttp] of calls) {
+      const said = await callTool(tool, args);
+      assert.ok(!said.isError, `${tool} should draw: ${said.content[0].text}`);
+      const audit = tool !== 'board_chapter';
+      const r = await post(asHttp(args.ops), audit);
+      assert.deepEqual(r.errors || [], [], `the same ops over HTTP should draw: ${r.errors}`);
+      assert.deepEqual(said.content[0].text.split('\n').slice(1), [...(r.warnings || []), ...(r.audit?.lines || [])],
+        `${tool} tells the agent what POST /op tells its caller`);
+    }
+    const [a, b] = [await state(viaMcp), await state(viaHttp)];
+    assert.equal(a.chapters.length, 1, 'the drawing reached a second chapter');
+    assert.ok(a.chapters[0].nodes.some(n => n.id === 'cache'), 'and the amendment reached the first');
+    assert.deepEqual(a, b);
+  } finally {
+    child.stdin.end();
+    child.kill('SIGKILL');
+    for (const app of [mcpApp, httpApp]) {
+      app.server.close();
+      app.server.closeAllConnections?.();
+    }
   }
 });
 

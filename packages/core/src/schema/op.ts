@@ -70,8 +70,13 @@ const num = Schema.optionalKey(Num);
    the rail reads it as "tied to nothing". */
 const StepRef = Schema.optionalKey(Schema.NullOr(Num));
 
-const KINDS = 'service, gateway, datastore, queue, cache, client, external, ' +
-  'compute, note, formula, field, blob, vessel, particle, source';
+/* The kinds with a glyph, as a model is told them. Exported because the MCP
+   tool's own prose names them as well, through tools/op-schema.js — a second
+   list typed out there hid `field` from every agent for as long as it was
+   stale (#136). The glyph table in src/render/glyphs.ts is what the reducer
+   checks against, and the suite holds the two equal. */
+export const KINDS = ['service', 'gateway', 'datastore', 'queue', 'cache', 'client', 'external',
+  'compute', 'note', 'formula', 'field', 'blob', 'vessel', 'particle', 'source'] as const;
 
 /* One struct per op, in the order docs/vocabulary.md lists them, because that
    table and this file are the same document said twice and a reader will have
@@ -83,7 +88,7 @@ const NodeFields = {
   sub: str,
   /* Any string. A kind with no glyph is drawn as a service and warned about,
      which is the reducer's decision and not this file's to overturn. */
-  kind: Schema.optionalKey(Schema.String.annotate({ description: `one of: ${KINDS}` })),
+  kind: Schema.optionalKey(Schema.String.annotate({ description: `one of: ${KINDS.join(', ')}` })),
   lines: Schema.optionalKey(Ids.annotate({ description: 'lines of text, not ids' })),
   body: Schema.optionalKey(Schema.String.annotate({
     description: 'body colour: tomato, mustard, mint, cobalt, blush, slate, linen or paper',
