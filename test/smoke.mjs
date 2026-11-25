@@ -2599,8 +2599,8 @@ await atest('board_draw and board_tag take their list as a JSON string, as some 
 await atest('board_draw and board_amend advertise the op union, derived from it (#136)', async () => {
   const { spawn } = await import('node:child_process');
   const { Schema } = await import('effect');
-  const { OPS } = await import('../packages/core/src/schema/op.js');
-  const { advertised, OWN_TOOL } = await import('../tools/op-schema.js');
+  const { OPS, KINDS: CORE_KINDS } = await import('../packages/core/src/schema/op.js');
+  const { advertised, generated, OWN_TOOL } = await import('../tools/op-schema.js');
 
   const names = s => s.anyOf.map(b => b.properties.op.enum[0]);
   const union = advertised();
@@ -2625,8 +2625,15 @@ await atest('board_draw and board_amend advertise the op union, derived from it 
   assert.ok(changed.anyOf[0].required.includes('id'), 'and the advertisement follows the union when they are not');
 
   const committed = fs.readFileSync(path.join(ROOT, 'src/mcp/op-schema.json'), 'utf8');
-  assert.equal(committed, JSON.stringify(union, null, 2) + '\n',
+  assert.equal(committed, JSON.stringify(generated(), null, 2) + '\n',
     'src/mcp/op-schema.json is not what the op union generates — run `pnpm run op-schema` and commit it');
+
+  /* The kinds a model is told, in the prose and in the schema, are the kinds
+     there are glyphs for. The prose kept its own list once and it lost
+     `field` — a real kind, hidden from every agent — and this PR put the
+     stale list and the right one side by side in one tool. */
+  assert.deepEqual([...CORE_KINDS], KINDS,
+    'the kinds op.ts advertises are not the kinds src/render/glyphs.ts draws');
 
   /* Resolve-time rather than a walk of the import statements, because the
      board server reaches Effect through a lazy `require` that no static walk
@@ -2686,6 +2693,10 @@ await atest('board_draw and board_amend advertise the op union, derived from it 
       `the flat ${name} inlines the union in both places`);
   }
   assert.deepEqual(shared.tools.find(t => t.name === 'board_amend').inputSchema.required, ['chapter', 'ops']);
+  const draw = shared.tools.find(t => t.name === 'board_draw');
+  assert.equal(draw.inputSchema.$defs.op.anyOf[0].properties.kind.description, `one of: ${KINDS.join(', ')}`);
+  assert.ok(draw.description.includes(`kinds: ${KINDS.join(', ')}\n`),
+    'board_draw\'s prose names the same kinds as its schema, in the same order');
   assert.ok(!flat.line.includes('"$ref"'), 'SPIEGA_MCP_FLAT_SCHEMA=1 leaves no $ref anywhere in tools/list');
 });
 

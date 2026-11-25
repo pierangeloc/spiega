@@ -28,7 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Schema } from 'effect';
-import { OPS } from '../packages/core/src/schema/op.js';
+import { OPS, KINDS } from '../packages/core/src/schema/op.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -71,8 +71,14 @@ export function advertised(ops = OPS) {
   return doc.schema;
 }
 
+/* What the MCP server reads: the op schema, and the kinds board_draw's prose
+   names. The kinds ride along because the prose and the schema sit in the
+   same tool, a few lines apart, and a list typed out by hand in the server
+   was the stale one of the two (#136). */
+export const generated = () => ({ kinds: [...KINDS], op: advertised() });
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const out = process.argv[2] ? path.resolve(process.argv[2]) : path.join(ROOT, 'src', 'mcp', 'op-schema.json');
-  fs.writeFileSync(out, JSON.stringify(advertised(), null, 2) + '\n');
+  fs.writeFileSync(out, JSON.stringify(generated(), null, 2) + '\n');
   console.log(`wrote ${path.relative(process.cwd(), out)}`);
 }

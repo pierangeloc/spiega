@@ -18,8 +18,6 @@ import type { Board } from '../board/state.js';
    and were handed the same board — see claimSession in board/server.ts. */
 claimSession();
 
-const KINDS = 'client, gateway, service, compute, datastore, cache, queue, external, note, formula, blob, vessel, particle, source';
-
 /* The board for this session, started if need be. One server holds every
    board, so this is usually a file read and nothing more. */
 const url = async (): Promise<string> => {
@@ -68,8 +66,13 @@ async function send(ops: unknown, { audit = false }: { audit?: boolean } = {}): 
    packages/core/src/schema/op.ts by tools/op-schema.js and committed beside
    this file. Read as data rather than generated here, because generating it
    means importing `effect`, and that alone is three times what answering
-   `initialize` costs without it. */
-const OP_SCHEMA: object = JSON.parse(fs.readFileSync(new URL('./op-schema.json', import.meta.url), 'utf8'));
+   `initialize` costs without it.
+
+   The kinds board_draw's prose names come from the same file, so the prose
+   and the schema's own `kind` description are one list. They used to be two,
+   and the one typed out here had been missing `field` all along. */
+const { kinds: KINDS, op: OP_SCHEMA }: { kinds: string[], op: object } =
+  JSON.parse(fs.readFileSync(new URL('./op-schema.json', import.meta.url), 'utf8'));
 
 /* `ops` is one op or an array of them, and the union is some 7 KB, so by
    default it is stated once per tool under `$defs` and pointed at twice. The
@@ -122,7 +125,7 @@ const TOOLS = [
     name: 'board_draw',
     description:
       'Add things to the board. Pass one op or several. Ops:\n' +
-      `  {"op":"node","id":"gw","kind":"gateway","label":"API Gateway","sub":"authn"}   kinds: ${KINDS}\n` +
+      `  {"op":"node","id":"gw","kind":"gateway","label":"API Gateway","sub":"authn"}   kinds: ${KINDS.join(', ')}\n` +
       '  {"op":"edge","from":"gw","to":"orders","label":"gRPC","async":false}\n' +
       '  {"op":"note","label":"retries are capped at 3"}\n' +
       '  {"op":"node","kind":"formula","id":"ke","label":"K = \\\\int_0^v v\\\\,d(\\\\gamma m v)"}\n' +
