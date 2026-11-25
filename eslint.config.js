@@ -116,22 +116,15 @@ export default [
     rules: browserSafeTs,
   },
   {
-    // The node side (JavaScript). These run only in the server process, and the
-    // board page must never reach them.
-    files: [
-      'src/board/server.js',
-    ],
-    rules: nodeSide,
-  },
-  {
     // The node side (TypeScript). `settle.ts` imports `@dagrejs/dagre`, which
     // runs only in the server process — a test in smoke.mjs still asserts that
     // the board page never reaches settle.js or dagre. `log.ts` is the op log
-    // on disk, split from the reducer for exactly this rule. The other three
+    // on disk, split from the reducer for exactly this rule, and `server.ts`
+    // is the http server that holds the boards. The other three
     // read files and start processes: the export reads the page and its modules
     // off disk, the snapshot inlines the icon, and open runs the window Effects
     // in packages/server/src/window.ts, which start a browser.
-    files: ['src/board/settle.ts', 'src/board/log.ts', 'src/board/export.ts', 'src/board/open.ts', 'src/board/snapshot.ts'],
+    files: ['src/board/settle.ts', 'src/board/log.ts', 'src/board/server.ts', 'src/board/export.ts', 'src/board/open.ts', 'src/board/snapshot.ts'],
     rules: { ...nodeSide, '@typescript-eslint/no-restricted-imports': 'off' },
   },
   {

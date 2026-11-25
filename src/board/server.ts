@@ -25,9 +25,10 @@ import { spawn, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { emptyBoard, boardOps } from './state.js';
+import { emptyBoard, boardOps, type Board, type Chapter } from './state.js';
 import { restoreBoard, openLogFile, boardLogFile } from './log.js';
 import { home } from '../home.js';
+import type { BoardEntry, BoardEvents, OpLog, SavingStatus } from '../../packages/server/src/index.js';
 
 /* The Effect server: the routes, the op log's writer and the op Schema that
    screens what an agent posts.
@@ -45,9 +46,11 @@ import { home } from '../home.js';
  * a socket: loading Effect eagerly put 70 ms into the start-up of a process
  * that posts its ops over HTTP to somebody else's board and never decodes one.
  */
+type ServerPkg = typeof import('../../packages/server/src/index.js');
 const require = createRequire(import.meta.url);
-let serverPkg = null;
-const loadServerPkg = () => (serverPkg ??= require('../../packages/server/src/index.js'));
+let serverPkg: ServerPkg | null = null;
+const loadServerPkg = (): ServerPkg =>
+  (serverPkg ??= require('../../packages/server/src/index.js') as ServerPkg);
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..', '..');
@@ -59,7 +62,7 @@ export const SESSION_DIR = path.join(home(), '.spiega');
    does any shell alias or script someone wrote. Honouring both for a while
    costs one function and means a half-updated machine keeps working, which is
    the state every machine is in during a rename. */
-const envVar = name => process.env[`SPIEGA_${name}`] ?? process.env[`HANDWAVE_${name}`];
+const envVar = (name: string): string | undefined => process.env[`SPIEGA_${name}`] ?? process.env[`HANDWAVE_${name}`];
 /* Read, never written any more. It held the url of the one board there used to
    be, back when that board answered /state and /op at its root. A board is now
    at /b/<name>, so writing this file would record a url that nothing here
@@ -68,12 +71,12 @@ const envVar = name => process.env[`SPIEGA_${name}`] ?? process.env[`HANDWAVE_${
 export const SESSION_FILE = path.join(SESSION_DIR, 'session.json');
 /* The boards themselves: one append-only JSONL op log each. */
 export const BOARDS_DIR = path.join(SESSION_DIR, 'boards');
-export const boardFile = name => boardLogFile(BOARDS_DIR, name);
+export const boardFile = (name: string): string => boardLogFile(BOARDS_DIR, name);
 
 /* The canonical port, and the lock on being the server — see `listen`. */
 export const PORT = Number(envVar('PORT')) || 4777;
 
-const json = (res, code, body) => {
+const json = (res: http.ServerResponse, code: number, body: unknown): void => {
   const s = JSON.stringify(body);
   res.writeHead(code, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(s) });
   res.end(s);
@@ -82,27 +85,66 @@ const json = (res, code, body) => {
 /* A throw while settling must cost the request, not the process — one process
    holds every board. Its callers parse the answer, so a failed batch answers in
    the shape they expect rather than as plain text they would choke on. */
-const failedOp = (res, e) => {
-  const message = e && e.message ? e.message : String(e);
+const failedOp = (res: http.ServerResponse, e: unknown): void => {
+  const message = e && typeof e === 'object' && 'message' in e && e.message ? String(e.message) : String(e);
   return json(res, 500, { ok: false, error: `spiega could not apply these ops: ${message}` });
 };
 
-const readBody = req => new Promise((resolve, reject) => {
+const readBody = (req: http.IncomingMessage): Promise<string> => new Promise((resolve, reject) => {
   let b = '';
   req.on('data', c => { b += c; if (b.length > 4e6) reject(new Error('body too large')); });
   req.on('end', () => resolve(b));
   req.on('error', reject);
 });
 
-export function createServer({ board = null, name = DEFAULT_BOARD, persist = false, debounce = 100 } = {}) {
+/* A board this process is holding. `events` is made the first time somebody
+   watches, and `log` is null for a board that is not being saved. */
+export interface HeldBoard {
+  readonly name: string;
+  board: Board;
+  events: BoardEvents | null;
+  readonly started: number;
+  log: OpLog | null;
+}
+
+/* What a restore hands `hold`: the board, and enough about the file to append
+   to it. `unreadable` is a log this build could not read at all. */
+interface Loaded {
+  readonly board: Board;
+  readonly lines: number;
+  readonly tail: boolean;
+  readonly unreadable?: boolean;
+}
+
+export interface BoardServer {
+  readonly server: http.Server;
+  readonly boards: Map<string, HeldBoard>;
+  readonly hold: (name: string, board?: Board | null) => HeldBoard;
+  readonly drop: (name: string) => Promise<boolean>;
+  readonly broadcast: (entry: HeldBoard, event: 'patch' | 'replay' | 'saving', data: unknown) => void;
+  readonly name: string;
+  url: string | null;
+  readonly board: Board;
+  readonly flush: () => Promise<unknown>;
+  readonly close: () => Promise<unknown>;
+}
+
+export interface ServerOptions {
+  board?: Board | null;
+  name?: string;
+  persist?: boolean;
+  debounce?: number;
+}
+
+export function createServer({ board = null, name = DEFAULT_BOARD, persist = false, debounce = 100 }: ServerOptions = {}): BoardServer {
   const pkg = loadServerPkg();
 
   /* name -> { name, board, events, log }. Nothing else in the process is per
      board: the renderer, the port and the HTTP server are shared. Tests and
      one-off renders stay in memory; `startBoard` turns persistence on. */
-  const boards = new Map();
+  const boards = new Map<string, HeldBoard>();
 
-  const load = nm => {
+  const load = (nm: string): Loaded => {
     if (!persist) return { board: emptyBoard(), lines: 0, tail: true };
     try {
       const loaded = restoreBoard(boardFile(nm));
@@ -125,16 +167,17 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
       /* Said once, in words, and the board is held without a log: appending
          to a file this version cannot read would put its ops after the ones
          it could not, and compacting it would overwrite them. */
-      console.error(`spiega: ${e.name === 'LogError' ? e.message : `could not restore "${nm}": ${e.message}`}`);
+      const err = e as Error;
+      console.error(`spiega: ${err.name === 'LogError' ? err.message : `could not restore "${nm}": ${err.message}`}`);
       return { board: emptyBoard(), lines: 0, tail: true, unreadable: true };
     }
   };
 
-  const hold = (nm, b = null) => {
+  const hold = (nm: string, b: Board | null = null): HeldBoard => {
     const held = boards.get(nm);
     if (held) return held;
-    const loaded = b ? { board: b, lines: 0, tail: true } : load(nm);
-    const entry = { name: nm, board: loaded.board, events: null, started: Date.now(), log: null };
+    const loaded: Loaded = b ? { board: b, lines: 0, tail: true } : load(nm);
+    const entry: HeldBoard = { name: nm, board: loaded.board, events: null, started: Date.now(), log: null };
     boards.set(nm, entry);
     if (persist && !loaded.unreadable) {
       try {
@@ -149,7 +192,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
         });
       } catch (e) {
         // An unwritable state directory must not stop the board being drawn on.
-        console.error(`spiega: could not open the log for "${nm}": ${e.message}`);
+        console.error(`spiega: could not open the log for "${nm}": ${(e as Error).message}`);
       }
     }
     return entry;
@@ -167,7 +210,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
      and start one" — and a client that polls a name must not quietly stand a
      board back up on every poll. Listing never holds anything either: it is
      asking for one board, by name, that means this. */
-  const reopen = (nm, url) => {
+  const reopen = (nm: string, url: string): HeldBoard | null => {
     if (!persist || !fs.existsSync(boardFile(nm))) return null;
     const entry = hold(nm);
     /* Now open, so it belongs in the registry — owned by nobody, since a url
@@ -188,7 +231,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
      `write-failed` is the one that can start part-way through: the file was
      ours and the lock held, and then a write stopped working. The log keeps
      the ops and tries again, so it clears itself when the disk does. */
-  const saving = entry => {
+  const saving = (entry: HeldBoard): SavingStatus => {
     if (!persist) return { saving: false, why: 'memory' };
     if (!entry.log) return { saving: false, why: 'unwritable', file: boardFile(entry.name) };
     if (!entry.log.owner) return { saving: false, why: 'other-server', file: entry.log.file };
@@ -198,7 +241,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     return { saving: true, file: entry.log.file };
   };
 
-  const drop = async nm => {
+  const drop = async (nm: string): Promise<boolean> => {
     const entry = boards.get(nm);
     if (!entry) return false;
     boards.delete(nm);
@@ -207,14 +250,14 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     return true;
   };
 
-  const broadcast = (entry, event, data) => entry.events?.publish(event, data);
-  const viewers = entry => entry.events?.viewers ?? 0;
+  const broadcast: BoardServer['broadcast'] = (entry, event, data) => entry.events?.publish(event, data);
+  const viewers = (entry: HeldBoard): number => entry.events?.viewers ?? 0;
 
   /* The same settle as POST /settle, for /replay, which still needs a settled
      board before it plays one back. */
-  const settle = entry => pkg.settle(readEntry(entry));
+  const settle = (entry: HeldBoard): void => pkg.settle(readEntry(entry));
 
-  const readEntry = entry => ({
+  const readEntry = (entry: HeldBoard): BoardEntry => ({
     name: entry.name, board: entry.board, viewers: viewers(entry),
     get events() { return entry.events ??= pkg.createBoardEvents(); },
     get log() { return entry.log; },
@@ -226,7 +269,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
      from the request rather than from what `listen` recorded, so a server
      bound to an ephemeral port (every test in this repo) still hands out urls
      that work. */
-  const baseOf = req => app.url || `http://${req.headers.host || `127.0.0.1:${PORT}`}`;
+  const baseOf = (req: http.IncomingMessage): string => app.url || `http://${req.headers.host || `127.0.0.1:${PORT}`}`;
 
   /* The Effect HTTP router handles all security checks (loopback host,
      same-origin-or-absent origin, silent OPTIONS, no CORS headers), every read
@@ -265,7 +308,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
   const server = http.createServer(async (req, res) => {
     if (await bridge.handle(req, res)) return;
 
-    const url = new URL(req.url, 'http://x');
+    const url = new URL(req.url ?? '/', 'http://x');
     const p = url.pathname;
 
     /* Creating a board — the write half of /boards (GET is on the Effect router). */
@@ -273,9 +316,9 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
       if (!isJsonContentType(req.headers['content-type'])) {
         return json(res, 415, { ok: false, error: 'expected content-type: application/json' });
       }
-      let want;
+      let want: { name?: unknown, owner?: string | null, cwd?: string | null };
       try { want = JSON.parse(await readBody(req)); }
-      catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + e.message }); }
+      catch (e) { return json(res, 400, { ok: false, error: 'invalid JSON: ' + (e as Error).message }); }
       /* The name is decided here, not by the client that asked.
 
          Each client used to work its own name out of the registry and then
@@ -309,7 +352,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
 
     const m = /^\/b\/([^/]+)(\/.*)?$/.exec(p);
     if (!m || m[2] == null) { res.writeHead(404); return res.end('not found'); }
-    const nm = decodeURIComponent(m[1]);
+    const nm = decodeURIComponent(m[1] ?? '');
     const rest = m[2];
 
     const entry = boards.get(nm);
@@ -341,7 +384,7 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
     void bridge.dispose().catch(() => {});
   });
 
-  const app = {
+  const app: BoardServer = {
     server, boards, hold, drop, broadcast, name, url: null, board: first.board,
     // lets a test (or a shutdown path) wait for the buffer to reach the file
     flush: () => Promise.all([...boards.values()].map(e => e.log?.flush())),
@@ -363,11 +406,15 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
    A board that cannot be rendered says nothing here. The ops landed, the
    status says so, and an explanation does not stop because the measurement
    of it failed. */
-async function auditBoard(board) {
+async function auditBoard(board: Board | Chapter): Promise<unknown> {
   try {
     const { renderSVG } = await import('../render/render.js');
     const { audit, report } = await import('../render/audit.js');
-    const found = audit(board, renderSVG(board, { margin: 16, active: board.active }));
+    // The renderer takes a whole board; a chapter is handed over as one,
+    // carrying the board-level fields it never reads (as in the board view's
+    // drawing.ts).
+    const whole: Board = 'log' in board ? board : { ...board, chapter: '', chapters: [], log: [], rev: 0 };
+    const found = audit(board, renderSVG(whole, { margin: 16, active: board.active }));
     return { ...found, lines: report(found) };
   } catch {
     return null;
@@ -391,23 +438,33 @@ export const BOARDS_FILE = path.join(SESSION_DIR, 'boards.json');
 export const SERVER_FILE = path.join(SESSION_DIR, 'server.json');
 export const DEFAULT_BOARD = 'default';
 
-const readBoards = () => {
+/* One line of boards.json: where a board is, which process holds it, and the
+   session that claimed it, if one did. */
+export interface Registered {
+  readonly url: string;
+  readonly pid: number;
+  readonly started: number;
+  readonly owner: string | null;
+  readonly cwd: string | null;
+}
+
+const readBoards = (): Record<string, Registered> => {
   try { return JSON.parse(fs.readFileSync(BOARDS_FILE, 'utf8')); } catch { return {}; }
 };
 
-const writeBoards = all => {
+const writeBoards = (all: Record<string, Registered>): void => {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
   fs.writeFileSync(BOARDS_FILE, JSON.stringify(all, null, 2) + '\n');
 };
 
-const running = pid => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const running = (pid: number): boolean => { try { process.kill(pid, 0); return true; } catch { return false; } };
 
 /* Every board we still believe in. `prune` drops the ones whose process is
    gone — cheap, since it is a signal-0, not a request. */
-export function listBoards({ prune = true } = {}) {
+export function listBoards({ prune = true }: { prune?: boolean } = {}): Record<string, Registered> {
   const all = readBoards();
   if (!prune) return all;
-  const live = {};
+  const live: Record<string, Registered> = {};
   let changed = false;
   for (const [name, b] of Object.entries(all)) {
     if (b && b.pid && !running(b.pid)) { changed = true; continue; }
@@ -432,10 +489,10 @@ export function listBoards({ prune = true } = {}) {
 
    Newest log first: with dozens of them, when it was last drawn on is the only
    ordering anybody can use. */
-export function savedBoards() {
-  let files;
+export function savedBoards(): { name: string, file: string, written: number }[] {
+  let files: string[];
   try { files = fs.readdirSync(BOARDS_DIR); } catch { return []; }
-  const saved = [];
+  const saved: { name: string, file: string, written: number }[] = [];
   for (const f of files) {
     if (!f.endsWith('.jsonl')) continue;         // .lock and half-written .tmp files are not boards
     const file = path.join(BOARDS_DIR, f);
@@ -453,17 +510,17 @@ export function savedBoards() {
    silently rebinds that session's default board to "notes" for good, because
    the owner match comes first when resolving a name. Measured: three
    `--board` calls from one shell left all three boards claiming it. */
-export function ownerOfThisProcess() {
+export function ownerOfThisProcess(): string | null {
   return envVar('BOARD') ? null : sessionKey();
 }
 
-export function registerBoard(name, url, owner = ownerOfThisProcess(), cwd = process.cwd()) {
+export function registerBoard(name: string, url: string, owner: string | null = ownerOfThisProcess(), cwd: string | null = process.cwd()): void {
   const all = readBoards();
   all[name] = { url, pid: process.pid, started: Date.now(), owner, cwd };
   writeBoards(all);
 }
 
-export function unregisterBoard(name) {
+export function unregisterBoard(name: string): boolean {
   const all = readBoards();
   if (!(name in all)) return false;
   delete all[name];
@@ -475,7 +532,7 @@ export function unregisterBoard(name) {
 
    Where it is, written by whoever won the port. Clients read it to decide
    between asking for a board and starting a process. */
-export function readServer() {
+export function readServer(): { url: string, pid: number, started: number } | null {
   try {
     const s = JSON.parse(fs.readFileSync(SERVER_FILE, 'utf8'));
     if (s && s.url && s.pid && running(s.pid)) return s;
@@ -483,22 +540,22 @@ export function readServer() {
   return null;
 }
 
-export const findServer = () => readServer()?.url ?? null;
+export const findServer = (): string | null => readServer()?.url ?? null;
 
-const writeServer = url => {
+const writeServer = (url: string): void => {
   fs.mkdirSync(SESSION_DIR, { recursive: true });
   fs.writeFileSync(SERVER_FILE, JSON.stringify({ url, pid: process.pid, started: Date.now() }, null, 2) + '\n');
 };
 
 /* Is a board answering at this url? */
-export async function alive(url) {
+export async function alive(url: string): Promise<boolean> {
   try { return (await fetch(url + '/state', { signal: AbortSignal.timeout(900) })).ok; }
   catch { return false; }
 }
 
 /* Is the thing holding this port one of ours? Something else on 4777 must not
    be mistaken for a server with no boards on it. */
-export async function spiegaAt(url) {
+export async function spiegaAt(url: string): Promise<boolean> {
   try {
     const r = await fetch(url + '/boards', { signal: AbortSignal.timeout(900) });
     if (!r.ok) return false;
@@ -508,7 +565,10 @@ export async function spiegaAt(url) {
 
 /* Ask the running server for a board, creating it if it has none by that name.
    A board is a map entry, so this is cheaper than anything that forks. */
-export async function createBoardOn(serverUrl, name, { owner = ownerOfThisProcess(), cwd = process.cwd() } = {}) {
+export async function createBoardOn(
+  serverUrl: string, name: string,
+  { owner = ownerOfThisProcess(), cwd = process.cwd() }: { owner?: string | null, cwd?: string } = {},
+): Promise<string | null> {
   try {
     const r = await fetch(serverUrl + '/boards', {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -551,7 +611,7 @@ export async function createBoardOn(serverUrl, name, { owner = ownerOfThisProces
    Windows has no `ps`, and a walk that cannot be done must not come out as
    "not ours" — that would split one Claude Code session across two boards on
    the platform we cannot check. Unknown means trust. */
-export function hasAncestor(target, from = process.pid, hops = 24) {
+export function hasAncestor(target: number, from = process.pid, hops = 24): boolean {
   if (process.platform === 'win32') return true;
   let pid = from;
   for (let i = 0; i < hops && pid > 1; i++) {
@@ -586,8 +646,8 @@ export function hasAncestor(target, from = process.pid, hops = 24) {
 
    No CLAUDE_PID at all is not Claude Code CLI, which always sets it: that is
    somebody pinning the variable by hand, and they are taken at their word. */
-let claudeOwn;                 // one process, one answer; the walk is a few ps calls
-export function claudeSession(env = process.env, self = process.pid) {
+let claudeOwn: string | null | undefined;              // one process, one answer; the walk is a few ps calls
+export function claudeSession(env: NodeJS.ProcessEnv = process.env, self = process.pid): string | null {
   const here = env === process.env && self === process.pid;
   if (here && claudeOwn !== undefined) return claudeOwn;
 
@@ -602,7 +662,7 @@ export function claudeSession(env = process.env, self = process.pid) {
   return answer;
 }
 
-export function sessionKey() {
+export function sessionKey(): string {
   return envVar('SESSION')
     || claudeSession()                      // the conversation itself, where a harness says so
     || process.env.HERDR_PANE_ID            // one pane is one task
@@ -630,8 +690,8 @@ export function sessionKey() {
    they want, and a CLAUDE_CODE_SESSION_ID that really is this process's is a
    harness naming its own conversation — all four are left exactly as they are.
    An inherited one is not a conversation we are in; see claudeSession. */
-export function claimSession(env = process.env, pid = process.pid) {
-  const given = n => env[`SPIEGA_${n}`] ?? env[`HANDWAVE_${n}`];
+export function claimSession(env: NodeJS.ProcessEnv = process.env, pid = process.pid): string | null {
+  const given = (n: string): string | undefined => env[`SPIEGA_${n}`] ?? env[`HANDWAVE_${n}`];
   if (given('SESSION') || given('BOARD') || given('URL') || claudeSession(env, pid)) return null;
   env.SPIEGA_SESSION = `mcp:${pid}:${randomUUID().slice(0, 8)}`;
   return env.SPIEGA_SESSION;
@@ -645,12 +705,12 @@ export function claimSession(env = process.env, pid = process.pid) {
    finished boards sit there owned by nobody. Any other key — a conversation
    id, a pane, a directory — says nothing about whether its session is still
    going, and an owner we cannot check is an owner we keep. */
-export function ownerGone(owner) {
+export function ownerGone(owner: string | null | undefined): boolean {
   const m = /^mcp:(\d+):/.exec(owner || '');
   return !!m && !running(Number(m[1]));
 }
 
-const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
+const slug = (s: unknown): string => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40);
 
 /* A board name a person can recognise in a list of eight.
 
@@ -667,7 +727,7 @@ const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^
    session and is answered by boardName, below. The server runs this and
    nothing else, so a client asking for a board by name gets the board it
    named — while two clients asking for the same one get two boards. */
-export function freeName(base, key) {
+export function freeName(base: string, key: string | null): string {
   const all = listBoards();
   const held = all[base];
   if (!held || held.owner === key || ownerGone(held.owner)) return base;
@@ -678,7 +738,7 @@ export function freeName(base, key) {
   return `${base}-${Date.now().toString(36).slice(-4)}`;
 }
 
-export function boardName() {
+export function boardName(): string {
   const named = envVar('BOARD');
   if (named) return slug(named);
 
@@ -702,10 +762,13 @@ export function boardName() {
    `solo` is the way out if an isolation case ever turns up: a board on its own
    port, in its own process, reachable by exactly the same url shape, so no
    client has to know which it is talking to. */
-export async function listen(app, { port = PORT, solo = false, tries = 20 } = {}) {
-  const bind = n => new Promise((resolve, reject) => {
+export async function listen(
+  app: BoardServer,
+  { port = PORT, solo = false, tries = 20 }: { port?: number, solo?: boolean, tries?: number } = {},
+): Promise<{ url: string, mine: boolean }> {
+  const bind = (n: number) => new Promise<boolean>((resolve, reject) => {
     const s = app.server;
-    const onErr = e => {
+    const onErr = (e: NodeJS.ErrnoException) => {
       s.removeListener('error', onErr);
       if (e.code === 'EADDRINUSE') return resolve(false);
       reject(e);
@@ -740,7 +803,9 @@ export async function listen(app, { port = PORT, solo = false, tries = 20 } = {}
    `serving` tells the caller whether this process is now the one holding the
    board — `spiega serve` stays alive on true and exits on false, having done
    its job by asking the running server for one more map entry. */
-export async function startBoard({ name = boardName(), port = PORT, solo = false } = {}) {
+export async function startBoard(
+  { name = boardName(), port = PORT, solo = false }: { name?: string, port?: number, solo?: boolean } = {},
+): Promise<{ url: string, serving: false } | { url: string, serving: true, app: BoardServer }> {
   if (!solo) {
     const server = findServer();
     if (server) {
@@ -772,7 +837,7 @@ export async function startBoard({ name = boardName(), port = PORT, solo = false
    a test or a script wants. Otherwise the name decides: SPIEGA_BOARD, which
    each harness's MCP registration can set, so a Claude session and an opencode
    session reach different boards without either knowing the other exists. */
-export function findBoard(name = boardName()) {
+export function findBoard(name = boardName()): string | null {
   const direct = envVar('URL');
   if (direct) return direct;
   const all = listBoards();
@@ -791,7 +856,7 @@ export function findBoard(name = boardName()) {
    entry; and only then a process. An agent that draws as its first action
    should not have to run a server command first, and eight of them drawing at
    once should not cost eight processes. */
-export async function resolveBoard(name = boardName(), { start = true } = {}) {
+export async function resolveBoard(name = boardName(), { start = true }: { start?: boolean } = {}): Promise<string | null> {
   const direct = envVar('URL');
   if (direct) return direct;
 
@@ -820,7 +885,7 @@ export async function resolveBoard(name = boardName(), { start = true } = {}) {
    The name is recomputed from the registry on each poll rather than asked for
    here, because the child decides it — `boardName()` matches a session to the
    board it owns, and the child is the one that registers the ownership. */
-function spawnServer() {
+function spawnServer(): Promise<string | null> {
   const out = fs.openSync(path.join(process.env.TMPDIR || '/tmp', 'spiega.log'), 'a');
   const child = spawn(process.execPath, [path.join(ROOT, 'src', 'cli.js'), 'serve', '--quiet'], {
     detached: true, stdio: ['ignore', out, out], env: process.env,
