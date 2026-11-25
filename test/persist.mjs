@@ -285,21 +285,27 @@ await test('the per-op work on POST /op stays under 0.2 ms p99', async () => {
   const log = createOpLog(openLogFile(file, { snapshot: () => boardOps(board) }), { debounce: 1e9 });
   const entry = { name: 'bench', board, viewers: 0, events: createBoardEvents(), log };
   const samples = [];
-  for (let i = 0; i < 3000; i++) {
-    const op = i % 3 === 0
-      ? { op: 'say', text: 'a line of the explanation, number ' + i }
-      : i % 3 === 1
-        ? { op: 'node', id: 'n' + (i % 40), label: 'N' + (i % 40) }
-        : { op: 'edge', from: 'n' + (i % 40), to: 'n' + ((i + 1) % 40) };
-    const t0 = process.hrtime.bigint();
-    draw(entry, { ops: [op] });
-    samples.push(Number(process.hrtime.bigint() - t0) / 1e6);
+  /* Closed whatever the verdict: the log's debounce timer holds the process
+     open, and a missed budget that hangs instead of exiting is a build that
+     never goes red, only stops. */
+  try {
+    for (let i = 0; i < 3000; i++) {
+      const op = i % 3 === 0
+        ? { op: 'say', text: 'a line of the explanation, number ' + i }
+        : i % 3 === 1
+          ? { op: 'node', id: 'n' + (i % 40), label: 'N' + (i % 40) }
+          : { op: 'edge', from: 'n' + (i % 40), to: 'n' + ((i + 1) % 40) };
+      const t0 = process.hrtime.bigint();
+      draw(entry, { ops: [op] });
+      samples.push(Number(process.hrtime.bigint() - t0) / 1e6);
+    }
+    samples.sort((a, b) => a - b);
+    const p99 = samples[Math.floor(samples.length * 0.99)];
+    console.log(`        p99 ${p99.toFixed(4)} ms (budget 0.2 ms), median ${samples[1500].toFixed(4)} ms, max ${samples[2999].toFixed(3)} ms`);
+    assert.ok(p99 < 0.2, `p99 was ${p99.toFixed(3)} ms, budget 0.2 ms`);
+  } finally {
+    await log.close();
   }
-  samples.sort((a, b) => a - b);
-  const p99 = samples[Math.floor(samples.length * 0.99)];
-  console.log(`        p99 ${p99.toFixed(4)} ms (budget 0.2 ms), median ${samples[1500].toFixed(4)} ms, max ${samples[2999].toFixed(3)} ms`);
-  assert.ok(p99 < 0.2, `p99 was ${p99.toFixed(3)} ms, budget 0.2 ms`);
-  await log.close();
 });
 
 /* Restore is the same applyOps over the lines just read. The id -> index map
