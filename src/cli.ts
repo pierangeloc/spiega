@@ -10,6 +10,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { BoardSpec } from './spec.js';
+import type { Board } from './board/state.js';
+import type { Registered } from './board/server.js';
 
 /* The first thing that runs, before any of the modules below are imported.
 
@@ -56,7 +59,7 @@ const cmd = argv[0];
    unknown flag would slip through, or a known one be refused. `-` on its own
    is stdin and a bare `--` is not a name, so a flag needs a letter after its
    dashes. */
-const isFlag = a => /^--?[A-Za-z]/.test(a);
+const isFlag = (a: string): boolean => /^--?[A-Za-z]/.test(a);
 
 /* One name, two dialects. The CLI says `--keep-title` and the MCP tool says
    `keepTitle` for the same option (src/mcp/server.js), so somebody who has
@@ -64,15 +67,17 @@ const isFlag = a => /^--?[A-Za-z]/.test(a);
    — and until both spellings answer, the two vocabularies are free to drift
    apart one option at a time. Comparing on the kebab form makes them the same
    flag at the one place it matters, the lookup. */
-const canon = s => s.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
-const flagName = a => canon(a.replace(/^--?/, '').split('=')[0]);
+const canon = (s: string): string => s.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+const flagName = (a: string): string => canon(a.replace(/^--?/, '').split('=')[0]);
 
 /* Accepts both `--out x` and the short `-o x`, since the help advertises both,
    and `--out=x`, which positional() has always known to step over but flag()
    could not read — so it was accepted and then ignored, which is the whole
    complaint. argv[0] is the command, never a flag, because of the rotation
    above. */
-const flag = (name, def = null) => {
+function flag(name: string): string | true | null;
+function flag<D>(name: string, def: D): string | true | D;
+function flag(name: string, def: unknown = null): unknown {
   const want = canon(name);
   const i = argv.findIndex((a, at) => at > 0 && isFlag(a) && flagName(a) === want);
   if (i < 0) return def;
@@ -80,11 +85,16 @@ const flag = (name, def = null) => {
   if (eq >= 0) return argv[i].slice(eq + 1) || true;
   const v = argv[i + 1];
   return v && !v.startsWith('-') ? v : true;
-};
+}
+
+/* A flag that takes a value, read as one. Given bare — `--out` with nothing
+   after it — it has no value, and reads as absent: the default applies, rather
+   than `true` reaching a call that wants a path. */
+const value = (v: string | true | null): string | null => (v === true ? null : v);
 const positional = () => argv.slice(1).filter((a, i, all) =>
   !a.startsWith('--') && !(i > 0 && all[i - 1].startsWith('--') && !all[i - 1].includes('=')));
 
-const die = (msg, code = 1) => { console.error(msg); process.exit(code); };
+const die: (msg: string, code?: number) => never = (msg, code = 1) => { console.error(msg); process.exit(code); };
 
 /* ---------- flags a command will answer for ---------- */
 
@@ -103,7 +113,7 @@ const die = (msg, code = 1) => { console.error(msg); process.exit(code); };
    Keep it in step with HELP, and with the switch below. A flag added to a
    command and not to its row here is refused before the command runs. */
 const GLOBAL_FLAGS = ['board', 'name'];
-const FLAGS = {
+const FLAGS: Record<string, string[]> = {
   serve: ['port', 'open', 'solo', 'quiet', 'tab', 'size', 'browser'],
   open: ['tab', 'size', 'pos', 'browser', 'new'],
   focus: ['tab', 'size', 'browser'],
@@ -128,10 +138,10 @@ const FLAGS = {
    meant is worse than no suggestion, so what counts as near scales with the
    length of the name: two edits away from `keep-title` is still recognisably
    that flag, while two edits away from `name` is any four-letter word. */
-const distance = (a, b) => {
+const distance = (a: string, b: string): number => {
   let prev = [...Array(b.length + 1).keys()];
   for (let i = 1; i <= a.length; i++) {
-    const row = [i];
+    const row: number[] = [i];
     for (let j = 1; j <= b.length; j++) {
       row[j] = Math.min(prev[j] + 1, row[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
     }
@@ -147,7 +157,7 @@ if (cmd != null && Object.hasOwn(FLAGS, cmd) && !argv.slice(1).some(a => a === '
   const known = new Set(allowed);
   const bad = argv.slice(1).filter(a => isFlag(a) && !known.has(flagName(a)));
   if (bad.length) {
-    const spell = n => (n.length === 1 ? '-' : '--') + n;   // the help advertises `-o`
+    const spell = (n: string): string => (n.length === 1 ? '-' : '--') + n;   // the help advertises `-o`
     const lines = bad.map(a => {
       const want = flagName(a);
       const near = allowed
@@ -178,20 +188,22 @@ if (boardFlag && boardFlag !== true) process.env.SPIEGA_BOARD = String(boardFlag
 /* The board this command is for, started if it is not up yet. One server holds
    every board, so "starting" one is usually a map entry on a process that is
    already running — see resolveBoard. */
-async function boardURL({ autostart = false } = {}) {
+async function boardURL(opts: { autostart: true }): Promise<string>;
+async function boardURL(opts?: { autostart?: boolean }): Promise<string | null>;
+async function boardURL({ autostart = false }: { autostart?: boolean } = {}): Promise<string | null> {
   const { resolveBoard } = await import('./board/server.js');
   const url = await resolveBoard(undefined, { start: autostart });
   if (!url && autostart) die('spiega: could not start a board (see $TMPDIR/spiega.log)');
   return url;
 }
 
-const alive = async url => (await import('./board/server.js')).alive(url);
+const alive = async (url: string): Promise<boolean> => (await import('./board/server.js')).alive(url);
 
 /* What a person needs to see before a command changes a board: the name it
    resolved to, the title on it, and the url. Two boards can have the same
    name-shaped answer to "which one?", and only the title tells them apart. */
-async function boardIdentity(url) {
-  const read = async p => {
+async function boardIdentity(url: string): Promise<{ name: string, title: string | null, url: string }> {
+  const read = async (p: string): Promise<{ name?: string, title?: string }> => {
     try {
       return await (await fetch(url + p, { signal: AbortSignal.timeout(900) })).json();
     } catch { return {}; }
@@ -205,16 +217,27 @@ async function boardIdentity(url) {
   };
 }
 
-const describeBoard = b =>
+const describeBoard = (b: { name: string, title?: string | null, url: string }): string =>
   `"${b.name}"${b.title ? ` \u2014 "${b.title}"` : ' \u2014 untitled'}  ${b.url}`;
 
-async function send(ops, { quiet = false, audit = false } = {}) {
+/* What POST /op answers, as far as this reads it. */
+interface OpReply {
+  errors?: string[];
+  warnings?: string[];
+  nodes?: number;
+  edges?: number;
+  steps?: number;
+  amended?: { chapter: number, title?: string, nodes: number, edges: number, steps: number };
+  audit?: { lines?: string[] } | null;
+}
+
+async function send(ops: unknown[], { quiet = false, audit = false }: { quiet?: boolean, audit?: boolean } = {}): Promise<OpReply> {
   const url = await boardURL({ autostart: true });
   const res = await fetch(url + '/op', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ ops, ...(audit ? { audit: true } : {}) }),
   });
-  const body = await res.json().catch(() => ({}));
+  const body: OpReply = await res.json().catch(() => ({}));
   if (!quiet) {
     if (body.errors?.length) console.error(body.errors.join('\n'));
     if (body.warnings?.length) console.error(body.warnings.join('\n'));
@@ -231,15 +254,15 @@ async function send(ops, { quiet = false, audit = false } = {}) {
 }
 
 /* Ops may arrive as one object, an array, JSON on stdin, or a file path. */
-async function readOps(arg) {
+async function readOps(arg: string | undefined): Promise<unknown[]> {
   let raw = arg;
   if (!raw || raw === '-') raw = fs.readFileSync(0, 'utf8');
   else if (!raw.trimStart().startsWith('{') && !raw.trimStart().startsWith('[') && fs.existsSync(raw)) {
     raw = fs.readFileSync(raw, 'utf8');
   }
-  let parsed;
+  let parsed: unknown[] | (BoardSpec & { ops?: unknown[] });
   try { parsed = JSON.parse(raw); }
-  catch (e) { die(`spiega: that is not valid JSON (${e.message})`); }
+  catch (e) { die(`spiega: that is not valid JSON (${(e as Error).message})`); }
   if (Array.isArray(parsed)) return parsed;
   if (parsed.ops) return parsed.ops;
   // A whole spec, not an op list: turn it into the ops that would build it.
@@ -334,7 +357,7 @@ through the TTY, so it is good for glancing and for stepping a flow, not for roa
   --size 1100x900 --pos 60,60
   --browser brave`;
 
-const FLAG_HELP = {
+const FLAG_HELP: Record<string, readonly [string, string]> = {
   board: ['NAME', 'select a saved or running board (default: this session’s board)'],
   name: ['NAME', 'alias for --board'],
   port: ['N', 'server port (default: 4777)'],
@@ -362,7 +385,7 @@ const FLAG_HELP = {
   models: ['A,B', 'comma-separated model names'], timeout: ['SECONDS', 'benchmark timeout'],
 };
 
-const COMMAND_HELP = {
+const COMMAND_HELP: Record<string, readonly [string, string]> = {
   serve: ['[--port N] [--open]', 'Start the board and keep it running.'],
   open: ['', 'Raise this board’s window or open one. A saved board is restored as it was.'],
   focus: ['', 'Bring this session’s board to the front, opening it if needed.'],
@@ -400,7 +423,7 @@ for (const [name, options] of Object.entries(FLAGS)) {
     if (!Object.hasOwn(FLAG_HELP, option)) throw new Error(`spiega ${name} has no help for ${option}`);
 }
 
-function commandHelp(name) {
+function commandHelp(name: string): string {
   const [args, description] = COMMAND_HELP[name === '--version' || name === '-v' ? 'version' :
     name === '--help' || name === '-h' ? 'help' : name];
   const options = [...FLAGS[name], ...GLOBAL_FLAGS];
@@ -492,7 +515,7 @@ const main = async () => {
       const entry = path.join(HERE, 'mcp', 'server.js');
       const { piMcpEntry } = await import('./pi.js');
       const shape = String(flag('shape') || 'stdio');
-      const shapes = {
+      const shapes: Record<string, object | null> = {
         stdio: { mcpServers: { spiega: { type: 'stdio', command: 'node', args: [entry] } } },
         servers: { servers: { spiega: { type: 'stdio', command: 'node', args: [entry] } } },
         opencode: { mcp: { spiega: { type: 'local', command: ['node', entry], enabled: true } } },
@@ -514,7 +537,7 @@ const main = async () => {
       if (!prompt) die('spiega bench: give me something to explain');
       await bench(prompt, {
         models: String(flag('models') || '').split(',').map(s => s.trim()).filter(Boolean),
-        out: flag('out') || 'bench',
+        out: value(flag('out')) || 'bench',
         timeout: Number(flag('timeout', 180)),
       });
       return;
@@ -554,7 +577,7 @@ const main = async () => {
     case 'chapters': {
       const url = await boardURL({ autostart: false });
       if (!url) die('spiega chapters: no board is running');
-      const b = await (await fetch(url + '/state')).json();
+      const b: Board = await (await fetch(url + '/state')).json();
       const { c, sym, heading } = await import('./term.js');
       const g = sym();
       const all = [...(b.chapters || []).map(ch => ({ ...ch, live: false })),
@@ -577,7 +600,7 @@ const main = async () => {
       const text = positional().join(' ');      // positional() already drops `--flag value` pairs
       if (!text) die('spiega say: nothing to say');
       // tying the line to a step lets the rail light it when that step is lit
-      const op = { op: 'say', text };
+      const op: Record<string, unknown> = { op: 'say', text };
       if (step) op.step = Number(step);
       if (edge) op.edge = edge;
       return void (await send([op]));
@@ -594,7 +617,7 @@ const main = async () => {
       // A board started before this command existed answers 404; say so, since
       // the fix is to restart it and that is not guessable from a stack trace.
       if (!res.ok) die('spiega replay: the running board is older than this command \u2014 `spiega stop`, then start it again');
-      const r = await res.json();
+      const r: { ops: number, viewers: number } = await res.json();
       if (!r.ops) die('spiega replay: nothing has been drawn yet');
       if (!r.viewers) console.error('spiega: no window is watching — run `spiega open` to see it');
       return void console.log(`replaying ${r.ops} ops for ${r.viewers} viewer${r.viewers === 1 ? '' : 's'}`);
@@ -607,7 +630,7 @@ const main = async () => {
       const line = positional()[0];
       if (!line && !match) die('spiega tag: which line? `spiega script` lists them, or use --match');
       if (!step && !edge) die('spiega tag: --step N, --edge a>b, or --step off to untie it');
-      const op = { op: 'tag' };
+      const op: Record<string, unknown> = { op: 'tag' };
       if (match) op.match = match; else op.line = Number(line);
       if (edge) op.edge = edge;
       if (step) op.step = step === 'off' || step === true ? null : Number(step);
@@ -619,7 +642,7 @@ const main = async () => {
     case 'script': {
       const url = await boardURL({ autostart: false });
       if (!url) die('spiega script: no board is running');
-      const b = await (await fetch(url + '/state')).json();
+      const b: Board = await (await fetch(url + '/state')).json();
       const { scriptSteps, tagReport } = await import('./board/script.js');
       const { c, sym, pad, heading } = await import('./term.js');
       const g = sym();
@@ -655,8 +678,8 @@ const main = async () => {
     case 'step': {
       const a = positional()[0];
       const url = await boardURL({ autostart: true });
-      const state = await (await fetch(url + '/state')).json();
-      let step;
+      const state: { active?: number | null } = await (await fetch(url + '/state')).json();
+      let step: number | null;
       if (a === 'off' || a === 'none') step = null;
       else if (a === 'next') step = state.active == null ? 0 : state.active + 1;
       else if (a === 'prev') step = Math.max(0, (state.active ?? 0) - 1);
@@ -698,14 +721,14 @@ const main = async () => {
     case 'render': {
       const file = positional()[0];
       if (!file) die('spiega render: give me a spec file');
-      const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const spec: BoardSpec = JSON.parse(fs.readFileSync(file, 'utf8'));
       const { emptyBoard, applyOps } = await import('./board/state.js');
       const { snapshotHTML } = await import('./board/snapshot.js');
       const { specToOps } = await import('./spec.js');
       const board = emptyBoard();
       applyOps(board, specToOps(spec));
       const html = snapshotHTML(board, { active: flag('step') ? Number(flag('step')) - 1 : null });
-      const out = flag('o') || flag('out') || file.replace(/\.json$/, '') + '.html';
+      const out = value(flag('o')) || value(flag('out')) || file.replace(/\.json$/, '') + '.html';
       fs.writeFileSync(out, html);
       console.log(out);
       return;
@@ -715,7 +738,7 @@ const main = async () => {
       const url = await boardURL();
       if (!url) die('spiega: no board is running');
       const html = await (await fetch(url + '/snapshot')).text();
-      const out = flag('o') || flag('out') || 'board.html';
+      const out = value(flag('o')) || value(flag('out')) || 'board.html';
       fs.writeFileSync(out, html);
       console.log(path.resolve(out));
       return;
@@ -737,14 +760,14 @@ const main = async () => {
          and stopping the server is a kill. Telling them apart by pid keeps a
          `--solo` board, and a board from before all this, working the old way:
          if nothing else is on that pid, the kill is the drop. */
-      const shared = b => srv && b?.pid === srv.pid;
+      const shared = (b: { pid?: number } | undefined): boolean => !!srv && b?.pid === srv.pid;
       const killServer = !!(flag('all') || flag('server'));
       const names = flag('server') ? [] : flag('all') ? Object.keys(all) : [boardName()];
 
       /* A close and a signal both take a moment to land. Give a board that
          still answers a short grace period before declaring it stopped, so a
          tidy shutdown is not mistaken for a failure and kept in the registry. */
-      const gone = async url => {
+      const gone = async (url: string): Promise<boolean> => {
         for (let i = 0; i < 8; i++) {
           if (!(await up(url))) return true;
           await new Promise(r => setTimeout(r, 50));
@@ -752,7 +775,7 @@ const main = async () => {
         return false;
       };
 
-      const stopped = new Set();      // urls we actually took down
+      const stopped = new Set<string>();      // urls we actually took down
       let n = 0;
       for (const name of names) {
         const b = all[name];
@@ -792,7 +815,7 @@ const main = async () => {
       // a board from before the registry existed
       if (!n && !killServer) {
         try {
-          const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+          const sess: { url: string, pid: number } = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
           const who = await boardIdentity(sess.url);
           console.log(`stopping "default"${who.title ? ` \u2014 "${who.title}"` : ''}  ${sess.url}`);
           process.kill(sess.pid);
@@ -808,7 +831,7 @@ const main = async () => {
          other one: the board kept drawing, and the CLI had no name for it.
          Only remove the pointer when the board it names is gone. */
       try {
-        const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+        const sess: { url?: string } = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
         const stillThere = sess.url && !stopped.has(sess.url)
           && (killServer ? !(await gone(sess.url)) : await up(sess.url));
         if (!stillThere) {
@@ -841,7 +864,7 @@ const main = async () => {
         if (r.ok) return void console.log(`${name}  ${url}  (${r.how})`);
       }
       // no window to raise: give it one
-      const o = await openBoard(url, { app: !flag('tab'), size: flag('size'), browser: flag('browser') });
+      const o = await openBoard(url, { app: !flag('tab'), size: value(flag('size')), browser: value(flag('browser')) });
       // The launcher focus and open share (window.ts) is the same one serve
       // and open go through, so a browser gone between the check and the
       // launch (#186) is reported here too, rather than left to crash this.
@@ -855,13 +878,15 @@ const main = async () => {
         await import('./board/server.js');
       const { c, sym, pad, shortPath, heading } = await import('./term.js');
       const g = sym();
-      const all = listBoards();
+      /* A row of the registry, or the one board from before it, which has a url
+         and nothing else. */
+      const all: Record<string, Partial<Registered> & { url: string, legacy?: boolean }> = listBoards();
       /* A board started before the registry existed is in session.json and
          nowhere else. Saying "no boards running" while one is plainly open on
          screen is worse than saying nothing. */
       if (!all[DEFAULT_BOARD]) {
         try {
-          const sess = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
+          const sess: { url?: string } = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
           if (sess.url && await up(sess.url)) all[DEFAULT_BOARD] = { url: sess.url, legacy: true };
         } catch { /* none */ }
       }
@@ -884,7 +909,7 @@ const main = async () => {
         const { url } = all[name];
         let note = c.accent('not answering'), size = '';
         try {
-          const st = await (await fetch(url + '/state', { signal: AbortSignal.timeout(900) })).json();
+          const st: Board = await (await fetch(url + '/state', { signal: AbortSignal.timeout(900) })).json();
           size = `${st.nodes.length} ${g.dot} ${st.edges.length}`;
           note = st.title ? c.plain(st.title) : c.dim('untitled');
         } catch { /* left as not answering */ }
@@ -906,7 +931,7 @@ const main = async () => {
       if (closed.length) {
         /* When it was last drawn on, which is the only thing that tells two
            old boards apart once the names have stopped meaning anything. */
-        const ago = at => {
+        const ago = (at: number): string => {
           const m = Math.round((Date.now() - at) / 60000);
           if (m < 1) return 'just now';
           if (m < 60) return `${m}m ago`;
@@ -940,7 +965,7 @@ const main = async () => {
        The number is alone on the first, where `spiega --version | head -1`
        and the eye both expect it. */
     case 'version': case '--version': case '-v': {
-      const pkg = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8'));
+      const pkg: { version: string } = JSON.parse(fs.readFileSync(path.join(HERE, '..', 'package.json'), 'utf8'));
       console.log(`spiega ${pkg.version}`);
 
       // The same check doctor uses, not a second guess at it: `git -C` walks
@@ -976,4 +1001,4 @@ const main = async () => {
   }
 };
 
-main().catch(e => die('spiega: ' + (e.stack || e.message)));
+main().catch((e: Error) => die('spiega: ' + (e.stack || e.message)));
