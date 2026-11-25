@@ -28,9 +28,11 @@ already expressed in it.
   translating, and there are more of those in circulation.
 - Effect's MCP module is the one piece whose stability still matters most to
   us, because an agent-facing server that will not start is worse than one
-  with a hand-rolled JSON-RPC loop. That question is not settled by this ADR:
-  #146 spikes it against the official TypeScript MCP SDK wrapped in Effect and
-  measures cold start both ways, and the fallback stays available.
+  with a hand-rolled JSON-RPC loop. That question was not settled by this ADR;
+  #146 spiked it, and the answer turned out to be the sentence above: the
+  hand-rolled loop stays, because unbundled the module answers `initialize` in
+  228 ms against its 38 ms —
+  [ADR 0003](0003-keep-the-hand-rolled-mcp-server.md).
 - Versions are pinned. Churn in a fast-moving major is absorbed deliberately,
   in its own change, not picked up by a lockfile refresh in the middle of a
   port whose oracle is byte-identical pictures.

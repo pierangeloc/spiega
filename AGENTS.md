@@ -238,6 +238,24 @@ back on the hot path fails the suite.
 Losing the last tick of ops in a hard crash is fine. This is a whiteboard, not
 a ledger.
 
+## The MCP server imports no Effect, and that is the point
+
+`src/mcp/server.ts` is hand-written JSON-RPC over stdio, deliberately — ADR
+0003 (`docs/adr/0003-keep-the-hand-rolled-mcp-server.md`) declines #151 and
+says why. It answers `initialize` in about **38 ms**, and that number is not a
+property of its being short. It is a property of **nothing in its import graph
+pulling in `effect`**: importing `effect/ai/McpServer` costs 95–108 ms on its
+own, and `import { Schema } from 'effect'` about 115 ms, against a client
+budget of 138 ms. `src/board/server.ts` lazily `require`s the Effect server
+package for the same reason, and says so where it does it.
+
+So: **do not add a bare `effect` import to this server or to anything it
+reaches.** A type-only import is free and fine. If you need a Schema, derive
+what you need at build time and read the result as data — which is how the
+generated op schemas get there. The failure mode if you forget is not a test
+going red; it is MCP clients quietly dropping spiega's tools on slow machines,
+which nobody reports as a bug because the tools were simply never there.
+
 ## A board that cannot do its job has to say so on the board
 
 The CLI cannot carry a warning that matters: by the time anyone runs a command,
