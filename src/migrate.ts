@@ -31,31 +31,42 @@ const NEW = 'spiega';
 const OLD_DIR = path.join(HOME, `.${OLD}`);
 const NEW_DIR = path.join(HOME, `.${NEW}`);
 
-const done = (what, detail) => ({ level: 'done', what, detail });
-const skip = (what, detail) => ({ level: 'skip', what, detail });
-const todo = (what, detail) => ({ level: 'todo', what, detail });
+/* One line of the report: what was done, what did not need doing, and what is
+   left for a person. */
+export interface Row {
+  readonly level: 'done' | 'skip' | 'todo';
+  readonly what: string;
+  readonly detail: string;
+}
 
-const isLink = p => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
+const done = (what: string, detail: string): Row => ({ level: 'done', what, detail });
+const skip = (what: string, detail: string): Row => ({ level: 'skip', what, detail });
+const todo = (what: string, detail: string): Row => ({ level: 'todo', what, detail });
+
+const isLink = (p: string): boolean => { try { return fs.lstatSync(p).isSymbolicLink(); } catch { return false; } };
 
 /* Every file this rewrites was written by someone else. `install` has always
    backed them up; this did not, which is how a botched TOML edit here had no
    clean copy to go back to. One per file per day, never overwritten. */
-const backup = file => {
+const backup = (file: string): string | null => {
   if (!fs.existsSync(file)) return null;
   const b = `${file}.bak-migrate-${new Date().toISOString().slice(0, 10)}`;
   if (!fs.existsSync(b)) fs.copyFileSync(file, b);
   return b;
 };
-const readJSON = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
+/* Read as the shape every config below has: an object whose servers sit in one
+   table of it. */
+type Config = Record<string, Record<string, unknown> | undefined>;
+const readJSON = (f: string): Config | null => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
 
 /* The state directory, boards registry and all. Moved rather than recreated,
    because it holds the registry of running boards and losing it orphans them:
    the servers keep listening and nothing can find them again. */
-const linkedForward = () => {
+const linkedForward = (): boolean => {
   try { return fs.realpathSync(OLD_DIR) === fs.realpathSync(NEW_DIR); } catch { return false; }
 };
 
-function stateDir(rows) {
+function stateDir(rows: Row[]) {
   // already migrated, with the compatibility link still in place
   if (isLink(OLD_DIR) && linkedForward()) {
     const stale = oldProcesses();
@@ -88,19 +99,19 @@ function stateDir(rows) {
 
    A symlink costs nothing and keeps those processes correct until their
    sessions end. A later `migrate` removes it once nothing needs it. */
-function link(rows) {
+function link(rows: Row[]) {
   try {
     fs.symlinkSync(NEW_DIR, OLD_DIR, 'dir');
     rows.push(done('old path', `~/.${OLD} → ~/.${NEW}, for processes started before the rename`));
   } catch (e) {
-    rows.push(todo('old path', `could not link ~/.${OLD} (${e.code}) — restart agent sessions promptly`));
+    rows.push(todo('old path', `could not link ~/.${OLD} (${(e as NodeJS.ErrnoException).code}) — restart agent sessions promptly`));
   }
 }
 
 /* Skills are symlinked, so the old link points at a path that no longer
    exists. Remove it: a dangling skill directory is loaded by some harnesses
    and read as a second, broken skill. */
-function skills(rows) {
+function skills(rows: Row[]) {
   const dirs = {
     claude: path.join(HOME, '.claude', 'skills'),
     codex: path.join(HOME, '.codex', 'skills'),
@@ -121,8 +132,8 @@ function skills(rows) {
 /* An MCP registration keyed by the old name. Dropped, since `install` adds the
    new one; leaving both would start two servers and give the agent every tool
    twice. */
-function registrations(rows) {
-  const targets = [
+function registrations(rows: Row[]) {
+  const targets: [string, string, (c: Config) => Record<string, unknown> | undefined][] = [
     ['opencode', path.join(HOME, '.config', 'opencode', 'opencode.json'), c => c.mcp],
     ['gemini', path.join(HOME, '.gemini', 'settings.json'), c => c.mcpServers],
     ['copilot', path.join(HOME, '.copilot', 'mcp-config.json'), c => c.mcpServers],
@@ -156,14 +167,14 @@ function registrations(rows) {
   }
 }
 
-function vscodeMcp() {
+function vscodeMcp(): string {
   const dir = process.platform === 'darwin'
     ? path.join(HOME, 'Library', 'Application Support', 'Code', 'User')
     : path.join(HOME, '.config', 'Code', 'User');
   return path.join(dir, 'mcp.json');
 }
 
-function claudeDesktopCfg() {
+function claudeDesktopCfg(): string {
   const dir = process.platform === 'darwin'
     ? path.join(HOME, 'Library', 'Application Support', 'Claude')
     : path.join(HOME, '.config', 'Claude');
@@ -174,7 +185,7 @@ function claudeDesktopCfg() {
    old one out whole; `install` then writes the new one. Leaving both would
    give the agent two sets of instructions under two different names, one of
    which no longer exists. */
-function blocks(rows) {
+function blocks(rows: Row[]) {
   const files = [
     ['opencode', path.join(HOME, '.config', 'opencode', 'AGENTS.md')],
     ['codex', path.join(HOME, '.codex', 'AGENTS.md')],
@@ -198,7 +209,7 @@ function blocks(rows) {
    one — but a keybinding lives in the person's own config.toml and naming a
    plugin action that no longer exists just fails silently when they press it,
    so that one is reported, never edited. */
-function herdr(rows) {
+function herdr(rows: Row[]) {
   let listed = '';
   try {
     listed = execFileSync('herdr', ['plugin', 'list'],
@@ -220,8 +231,8 @@ function herdr(rows) {
 }
 
 /* The old command, left on PATH by `npm link` under the old package name. */
-function binary(rows) {
-  let which = null;
+function binary(rows: Row[]) {
+  let which: string | null = null;
   try {
     which = execFileSync('sh', ['-c', `command -v ${OLD}`],
       { encoding: 'utf8', timeout: 4000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -231,8 +242,8 @@ function binary(rows) {
 
 /* How many of our own processes started before this checkout's HEAD. The
    compatibility link stays while any of them are alive. */
-function oldProcesses() {
-  const run = (cmd, args) => execFileSync(cmd, args,
+function oldProcesses(): number {
+  const run = (cmd: string, args: string[]): string => execFileSync(cmd, args,
     { encoding: 'utf8', timeout: 4000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   try {
     const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -248,8 +259,8 @@ function oldProcesses() {
   } catch { return 0; }
 }
 
-export function migrate() {
-  const rows = [];
+export function migrate(): Row[] {
+  const rows: Row[] = [];
   stateDir(rows);
   skills(rows);
   registrations(rows);
@@ -261,7 +272,7 @@ export function migrate() {
 }
 
 /* Whether there is anything to do, cheaply enough to check on every run. */
-export function needed() {
+export function needed(): boolean {
   // a forward link is a deliberate compatibility shim, not a leftover
   if (fs.existsSync(OLD_DIR) && !(isLink(OLD_DIR) && linkedForward())) return true;
   for (const d of ['.claude/skills', '.codex/skills', '.gemini/skills']) {

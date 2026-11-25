@@ -15,7 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { emptyBoard, applyOps } from './board/state.js';
+import { emptyBoard, applyOps, type Board } from './board/state.js';
 import { snapshotHTML } from './board/snapshot.js';
 import { renderSVG } from './render/render.js';
 import { KINDS } from './render/glyphs.js';
@@ -52,11 +52,15 @@ Rules:
 
 /* ---------- pull ops out of whatever the model said ---------- */
 
+/* An object that names an op. Whether it is one the board can draw is the
+   reducer's question, asked when it is applied. */
+export type ExtractedOp = { op: string } & Record<string, unknown>;
+
 /* Scans for balanced top-level JSON objects and keeps the ones with an "op".
    This survives code fences, prose around the JSON, and objects spread over
    several lines, which models do in roughly equal measure. */
-export function extractOps(text) {
-  const ops = [];
+export function extractOps(text: unknown): ExtractedOp[] {
+  const ops: ExtractedOp[] = [];
   const s = String(text);
   for (let i = 0; i < s.length; i++) {
     if (s[i] !== '{') continue;
@@ -72,8 +76,8 @@ export function extractOps(text) {
     }
     if (end < 0) continue;
     try {
-      const o = JSON.parse(s.slice(i, end + 1));
-      if (o && typeof o === 'object' && typeof o.op === 'string') ops.push(o);
+      const o: unknown = JSON.parse(s.slice(i, end + 1));
+      if (o && typeof o === 'object' && 'op' in o && typeof o.op === 'string') ops.push(o as ExtractedOp);
     } catch { /* not JSON; move on */ }
     i = end;
   }
@@ -82,7 +86,21 @@ export function extractOps(text) {
 
 /* ---------- what makes a board good ---------- */
 
-export function score(board) {
+export interface Score {
+  boxes: number;
+  lines: number;
+  steps: number;
+  said: number;
+  notes: number;
+  boundaries: number;
+  titled: boolean;
+  labelled_edges: number;
+  connected_edges: number;
+  kinds_used: number;
+  subs: number;
+}
+
+export function score(board: Board): Score {
   const edges = board.edges || [];
   const nodes = board.nodes || [];
   const labelled = edges.filter(e => e.label).length;
@@ -106,11 +124,11 @@ export function score(board) {
 
 /* ---------- running one model ---------- */
 
-const stripAnsi = s => String(s).replace(/\u001b\[[0-9;]*m/g, '');
+const stripAnsi = (s: unknown): string => String(s).replace(/\u001b\[[0-9;]*m/g, '');
 
 /* The models you can actually reach right now. On a metered provider this
    changes between calls, so it is worth asking rather than remembering. */
-export function listModels() {
+export function listModels(): Promise<string[]> {
   return new Promise(resolve => {
     const child = spawn('opencode', ['models'], { stdio: ['ignore', 'pipe', 'ignore'] });
     let out = '';
@@ -120,7 +138,15 @@ export function listModels() {
   });
 }
 
-function runModel(model, prompt, timeoutMs) {
+interface Run {
+  out: string;
+  err: string;
+  code?: number | null;
+  ms: number;
+  failed: boolean;
+}
+
+function runModel(model: string, prompt: string, timeoutMs: number): Promise<Run> {
   return new Promise(resolve => {
     const started = Date.now();
     const child = spawn('opencode', ['run', '-m', model, '--log-level', 'none', prompt],
@@ -142,11 +168,20 @@ function runModel(model, prompt, timeoutMs) {
 
 /* ---------- the comparison page ---------- */
 
-function indexHTML(prompt, results) {
-  const cols = ['boxes', 'lines', 'steps', 'labelled_edges', 'connected_edges', 'kinds_used', 'subs', 'notes', 'said'];
-  const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
-  const best = {};
-  for (const c of cols) best[c] = Math.max(...results.filter(r => r.ok).map(r => r.score[c] ?? 0));
+type Drawn = {
+  model: string, ok: true, ms: number, score: Score, board: Board,
+  svg: string, file: string, raw: string,
+};
+type Undrawn = { model: string, ok: false, ms: number, raw: string, error: string };
+export type BenchResult = Drawn | Undrawn;
+
+type Column = Exclude<keyof Score, 'titled'>;
+
+function indexHTML(prompt: string, results: BenchResult[]): string {
+  const cols: Column[] = ['boxes', 'lines', 'steps', 'labelled_edges', 'connected_edges', 'kinds_used', 'subs', 'notes', 'said'];
+  const esc = (s: unknown): string => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const best: Partial<Record<Column, number>> = {};
+  for (const c of cols) best[c] = Math.max(...results.filter((r): r is Drawn => r.ok).map(r => r.score[c] ?? 0));
 
   const cards = results.map(r => {
     if (!r.ok) {
@@ -157,7 +192,7 @@ function indexHTML(prompt, results) {
       <h2>${esc(r.model)} <span class="t">${(r.ms / 1000).toFixed(1)}s</span></h2>
       <div class="board">${r.svg}</div>
       <dl>${cols.map(c =>
-        `<div${r.score[c] === best[c] && best[c] > 0 ? ' class="top"' : ''}><dt>${c.replace(/_/g, ' ')}</dt><dd>${r.score[c]}</dd></div>`).join('')}</dl>
+        `<div${r.score[c] === best[c] && (best[c] ?? 0) > 0 ? ' class="top"' : ''}><dt>${c.replace(/_/g, ' ')}</dt><dd>${r.score[c]}</dd></div>`).join('')}</dl>
       <p class="files"><a href="${esc(r.file)}">board</a> · <a href="${esc(r.raw)}">raw reply</a></p>
     </section>`;
   }).join('');
@@ -193,7 +228,10 @@ function indexHTML(prompt, results) {
 
 /* ---------- the command ---------- */
 
-export async function bench(prompt, { models = [], out = 'bench', timeout = 180 } = {}) {
+export async function bench(
+  prompt: string,
+  { models = [], out = 'bench', timeout = 180 }: { models?: string[], out?: string, timeout?: number } = {},
+): Promise<BenchResult[] | undefined> {
   if (!models.length) {
     console.error('spiega bench: --models is required, e.g.\n' +
       '  --models github-copilot/claude-opus-5,github-copilot/gpt-6-sol\n' +
@@ -206,7 +244,7 @@ export async function bench(prompt, { models = [], out = 'bench', timeout = 180 
 
   console.log(`asking ${models.length} model${models.length > 1 ? 's' : ''} to explain:\n  ${prompt}\n`);
 
-  const results = await Promise.all(models.map(async model => {
+  const results = await Promise.all(models.map(async (model): Promise<BenchResult> => {
     const slug = model.replace(/[^a-zA-Z0-9.]+/g, '-');
     const r = await runModel(model, full, timeout * 1000);
     const raw = path.join(out, `${slug}.txt`);
