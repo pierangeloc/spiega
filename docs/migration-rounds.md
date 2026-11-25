@@ -33,13 +33,12 @@ tsdown + Vitest, the browser rule as lint, the conventions rewritten, and the
 two holes phase 0 left — lint that could not parse TypeScript, and a build
 that did not compile `packages/`.
 
-**Phase 1 is closed but for one human task.** Round 1 (#135), all three tracks
-of Round 2 (#137, #138, #139) and #140 have landed: `packages/core/src/schema/`
-holds the op union, the board Schema and the versioned log decoder, `state.ts`,
-`script.ts`, `tape.ts`, `map.ts`, `camera.ts`, `spec.ts` and `settle.ts` are all
-strict TypeScript, and `vendor/` is gone (`@dagrejs/dagre@3.1.3` comes from
-npm). What remains in phase 1 is #136 (real MCP tool schemas,
-`ready-for-human`).
+**Phase 1 is closed.** Round 1 (#135), all three tracks of Round 2 (#137, #138,
+#139) and #140 have landed: `packages/core/src/schema/` holds the op union, the
+board Schema and the versioned log decoder, `state.ts`, `script.ts`, `tape.ts`,
+`map.ts`, `camera.ts`, `spec.ts` and `settle.ts` are all strict TypeScript, and
+`vendor/` is gone (`@dagrejs/dagre@3.1.3` comes from npm). #136 closed it: the
+MCP tool schemas are the op union, generated from it at build time.
 
 **Phase 2 (render) is finished.** #141–#145 landed; `src/render` is strict
 TypeScript and the picture sets remain byte-checked.
@@ -48,9 +47,10 @@ TypeScript and the picture sets remain byte-checked.
 the Effect router, stream, log flush, snapshot/export/window, the `serve`,
 `open`, `install` and `doctor` commands, and the last of `src/` in strict
 TypeScript. #186's vanished-browser failure is now a tool error rather than a
-dead MCP server. Of the human-gated three, #146 and #151 are now answered —
-the MCP server is deliberately not rebuilt,
-[ADR 0003](adr/0003-keep-the-hand-rolled-mcp-server.md) — and #136 remains.
+dead MCP server. The human-gated three are all answered: #146 and #151 by
+deliberately not rebuilding the MCP server
+([ADR 0003](adr/0003-keep-the-hand-rolled-mcp-server.md)), and #136 by
+generating its tool schemas from the op union.
 
 **Phase 4 (board app) is finished.** #152–#157 landed: the React app is the
 board, narration plays on it, and an export is one self-contained file whose
@@ -112,7 +112,7 @@ runtime dependency, and the browser-rule exemption for
 | #138 | script, tape, map, camera, spec | **done** (#172) — all five ported in place |
 | #139 | dagre from npm, settle ported | **done** (#174) — `@dagrejs/dagre@3.1.3` from npm, `src/board/settle.ts`, `vendor/` deleted |
 
-### Round 3 — done but for #136
+### Round 3 — done
 
 | | | status / watch |
 |---|---|---|
@@ -120,7 +120,7 @@ runtime dependency, and the browser-rule exemption for
 | #147 | Effect HTTP server (read routes + security middleware) | **done** (#176) — unblocks #149 |
 | #152 | board app model, messages, pure update, fixture store | **done** (#175) — `packages/board/src/app/` + `test/board-app.mjs` |
 | #140 | old op logs restore through the Schema | **done** (#177) — `packages/core/src/schema/log.ts` with versioned `MIGRATIONS`, goldens in `test/fixtures/logs/`; unblocks #148 |
-| #136 | `board_draw` advertises a real schema | **unblocked** — `ready-for-human` (needs four real MCP clients) |
+| #136 | `board_draw` advertises a real schema | **done** (#199) — generated from the op union at build time, read as data so no `effect` enters the MCP server; driven in Claude Code and opencode, with a gap recorded below |
 
 ### Round 4 — done
 
@@ -232,13 +232,10 @@ cannot afford; the log is now closed whatever the verdict.
 
 ## Deliberately left undone
 
-None of these is a port. Only the first is still a decision somebody has to
-make; the rest are decisions already made, recorded so the JavaScript and the
+None of these is a port, and none is still a decision somebody has to make.
+They are decisions already made, recorded so the JavaScript and the
 hand-written code they leave behind read as intended rather than as loose ends.
 
-- **#136** — `board_draw` advertises a real schema to MCP clients.
-  `ready-for-human`: it needs real clients, and it is the only one of these
-  with a symptom a user can feel. Going ahead.
 - **#146** — the MCP spike. **Decided: neither option.** Effect's `McpServer`
   now ships inside `effect` itself, so it adds no dependency — but unbundled it
   answers `initialize` in 228 ms against today's 38 ms, and it only matches
@@ -261,17 +258,30 @@ hand-written code they leave behind read as intended rather than as loose ends.
   TypeScript config only behind `unstable_native_nodejs_ts_config`, and with
   `allowJs` off tsc would skip a listed `.js` without saying so.
 
-### The human track, startable now
+### The human track is empty, and #136 closed with a gap
 
-**#136** (`board_draw` advertises a real schema), and only that. #146 is
-answered and #151 is declined — [ADR 0003](adr/0003-keep-the-hand-rolled-mcp-server.md).
+**#136 was closed on two clients out of five, knowingly** — the same shape as
+#150. `board_draw` and `board_amend` advertise the op union, generated from
+`packages/core/src/schema/op.ts` at build time and read back as data so that no
+`effect` import reaches the MCP server. Claude Code and opencode were each
+driven in a fresh session against the merged build: all 13 tools listed, a
+three-op board drawn from one array, the default `$defs`/`$ref` shape, no flat
+variant needed.
 
-**#136** is the one with a symptom a user can feel: a client is told `ops` is
-an `object` and nothing more, so a model guesses and malformed ops arrive. The
-schema is generated from the op union at build time; what needs your own hands
-is driving the real clients — Claude Code, opencode, Cursor and Pi — because
-clients differ in how much JSON Schema they digest and no unit test here can
-tell you which ones choke.
+**Claude Desktop, Cursor and Pi were never driven.** They have no headless
+mode, and the risk #136 named is entirely client-side: a client that cannot
+follow a `$ref` lists no spiega tools at all, which looks like spiega not being
+installed. `SPIEGA_MCP_FLAT_SCHEMA=1` is the one-line answer if one of them
+chokes, the table in [install.md](install.md) names who has been checked and
+when, and #202 is the plumbing to make `spiega install` keep that variable once
+a client is found to need it. If someone reports missing tools, start there.
+
+The round left four follow-ups rather than a clean close, all from reading the
+advertisement rather than the code: **#200** (`board_amend` advertises `title`,
+which an amendment refuses), **#201** (the internal `_n`/`_i` fields are
+advertised), **#202** (install drops the flat-schema variable), **#203**
+(`initialize` echoes any `protocolVersion` and reports version `0.1.0`). None
+is a port, and none blocks anything.
 
 ## What to check before calling any of these done
 
