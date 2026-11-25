@@ -38,6 +38,7 @@
     "serve": "pnpm run build && node dist/src/cli.js serve --open",
     "mcp": "pnpm run build && node dist/src/mcp/server.js",
     "shapes": "pnpm run build && node dist/tools/shapes.js docs/shapes",
+    "op-schema": "pnpm run build && node dist/tools/op-schema.js src/mcp/op-schema.json",
     "clean": "node -e \"fs.rmSync('dist',{recursive:true,force:true})\"",
     "gallery": "pnpm run build && node dist/tools/gallery.js docs/gallery"
   },

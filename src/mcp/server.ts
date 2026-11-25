@@ -7,6 +7,7 @@
    human in a terminal can draw on one board at the same time.
    ============================================================ */
 
+import fs from 'node:fs';
 import path from 'node:path';
 import { resolveBoard, claimSession } from '../board/server.js';
 import type { Board } from '../board/state.js';
@@ -63,6 +64,34 @@ async function send(ops: unknown, { audit = false }: { audit?: boolean } = {}): 
 
 /* ---------- tools ---------- */
 
+/* What one op looks like, as JSON Schema: the op union, generated from
+   packages/core/src/schema/op.ts by tools/op-schema.js and committed beside
+   this file. Read as data rather than generated here, because generating it
+   means importing `effect`, and that alone is three times what answering
+   `initialize` costs without it. */
+const OP_SCHEMA: object = JSON.parse(fs.readFileSync(new URL('./op-schema.json', import.meta.url), 'utf8'));
+
+/* `ops` is one op or an array of them, and the union is some 7 KB, so by
+   default it is stated once per tool under `$defs` and pointed at twice. The
+   pointer is resolved against the inputSchema, which is the document a client
+   is handed, so `$defs` sits at its root and not inside the property.
+
+   `$ref` is the part of JSON Schema clients are least agreed on, so
+   SPIEGA_MCP_FLAT_SCHEMA=1 inlines the union in both places instead and
+   carries no reference at all: twice the bytes, for a client that cannot
+   follow one. docs/install.md says which clients need it. */
+const FLAT = process.env.SPIEGA_MCP_FLAT_SCHEMA === '1';
+
+const withOps = (description: string, schema: { required: string[], properties: Record<string, object> }) => {
+  const one = FLAT ? OP_SCHEMA : { $ref: '#/$defs/op' };
+  return {
+    type: 'object',
+    ...schema,
+    properties: { ...schema.properties, ops: { description, anyOf: [one, { type: 'array', items: one }] } },
+    ...(FLAT ? {} : { $defs: { op: OP_SCHEMA } }),
+  };
+};
+
 const TOOLS = [
   {
     name: 'board_say',
@@ -112,15 +141,7 @@ const TOOLS = [
       'It is about the next thing you draw, not the last one — stop adding to this board and tell the person, ' +
       'who is the one looking at it. Redrawing the same ops cannot help, since layout is derived and the same ' +
       'board gives the same picture; drawing a different board (one fewer note, a shorter label) can.',
-    inputSchema: {
-      type: 'object', required: ['ops'],
-      properties: {
-        ops: {
-          description: 'One op object, or an array of them.',
-          oneOf: [{ type: 'object' }, { type: 'array', items: { type: 'object' } }],
-        },
-      },
-    },
+    inputSchema: withOps('One op object, or an array of them.', { required: ['ops'], properties: {} }),
   },
   {
     name: 'board_step',
@@ -216,19 +237,15 @@ const TOOLS = [
       'than saying "I have added X to chapter 2".\n' +
       'Drawing the same id again corrects it, so a fix is the op again with the right fields. ' +
       'Ids are per chapter: the ids in this chapter are its own.',
-    inputSchema: {
-      type: 'object', required: ['chapter', 'ops'],
+    inputSchema: withOps('One op object, or an array of them, as board_draw takes.', {
+      required: ['chapter', 'ops'],
       properties: {
         chapter: {
           description: 'Which chapter: its number on the strip, counting from 1, or its exact title.',
           oneOf: [{ type: 'integer' }, { type: 'string' }],
         },
-        ops: {
-          description: 'One op object, or an array of them, as board_draw takes.',
-          oneOf: [{ type: 'object' }, { type: 'array', items: { type: 'object' } }],
-        },
       },
-    },
+    }),
   },
   {
     name: 'board_clear',

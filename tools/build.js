@@ -134,6 +134,9 @@ const REQUIRED = [
   'src/cli.js',
   'src/index.js',
   'src/mcp/server.js',
+  // what board_draw advertises an op to be; the MCP server reads it at startup
+  // and cannot list its tools without it — tools/op-schema.js writes it
+  'src/mcp/op-schema.json',
   'src/board/server.js',
   // the board page, one file — tools/board.js assembles it
   'src/board/index.html',

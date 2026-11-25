@@ -137,6 +137,42 @@ keeps files current; it cannot do anything about processes already running.
 Then ask for something architectural — "walk me through how X talks to Y, on
 the board" — and watch the pane.
 
+## If a client will not load the tools
+
+`board_draw` and `board_amend` tell the client what an op looks like: the
+input schema of each is the op union itself, generated from
+`packages/core/src/schema/op.ts`. The union is stated once per tool, under
+`$defs`, and `ops` points at it twice — one op, or an array of them — with
+`$ref`. That reference is the part of JSON Schema MCP clients are least agreed
+on, so there is a second shape that carries none: the same union written out in
+both places, at about twice the bytes.
+
+| client | gets | tested |
+|---|---|---|
+| Claude Code | `$defs` and `$ref` | not yet |
+| Claude Desktop | `$defs` and `$ref` | not yet |
+| Cursor | `$defs` and `$ref` | not yet |
+| opencode | `$defs` and `$ref` | not yet |
+| Pi | `$defs` and `$ref` | not yet |
+| anything else | `$defs` and `$ref` | not yet |
+
+If a client fails to list spiega's tools, refuses `board_draw`, or sends ops
+that come back as a schema error the board itself would not give, try the flat
+shape before anything else: set `SPIEGA_MCP_FLAT_SCHEMA=1` in the environment
+of spiega's entry in that client's config and start a fresh session. No
+rebuild, no reinstall. In Claude Code, Claude Desktop and Cursor that is an
+`env` object beside `command` in `mcpServers.spiega`; in opencode it is
+`environment` in `mcp.spiega`:
+
+```json
+"spiega": { "type": "stdio", "command": "node", "args": ["…/server.js"],
+            "env": { "SPIEGA_MCP_FLAT_SCHEMA": "1" } }
+```
+
+If that fixes it, the client is the one that needs the flat shape: say so in
+an issue, so this table can name it. Until then, note that `spiega install`
+rewrites spiega's entry whole, so re-running it drops the variable.
+
 ## Updating, and checking that it took
 
 Installed from npm:
