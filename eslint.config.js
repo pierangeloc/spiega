@@ -28,7 +28,7 @@ const UNFETCHABLE = '^[^./]';
 
 // Said as a trailing clause so it reads either way round: the two rules below
 // each put their own sentence in front of it.
-const WHY = 'the board page loads these modules off disk, unbundled, so keep node-only code in a node-only module (see src/board/log.js)';
+const WHY = 'the board page loads these modules off disk, unbundled, so keep node-only code in a node-only module (see src/board/log.ts)';
 
 // `no-restricted-imports` reads static `import` and `export … from`, which is
 // everything the walk looked at, but it does not see `import()`. A lazy
@@ -119,7 +119,6 @@ export default [
     // The node side (JavaScript). These run only in the server process, and the
     // board page must never reach them.
     files: [
-      'src/board/log.js',
       'src/board/server.js',
     ],
     rules: nodeSide,
@@ -127,11 +126,12 @@ export default [
   {
     // The node side (TypeScript). `settle.ts` imports `@dagrejs/dagre`, which
     // runs only in the server process — a test in smoke.mjs still asserts that
-    // the board page never reaches settle.js or dagre. The other three read
-    // files and start processes: the export reads the page and its modules off
-    // disk, the snapshot inlines the icon, and open runs the window Effects in
-    // packages/server/src/window.ts, which start a browser.
-    files: ['src/board/settle.ts', 'src/board/export.ts', 'src/board/open.ts', 'src/board/snapshot.ts'],
+    // the board page never reaches settle.js or dagre. `log.ts` is the op log
+    // on disk, split from the reducer for exactly this rule. The other three
+    // read files and start processes: the export reads the page and its modules
+    // off disk, the snapshot inlines the icon, and open runs the window Effects
+    // in packages/server/src/window.ts, which start a browser.
+    files: ['src/board/settle.ts', 'src/board/log.ts', 'src/board/export.ts', 'src/board/open.ts', 'src/board/snapshot.ts'],
     rules: { ...nodeSide, '@typescript-eslint/no-restricted-imports': 'off' },
   },
   {
