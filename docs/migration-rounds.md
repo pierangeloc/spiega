@@ -230,7 +230,9 @@ cannot afford; the log is now closed whatever the verdict.
 
 ## Deliberately left undone
 
-None of these is a port; each is a decision somebody still has to make.
+None of these is a port. The first three are decisions somebody still has to
+make; the last two are decisions already made, recorded so the JavaScript they
+leave behind reads as intended rather than as a loose end.
 
 - **#136** — `board_draw` advertises a real schema to MCP clients.
   `ready-for-human`: it needs four real clients.
@@ -238,9 +240,13 @@ None of these is a port; each is a decision somebody still has to make.
   `ready-for-human`.
 - **#151** — MCP as a thin Effect adapter over the board API. Waits on #136 and
   #146. #160 ported `src/mcp/server` straight across and built none of it.
-- **#170** — whether the suites follow into TypeScript. `test/*.mjs` and
-  `tools/*.js` are JavaScript on purpose until that is decided, and outside the
-  checker.
+- **#170** — whether the suites follow into TypeScript. **Decided: they do
+  not.** `test/*.mjs` and `tools/*.js` stay JavaScript and stay outside the
+  checker. The gradual port this ADR 0002 planned for ported nothing in ten
+  rounds, so there is no split idiom to finish — only one to open, against
+  10,692 lines whose assertions are mostly SVG, child processes and temp
+  directories. The reasoning is in
+  [ADR 0002](adr/0002-port-the-suite-gradually.md#amendment-the-suites-stay-mjs-170-2026-11-25).
 - **`eslint.config.js`** stays JavaScript and unchecked: ESLint 10 reads a
   TypeScript config only behind `unstable_native_nodejs_ts_config`, and with
   `allowJs` off tsc would skip a listed `.js` without saying so.
