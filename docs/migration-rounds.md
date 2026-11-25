@@ -22,6 +22,12 @@ gh issue view <n> --json blockedBy \
 
 ## Where it stands
 
+**The plan is done** (#160). There is no JavaScript left in `src/` or
+`packages/`, `allowJs` is off, and `pnpm run typecheck` is strict over every
+source file with nothing listed one by one. What is still open is not a port,
+and is written down under [Deliberately left undone](#deliberately-left-undone)
+rather than left to be rediscovered.
+
 **Phase 0 is closed** (#130–#134, #166): pnpm workspace, strict tsconfigs,
 tsdown + Vitest, the browser rule as lint, the conventions rewritten, and the
 two holes phase 0 left — lint that could not parse TypeScript, and a build
@@ -38,16 +44,15 @@ npm). What remains in phase 1 is #136 (real MCP tool schemas,
 **Phase 2 (render) is finished.** #141–#145 landed; `src/render` is strict
 TypeScript and the picture sets remain byte-checked.
 
-**Phase 3 (server/CLI) is in progress.** #147–#150 and #158 landed: the Effect
-router, stream, log flush, snapshot/export/window and `serve`/`open` CLI are in
-place. #186's vanished-browser failure is now a tool error rather than a dead
-MCP server. Next is #159 (install and doctor), then #160 (the last JavaScript).
-The human-gated #146, #136 and #151 remain separate.
+**Phase 3 (server/CLI) is finished.** #147–#150, #158, #159 and #160 landed:
+the Effect router, stream, log flush, snapshot/export/window, the `serve`,
+`open`, `install` and `doctor` commands, and the last of `src/` in strict
+TypeScript. #186's vanished-browser failure is now a tool error rather than a
+dead MCP server. The human-gated #146, #136 and #151 remain separate.
 
-**Phase 4 (board app) is in progress.** #152 and #153 landed: `/next` serves a
-self-contained React page against the Kalman fixture beside the unchanged
-legacy board. It is not live yet; #154 (step mode, camera, chapters and
-draw-on) is next, followed by #155–#157.
+**Phase 4 (board app) is finished.** #152–#157 landed: the React app is the
+board, narration plays on it, and an export is one self-contained file whose
+weight is gated in CI.
 
 ## The decision the whole of phase 1 rests on
 
@@ -202,15 +207,43 @@ page remains intact.
 fixture page is a visual parity starting point, not a live-board cutover:
 playback, camera gestures and the live connection belong to later rounds.
 
-### Round 9 — unblocked now
+### Round 9 — done
 
-| | | unblocks |
+| | | status |
 |---|---|---|
-| #154 | Step mode, camera, chapters and draw-on at parity (Phase 4) | #155 → #156 → #157 |
-| #159 | Install and doctor on Effect (Phase 3) | #160 |
+| #154–#157 | Step mode, narration, the cutover, the offline export (Phase 4) | **done** (#190–#193) — **phase 4 is finished** |
+| #159 | Install and doctor on Effect (Phase 3) | **done** (#189) — unblocks #160 |
 
-These are separate board-app and CLI tracks. Check their tracker blockers
-before starting; the queue is a snapshot, not the source of truth.
+### Round 10 — done, and the last
+
+| | | status |
+|---|---|---|
+| #160 | The last JavaScript goes, and strict covers everything | **done** — every remaining `src/*.js` ported in place, leaves first and `cli.ts` last; `allowJs: false`; the root `tsconfig.json` checks `src/**/*.ts` by glob |
+
+The p99 budget in `test/persist.mjs` is the benchmark the plan meant: it is
+what fails when a write goes back on the draw path. It now also runs as a CI
+job of its own, `POST /op p99 budget`. `src/bench.js` — now `bench.ts` — was
+ported as the command it is, a model comparison through `opencode run`; it
+costs money and cannot gate anything. Making the budget fail on purpose turned
+up a suite that printed FAIL and then hung under plain node, which a gate
+cannot afford; the log is now closed whatever the verdict.
+
+## Deliberately left undone
+
+None of these is a port; each is a decision somebody still has to make.
+
+- **#136** — `board_draw` advertises a real schema to MCP clients.
+  `ready-for-human`: it needs four real clients.
+- **#146** — the MCP spike, Effect's MCP module or the official SDK wrapped.
+  `ready-for-human`.
+- **#151** — MCP as a thin Effect adapter over the board API. Waits on #136 and
+  #146. #160 ported `src/mcp/server` straight across and built none of it.
+- **#170** — whether the suites follow into TypeScript. `test/*.mjs` and
+  `tools/*.js` are JavaScript on purpose until that is decided, and outside the
+  checker.
+- **`eslint.config.js`** stays JavaScript and unchecked: ESLint 10 reads a
+  TypeScript config only behind `unstable_native_nodejs_ts_config`, and with
+  `allowJs` off tsc would skip a listed `.js` without saying so.
 
 ### The human track, startable now
 
@@ -227,7 +260,7 @@ The best use of your own hands while agents port the core.
 The oracle is not the suite alone.
 
 ```sh
-pnpm test          # 19 suites, inside dist/
+pnpm test          # 20 suites, inside dist/
 pnpm run lint      # the browser rule, over the source tree
 pnpm run typecheck # root plus every package, strict
 pnpm run pack      # the tarball npm would publish
@@ -241,14 +274,14 @@ And, per round:
   `persist.mjs`, which asserts the per-op work on `POST /op` stays under 0.2 ms.
 - **Cold start.** An MCP client times out on a slow server. `node -e
   "import('./dist/src/mcp/server.js')"` is ~0.03 s; keep it there. Effect
-  loaded eagerly in `board/server.js` costs 70 ms on a path that decodes
+  loaded eagerly in `board/server.ts` costs 70 ms on a path that decodes
   nothing, which is why the Schema is imported at `listen`.
 - **The browser, which the suite barely sees.** A green run does not mean a
   working board. Anything reachable from the page gets looked at, in a browser,
   at a narrow width too.
 - **That the suite ran at all.** Since #182 the harness reads every suite's
   exit code, so a failure is a failure. Before it, two of them were failing
-  into a green run. Read the count: 19 passed, not "no output".
+  into a green run. Read the count: 20 passed, not "no output".
 
 ## Two things this queue keeps getting right by accident
 
