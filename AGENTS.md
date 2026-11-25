@@ -221,8 +221,8 @@ off in `tsconfig.base.json` — said explicitly, so turning it back on is a
 visible decision rather than a default. A module is checked by being in a
 source tree; nothing opts in, and nothing is listed one by one. What still runs
 as JavaScript is outside the checker on purpose: `test/*.mjs` and `tools/*.js`
-(whether the suites follow is #170), and `eslint.config.js`, which ESLint reads
-as TypeScript only behind an unstable flag.
+(they stay that way — #170, recorded in ADR 0002), and `eslint.config.js`,
+which ESLint reads as TypeScript only behind an unstable flag.
 
 It is a separate job from `pnpm test` on purpose. The suite answers "does it
 work", the checker answers "do the types hold", and a run that cannot tell you
