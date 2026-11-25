@@ -24,7 +24,7 @@ export function piInstructionsFile() {
   /* readdirSync, not existsSync: on a case-insensitive filesystem AGENTS.MD
      "exists" whenever AGENTS.md does, and the name written back has to be the
      one actually on disk. */
-  let present = [];
+  let present: string[] = [];
   try { present = fs.readdirSync(dir); } catch { /* no directory yet */ }
   const found = INSTRUCTION_FILES.find(f => present.includes(f)) || 'AGENTS.md';
   return path.join(dir, found);
@@ -37,7 +37,7 @@ export function piInstructionsFile() {
 
    The description is what pi lists in the system prompt before the server has
    connected, so it carries the same trigger the skill does. */
-export const piMcpEntry = (entry) => ({
+export const piMcpEntry = (entry: string) => ({
   type: 'stdio',
   command: 'node',
   args: [entry],

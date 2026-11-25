@@ -1509,17 +1509,25 @@ test('doctor does not mistake an enclosing repo for its own checkout', async () 
   }
 });
 
+/* A checkout that has not been built has no CLI to run at all: the source tree
+   is TypeScript, so the launcher is the one thing left that can say so. */
 test('doctor names a missing checkout build rather than failing to import its CLI', async () => {
   const cp = await import('node:child_process');
-  const sourceCli = path.join(ROOT, '..', 'src', 'cli.js');
-  let out;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-unbuilt-'));
   try {
-    out = cp.execFileSync(process.execPath, [sourceCli, 'doctor'], { encoding: 'utf8' });
-  } catch (error) {
-    out = String(error.stdout || '');
+    fs.mkdirSync(path.join(dir, 'bin'));
+    fs.copyFileSync(path.join(ROOT, 'bin', 'spiega'), path.join(dir, 'bin', 'spiega'));
+    fs.chmodSync(path.join(dir, 'bin', 'spiega'), 0o755);
+    fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(dir, 'package.json'));
+    const r = cp.spawnSync(path.join(dir, 'bin', 'spiega'), ['doctor'], {
+      env: { ...isolatedEnv(dir), SPIEGA_NODE: process.execPath }, encoding: 'utf8',
+    });
+    assert.notEqual(r.status, 0, 'a launcher with nothing to run must not exit 0');
+    assert.match(r.stderr, /compiled CLI is missing/);
+    assert.match(r.stderr, /pnpm install && pnpm run build/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
-  assert.match(out, /compiled CLI is missing/);
-  assert.match(out, /pnpm install && pnpm run build/);
 });
 
 test('doctor diagnoses a built CLI whose dependencies are missing', async () => {

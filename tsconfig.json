@@ -12,30 +12,6 @@
   "include": [
     "vitest.config.ts",
     "eslint.config.js",
-    "src/index.ts",
-    "src/spec.ts",
-    "src/checkout.ts",
-    "src/install.ts",
-    "src/doctor.ts",
-    "src/board/state.ts",
-    "src/board/settle.ts",
-    "src/board/camera.ts",
-    "src/board/script.ts",
-    "src/board/map.ts",
-    "src/board/tape.ts",
-    "src/board/snapshot.ts",
-    "src/board/export.ts",
-    "src/board/open.ts",
-    "src/render/render.ts",
-    "src/render/audit.ts",
-    "src/render/layout.ts",
-    "src/render/floating.ts",
-    "src/render/theme.ts",
-    "src/render/math.ts",
-    "src/render/geom.ts",
-    "src/render/ink.ts",
-    "src/render/glyphs.ts",
-    "src/render/edges.ts",
-    "src/render/callout.ts"
+    "src/**/*.ts"
   ]
 }
