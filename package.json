@@ -34,6 +34,7 @@
     "typecheck": "tsc --noEmit && pnpm -r --if-present run typecheck",
     "pack": "pnpm run build && npm pack ./dist --pack-destination .",
     "release": "pnpm test && pnpm run typecheck && npm publish ./dist",
+    "size": "pnpm run build && node dist/tools/size.js",
     "serve": "pnpm run build && node dist/src/cli.js serve --open",
     "mcp": "pnpm run build && node dist/src/mcp/server.js",
     "shapes": "pnpm run build && node dist/tools/shapes.js docs/shapes",
