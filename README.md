@@ -290,8 +290,9 @@ tab is looking; **export chapter** keeps only the chapter in view. The files nee
 no spiega server and can be committed to a repository or served by GitHub Pages
 (including inside an iframe). Each is one file of about 340 KB (110 KB gzipped),
 the board page and the board's state, with nothing fetched; `pnpm run size`
-prints the current figure and CI reports it on every change. `spiega snapshot` remains the static, script-free
-view for places that do not allow interactive HTML.
+prints the current figure and CI reports it on every change. `spiega snapshot`
+remains the static, script-free view for places that do not allow interactive
+HTML.
 
 The specs under [`examples/`](examples/) ship inside the package as well as the
 repo, so to render one of those, point at where it actually is — from a clone,
