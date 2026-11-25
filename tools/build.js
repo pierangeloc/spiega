@@ -23,8 +23,8 @@
  * declarations, and parts of the suite read these files as text — which ops
  * the reducer's switch accepts, which paths install copies. Compiling them
  * bought nothing and broke those, so JavaScript is copied, byte for byte, and
- * only TypeScript is compiled. `allowJs` is what lets the two live together:
- * a ported module keeps importing the JavaScript it has not replaced yet.
+ * only TypeScript is compiled. Since #160 there is no JavaScript left in src/
+ * or packages/; what is still copied this way is the suites and the tools.
  */
 import fs from 'node:fs';
 import path from 'node:path';

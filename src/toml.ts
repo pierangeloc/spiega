@@ -14,18 +14,19 @@
    ============================================================ */
 
 /* The whole `[mcp_servers.<name>]` table, header line included. */
-export const tomlTable = name =>
+export const tomlTable = (name: string): RegExp =>
   new RegExp(String.raw`^\[mcp_servers\.${name}\][^\n]*\n(?:(?!\[)[^\n]*\n?)*`, 'm');
 
 /* Remove it, leaving the file's own spacing tidy. */
-export function dropTable(raw, name) {
+export function dropTable(raw: string, name: string): string {
   if (!tomlTable(name).test(raw)) return raw;
   return raw.replace(tomlTable(name), '').replace(/\n{3,}/g, '\n\n');
 }
 
 /* Add it, or repoint one that is already there. Only our own table is ever
    rewritten, and only as far as the next one. */
-export function upsertTable(raw, name, body) {
+export function upsertTable(raw: string, name: string, body: string):
+  { text: string; how: 'added' | 'unchanged' | 'repointed' } {
   const re = tomlTable(name);
   const found = raw.match(re);
   if (!found) return { text: raw.replace(/\n*$/, '\n') + '\n' + body, how: 'added' };

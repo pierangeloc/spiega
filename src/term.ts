@@ -37,7 +37,7 @@ const CODES = {
   ink: 39, muted: 90, accent: 31, good: 32, warn: 33, cool: 36,
 };
 
-const wrap = name => s => (colourful() ? `\u001b[${CODES[name]}m${s}\u001b[0m` : String(s));
+const wrap = (name: keyof typeof CODES) => (s: unknown): string => (colourful() ? `\u001b[${CODES[name]}m${s}\u001b[0m` : String(s));
 
 export const c = {
   bold: wrap('bold'), dim: wrap('muted'), muted: wrap('muted'),
@@ -52,13 +52,13 @@ export const sym = () => (fancy()
 export const cols = () => process.stdout.columns || 80;
 
 /* Visible width: what the terminal will give the string, ignoring escapes. */
-export const visible = s => String(s).replace(/\u001b\[[0-9;]*m/g, '').length;
+export const visible = (s: unknown): number => String(s).replace(/\u001b\[[0-9;]*m/g, '').length;
 
-export const pad = (s, n) => s + ' '.repeat(Math.max(0, n - visible(s)));
+export const pad = (s: string, n: number): string => s + ' '.repeat(Math.max(0, n - visible(s)));
 
 /* A path shortened from the left, because the end of a path is the part that
    identifies it and the beginning is usually your home directory. */
-export function shortPath(p, max = 48) {
+export function shortPath(p: unknown, max = 48): string {
   const home = process.env.HOME || '';
   let s = home ? String(p).replace(home, '~') : String(p);
   if (s.length <= max) return s;
@@ -72,7 +72,7 @@ export const rule = (n = cols() - 2) => c.dim((fancy() ? '─' : '-').repeat(Mat
 
 /* A title with a rule running off to the right of it, which reads as a heading
    without costing three lines. */
-export function heading(text) {
+export function heading(text: string): string {
   const t = ` ${c.bold(text)} `;
   const n = cols() - visible(t) - 3;
   return `\n${t}${c.dim((fancy() ? '─' : '-').repeat(Math.max(2, n)))}\n`;

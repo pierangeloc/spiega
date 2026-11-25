@@ -59,6 +59,27 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
 
+  # POST /op is on the critical path of somebody talking, and the only thing
+  # that keeps a write from creeping back onto it is the p99 budget in
+  # test/persist.mjs. The suite runs it too; this runs it under its own name,
+  # so a draw path that got slower reads as that in the checks list rather
+  # than as one more red suite somebody has to open to understand. It is not
+  # src/bench.js: that compares models through opencode, costs money and
+  # cannot be a gate.
+  budget:
+    runs-on: ubuntu-latest
+    name: POST /op p99 budget
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run build
+      - run: pnpm vitest run dist/test/persist.spec.mjs
+
   artefact:
     runs-on: ubuntu-latest
     name: npx from the tarball
@@ -156,6 +177,6 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      # Strict, and deliberately a job of its own: the modules that have opted
-      # in are checked with no `any`, no `@ts-ignore` and no loosened flag.
+      # Strict, and deliberately a job of its own: every source file is
+      # checked with no `any`, no `@ts-ignore` and no loosened flag.
       - run: pnpm run typecheck

@@ -9,7 +9,7 @@
    last tick of ops, which is the trade a whiteboard is allowed to make.
 
    The file itself — the lock, the append, the compaction — is `LogFile`, which
-   src/board/log.js provides. This module decides when to call it and what to do
+   src/board/log.ts provides. This module decides when to call it and what to do
    when it throws, and never does I/O of its own.
 
    A write that fails does not fail anything that asked for it. The batch is
@@ -162,7 +162,7 @@ export const makeOpLog = (
   });
 
 /* The same thing for a caller that is not in an Effect, which is every
-   caller in src/board/server.js: a log is made the moment a board is held. */
+   caller in src/board/server.ts: a log is made the moment a board is held. */
 export interface OpLog {
   readonly file: string;
   readonly owner: boolean;

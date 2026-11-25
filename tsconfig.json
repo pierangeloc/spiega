@@ -1,8 +1,12 @@
 {
-  // The root's own sources: the TypeScript modules ported so far, listed one
-  // by one. The render package is finished (#141–#145); what is left is the
-  // JavaScript outside it, which opts in with `// @ts-check` and a line here,
-  // because `checkJs` stays off for the files that have not been ported.
+  // The root's own sources: all of src/, which is TypeScript and nothing else
+  // since #160. Every module is checked by being there; none opts in.
+  //
+  // Not here: test/*.mjs and tools/*.js, which run as JavaScript (whether the
+  // suites follow is #170), and eslint.config.js, for the same reason — ESLint
+  // reads a TypeScript config only behind an unstable flag. With allowJs off a
+  // `.js` listed here is skipped without a word, so it is not listed at all;
+  // its `// @ts-check` is for an editor now, not for this.
   //
   // Shared options live in tsconfig.base.json, which every package extends.
   "extends": "./tsconfig.base.json",
@@ -11,31 +15,6 @@
   },
   "include": [
     "vitest.config.ts",
-    "eslint.config.js",
-    "src/index.ts",
-    "src/spec.ts",
-    "src/checkout.ts",
-    "src/install.ts",
-    "src/doctor.ts",
-    "src/board/state.ts",
-    "src/board/settle.ts",
-    "src/board/camera.ts",
-    "src/board/script.ts",
-    "src/board/map.ts",
-    "src/board/tape.ts",
-    "src/board/snapshot.ts",
-    "src/board/export.ts",
-    "src/board/open.ts",
-    "src/render/render.ts",
-    "src/render/audit.ts",
-    "src/render/layout.ts",
-    "src/render/floating.ts",
-    "src/render/theme.ts",
-    "src/render/math.ts",
-    "src/render/geom.ts",
-    "src/render/ink.ts",
-    "src/render/glyphs.ts",
-    "src/render/edges.ts",
-    "src/render/callout.ts"
+    "src/**/*.ts"
   ]
 }

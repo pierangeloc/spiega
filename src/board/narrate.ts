@@ -42,16 +42,16 @@
 /* Wrap every word of an element in its own span, numbered by the character
    offset it starts at. The offsets index into `el.textContent`, which is also
    exactly the string given to the synthesiser, so the two cannot drift. */
-export function wrapWords(el) {
+export function wrapWords(el: Node): number {
   const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-  const texts = [];
-  for (let n = walker.nextNode(); n; n = walker.nextNode()) texts.push(n);
+  const texts: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) texts.push(n as Text);
 
   let at = 0;
   for (const node of texts) {
     const frag = document.createDocumentFragment();
     // keep the whitespace: it carries the offsets, and the layout
-    for (const part of node.nodeValue.split(/(\s+)/)) {
+    for (const part of node.data.split(/(\s+)/)) {
       if (!part) continue;
       if (/^\s+$/.test(part)) {
         frag.appendChild(document.createTextNode(part));
@@ -64,7 +64,7 @@ export function wrapWords(el) {
       }
       at += part.length;
     }
-    node.parentNode.replaceChild(frag, node);
+    node.parentNode?.replaceChild(frag, node);
   }
   return at;
 }
@@ -76,7 +76,7 @@ export function wrapWords(el) {
    is a scan rather than a search, and an offset before the first word — which
    happens when a sentence starts with punctuation — means no word yet rather
    than the first one. */
-export function wordAt(starts, offset) {
+export function wordAt(starts: readonly number[], offset: number): number {
   let found = -1;
   for (let i = 0; i < starts.length; i++) {
     if (starts[i] <= offset) found = i; else break;
@@ -109,22 +109,41 @@ const CHAPTER_GAP = 2400;  // ms when the board is about to open another chapter
    that a step change gives them to take in a lit one. A card on the outline is
    a turn of its own kind — the next chapter being described — and gets the step
    silence, since nothing on screen changes but the one thing lit. */
-export function gapBefore(prev, next) {
+export function gapBefore(prev: Gapped, next: Gapped): number {
   if (next.chapter !== prev.chapter) return CHAPTER_GAP;
   if (next.card != null && next.card !== prev.card) return STEP_GAP;
   if (next.step != null && next.step !== prev.step) return STEP_GAP;
   return LINE_GAP;
 }
 
-/** @param {{ onState?: (state: { playing: boolean, index: number, total: number, rate: number }) => void }} options */
-export function createNarrator({ onState = () => {} } = {}) {
+/* What the player needs of a section: the words, where they sit — which is
+   what decides the silence before them — and the hooks the host hangs on it.
+   The tape builds the first half (src/board/tape.ts); the board adds the hooks. */
+type Gapped = {
+  readonly chapter?: number | null,
+  readonly card?: number | null,
+  readonly step?: number | null,
+};
+
+export type NarratorSection = Gapped & {
+  readonly text: string,
+  onStart?(): void | Promise<void>,
+  onWord?(offset: number): void,
+  onDone?(alive: () => boolean): void | Promise<void>,
+};
+
+export type NarratorState = { playing: boolean, index: number, total: number, rate: number };
+
+export type Voice = { name: string, lang: string, local: boolean };
+
+export function createNarrator({ onState = () => {} }: { onState?: (state: NarratorState) => void } = {}) {
   const synth = typeof speechSynthesis !== 'undefined' ? speechSynthesis : null;
 
-  let voice = null;
+  let voice: SpeechSynthesisVoice | null = null;
   let rate = 1;
   let playing = false;          // the tape is running
   let index = -1;               // which section
-  let sections = [];            // [{ text, step, chapter, onStart, onWord, onDone }]
+  let sections: NarratorSection[] = [];  // [{ text, step, chapter, onStart, onWord, onDone }]
   let ended = false;            // the tape ran off its own end, as opposed to being paused
   let token = 0;                // invalidates callbacks from an abandoned run
 
@@ -134,13 +153,13 @@ export function createNarrator({ onState = () => {} } = {}) {
      Jester, Organ — so an alphabetical list buries the handful anyone would
      narrate with. Ordering is a courtesy, not a filter: everything is still
      in the list, because which voice sounds right is not mine to decide. */
-  function listVoices() {
+  function listVoices(): Voice[] {
     if (!synth) return [];
     return synth.getVoices()
       .filter(v => /^en(-|$)/i.test(v.lang))
       .map(v => ({ name: v.name, lang: v.lang, local: v.localService }))
-      .sort((a, b) => (GOOD.test(b.name) - GOOD.test(a.name))
-        || (b.local - a.local)
+      .sort((a, b) => (Number(GOOD.test(b.name)) - Number(GOOD.test(a.name)))
+        || (Number(b.local) - Number(a.local))
         || a.name.localeCompare(b.name));
   }
 
@@ -149,7 +168,7 @@ export function createNarrator({ onState = () => {} } = {}) {
     const all = synth.getVoices().filter(v => /^en(-|$)/i.test(v.lang));
     if (!all.length) return;
     // a chosen voice outranks the guess, and survives a reload
-    let want = null;
+    let want: string | null = null;
     try { want = localStorage.getItem('spiega.voiceName'); } catch { /* private window */ }
     voice = (want && all.find(v => v.name === want))
       || all.find(v => v.localService && GOOD.test(v.name))
@@ -172,14 +191,14 @@ export function createNarrator({ onState = () => {} } = {}) {
 
   /* Speak one section, lighting each word as it is said, and resolve when it
      is finished rather than when it was started. */
-  function speak(section, mine) {
+  function speak(section: NarratorSection, mine: number): Promise<boolean> {
     return new Promise(resolve => {
       if (!synth) return resolve(false);
       const text = section.text;
       /* Sentences, for Chrome's fifteen-second limit. Each piece reports
          offsets from its own start, so it carries the offset of its start
          within the line to put them back on the same scale. */
-      const parts = [];
+      const parts: { piece: string, start: number }[] = [];
       let cursor = 0;
       for (const piece of text.split(/(?<=[.!?:;])\s+/)) {
         if (!piece) continue;
@@ -210,9 +229,9 @@ export function createNarrator({ onState = () => {} } = {}) {
 
   /* A silence that can be interrupted. Resolves false if the tape moved on
      while it was waiting, which is what a pause pressed mid-gap looks like. */
-  const hush = (ms, mine) => new Promise(r => setTimeout(() => r(mine === token), ms));
+  const hush = (ms: number, mine: number) => new Promise<boolean>(r => setTimeout(() => r(mine === token), ms));
 
-  async function run(from) {
+  async function run(from: number): Promise<void> {
     const mine = ++token;
     playing = true;
     ended = false;
@@ -257,7 +276,7 @@ export function createNarrator({ onState = () => {} } = {}) {
 
     /* Pick one. Remembered, and applied to whatever is said next — changing
        voice mid-sentence would mean cutting the sentence off. */
-    setVoice(name) {
+    setVoice(name: string): string | null {
       if (!synth) return null;
       const found = synth.getVoices().find(v => v.name === name);
       if (!found) return voice?.name || null;
@@ -281,21 +300,21 @@ export function createNarrator({ onState = () => {} } = {}) {
 
     /* The tape's contents. Replacing it keeps the position if it still
        exists, so a line arriving mid-session does not rewind anything. */
-    load(next) {
+    load(next: NarratorSection[]): void {
       if (next.length > sections.length) ended = false;
       sections = next;
       if (index >= sections.length) index = sections.length - 1;
       announce();
     },
 
-    setRate(v) {
+    setRate(v: unknown): void {
       rate = Math.max(0.5, Math.min(2.5, Number(v) || 1));
       if (playing) { const at = index; stop(); run(at); } else announce();
     },
 
     /* A tape that finished starts again from the top, as a player does; one
        that was paused carries on from where it was. */
-    play(from = ended || index < 0 ? 0 : index) {
+    play(from: number = ended || index < 0 ? 0 : index) {
       if (!synth || !sections.length) return;
       stop();
       run(Math.max(0, Math.min(from, sections.length - 1)));
@@ -303,13 +322,13 @@ export function createNarrator({ onState = () => {} } = {}) {
 
     pause() { if (playing) stop(); },
 
-    toggle(from) {
+    toggle(from?: number): void {
       if (playing) this.pause();
       else this.play(from);
     },
 
     /* Move the tape. Playing follows you; paused, it just marks the place. */
-    go(to) {
+    go(to: number): void {
       const k = Math.max(0, Math.min(to, sections.length - 1));
       if (playing) this.play(k);
       else { index = k; ended = false; announce(); sections[k]?.onStart?.(); }
@@ -317,7 +336,7 @@ export function createNarrator({ onState = () => {} } = {}) {
 
     /* Put the playhead on a section without moving the board or speaking —
        the click that marks where the next play will begin. */
-    park(to) {
+    park(to: number): void {
       if (playing || !sections.length) return;
       index = Math.max(0, Math.min(to, sections.length - 1));
       ended = false;

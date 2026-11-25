@@ -4,13 +4,13 @@
   // buy a green check. That rule is older than the migration — it is why the
   // modules that opted in early are worth having opted in.
   //
-  // `allowJs` is what lets the migration proceed module by module: a ported
-  // TypeScript module sits beside the JavaScript it has not replaced yet, and
-  // the build compiles both. `checkJs` stays off, so a JavaScript module is
-  // checked only once it says `// @ts-check` itself.
+  // `allowJs` is off, and said so rather than left to the default, because it
+  // was on for the whole of the migration: it let a ported module sit beside
+  // the JavaScript it had not replaced yet. The migration is finished (#160) —
+  // the source trees are TypeScript, every module in them is checked, and
+  // nothing may turn it back on to let a `.js` file in without being checked.
   "compilerOptions": {
-    "allowJs": true,
-    "checkJs": false,
+    "allowJs": false,
     "strict": true,
     "target": "ES2022",
     "module": "NodeNext",

@@ -17,4 +17,4 @@
 
 import os from 'node:os';
 
-export const home = () => process.env.HOME || process.env.USERPROFILE || os.homedir();
+export const home = (): string => process.env.HOME || process.env.USERPROFILE || os.homedir();

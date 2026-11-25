@@ -1,13 +1,13 @@
 /* ============================================================
    @spiega/cli — serve, open, install and doctor, on effect/cli.
 
-   src/cli.js stays the entry point and keeps owning the command table, the
+   src/cli.ts stays the entry point and keeps owning the command table, the
    unknown-flag check and the --help text (see the comment above FLAGS
    there); a line reaches here only once that check has already passed, and
    `--help`/`-h` on these commands never reach here at all, which is why
    nothing below renders help of its own and the `version` passed to
    `Command.runWith` is a placeholder — effect/cli's own `--help`/`--version`
-   handling for these commands is dead code from src/cli.js's point of
+   handling for these commands is dead code from src/cli.ts's point of
    view, present only because the type signature asks for a version string.
 
    `serve` and `open` are the two commands #150 already moved onto Effect
@@ -40,7 +40,7 @@ const run = <Name extends string, Input>(
     Effect.provide(NodeServices.layer),
   ));
 
-/* A boolean switch, read the way src/cli.js's `flag()` read one: present in
+/* A boolean switch, read the way src/cli.ts's `flag()` read one: present in
    argv is true, whatever follows the `=`. `flag('tab')` returned the non-empty
    string `"false"` for `--tab=false`, which is truthy, so `--tab=false`
    selected tab mode; effect/cli's Flag.Boolean parses a real false there, so
@@ -59,7 +59,7 @@ const serveConfig = {
   tab: Switch('tab'),
   size: Flag.String('size').pipe(Flag.optional),
   browser: Flag.String('browser').pipe(Flag.optional),
-  // Global flags (src/cli.js's GLOBAL_FLAGS): already consumed upstream, into
+  // Global flags (src/cli.ts's GLOBAL_FLAGS): already consumed upstream, into
   // SPIEGA_BOARD, before this module is even imported. Declared here only so
   // effect/cli's parser does not refuse them as unknown.
   board: Flag.String('board').pipe(Flag.optional),
@@ -125,7 +125,7 @@ const openConfig = {
 type OpenConfig = Command.Command.Config.Infer<typeof openConfig>;
 
 async function openHandler(cfg: OpenConfig): Promise<void> {
-  // src/cli.js already refused a positional board name before calling here
+  // src/cli.ts already refused a positional board name before calling here
   // (`spiega open: board names require --board NAME …`) — see its own
   // `case 'open'`, unchanged by this move.
   const { resolveBoard } = await import('../../../src/board/server.js');

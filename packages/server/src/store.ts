@@ -2,7 +2,7 @@
    Board store service — what the read routes read from.
 
    Keeping the store behind an Effect service lets the read routes run against
-   the live board map in src/board/server.js today, against an Effect-native
+   the live board map in src/board/server.ts today, against an Effect-native
    store once #148 lands, and against a lightweight in-memory store with a
    temp SpiegaHome layer in tests.
    ============================================================ */

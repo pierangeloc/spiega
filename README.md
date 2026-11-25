@@ -473,15 +473,15 @@ board. Runs are isolated and never touch a live board.
 
 | | |
 |---|---|
-| `src/render/ink.js` | seeded wobble: the geometry that makes a line look drawn |
-| `src/render/glyphs.js` | one drawing per kind — service, cylinder, queue, cloud, note |
-| `src/render/edges.js` | gutter routing, fan-out anchors, numbered tags |
-| `src/render/layout.js` | columns from the flow, order-stable so nothing jumps |
-| `src/board/state.js` | the board as an op log |
-| `src/board/server.js` | one process, every board; HTTP + SSE, and the renderer as plain ES modules |
+| `src/render/ink.ts` | seeded wobble: the geometry that makes a line look drawn |
+| `src/render/glyphs.ts` | one drawing per kind — service, cylinder, queue, cloud, note |
+| `src/render/edges.ts` | gutter routing, fan-out anchors, numbered tags |
+| `src/render/layout.ts` | columns from the flow, order-stable so nothing jumps |
+| `src/board/state.ts` | the board as an op log |
+| `src/board/server.ts` | one process, every board; HTTP + SSE, and the renderer as plain ES modules |
 | `src/board/board.html` | the pane: transcript rail, step strip, pan and zoom |
-| `src/board/draw-on.js` | the hand: variable pen speed, uneven pauses, ink then colour |
-| `src/mcp/server.js` | the same board as MCP tools |
+| `src/board/draw-on.ts` | the hand: variable pen speed, uneven pauses, ink then colour |
+| `src/mcp/server.ts` | the same board as MCP tools |
 
 Two separate things make it look hand-drawn, and both are needed. The geometry
 is off true — `waver()` in `ink.js` pushes every point around a seeded wobble,

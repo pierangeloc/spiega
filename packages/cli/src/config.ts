@@ -9,7 +9,7 @@
    config through a service lets a test substitute a temp directory with a
    Layer — no env mutation, no process per test.
 
-   The precedence is the same as src/home.js: HOME first, then USERPROFILE for
+   The precedence is the same as src/home.ts: HOME first, then USERPROFILE for
    Windows, then the syscall when neither is set — so the answer agrees with
    the shell rather than a cached runtime answer.
    ============================================================ */

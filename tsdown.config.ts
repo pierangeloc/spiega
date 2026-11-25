@@ -16,9 +16,9 @@ import { defineConfig } from 'tsdown';
  * module therefore comes out as its own file, at the path it has in the
  * repository, with its import specifiers intact.
  *
- * `.js` specifiers are left alone for the same reason the JavaScript is copied
- * rather than compiled: a ported module sits beside the modules it has not
- * replaced yet, and it must find them exactly where they have always been.
+ * `.js` specifiers are left alone: every module imports the `.js` its
+ * neighbour compiles to, at the path it has in the repository, and that is
+ * exactly where this build writes it.
  */
 
 /* One build per source root, rather than one build over every `.ts` in the
@@ -54,8 +54,8 @@ export default defineConfig(roots.map(root => ({
   platform: 'node' as const,
   unbundle: true,
   deps: {
-    // The JavaScript that has not been ported. It is copied into the artefact
-    // as-is, so the specifier pointing at it is correct as written.
+    // A neighbour, named by the file it compiles to. Each is its own output
+    // at its own path, so the specifier pointing at it is correct as written.
     neverBundle: [/\.js$/],
   },
   // The page asks for `.js`. rolldown would otherwise write `.mjs`.

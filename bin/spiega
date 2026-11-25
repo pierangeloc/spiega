@@ -31,12 +31,12 @@ done
 root=$(CDPATH= cd -- "$(dirname -- "$target")/.." && pwd -P)
 
 # In the published package this launcher sits beside the built src/, so the
-# first path is the only one that exists. In a checkout it is the other way
-# round: the build output is under dist/, and that is what must run — once a
-# module has been ported, the source tree alone no longer starts. Preferring
-# dist means `spiega` from a clone is the same program users get, and a clone
-# that has not been built yet still runs today's JavaScript rather than
-# failing with nothing to say.
+# second path is the only one that exists. In a checkout it is the other way
+# round: the build output is under dist/, and that is what must run — the
+# source tree is TypeScript and does not start on its own. Preferring dist
+# means `spiega` from a clone is the same program users get. A clone that has
+# not been built has neither, and is told so below rather than failing with
+# nothing to say.
 cli=$root/dist/src/cli.js
 [ -f "$cli" ] || cli=$root/src/cli.js
 
@@ -159,6 +159,14 @@ if [ "${SPIEGA_NODE_VERSION:-}" = "1" ]; then
     fi
   fi
   exit 0
+fi
+
+# After the node question, so doctor can still ask which node a checkout would
+# get; before the exec, because node on a missing file says only "Cannot find
+# module", which names neither the cause nor the fix.
+if [ ! -f "$cli" ]; then
+  echo "spiega: the compiled CLI is missing — this checkout has not been built, so run pnpm install && pnpm run build." >&2
+  exit 1
 fi
 
 exec "$node" "$cli" "$@"

@@ -16,7 +16,7 @@
 const prefersStill = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* A small seeded generator, so a given stroke always draws the same way. */
-function rnd(seed) {
+function rnd(seed: number): () => number {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6D2B79F5) >>> 0;
@@ -29,9 +29,9 @@ function rnd(seed) {
 /* Keyframes whose progress runs ahead of and behind the clock: the pen covers
    more ground in some stretches than others. Per-keyframe easing smooths each
    change of pace so it reads as a wrist, not as stuttering. */
-function penFrames(L, r) {
+function penFrames(L: number, r: () => number): Keyframe[] {
   const steps = 5;
-  const frames = [{ strokeDashoffset: L, offset: 0, easing: 'ease-in-out' }];
+  const frames: Keyframe[] = [{ strokeDashoffset: L, offset: 0, easing: 'ease-in-out' }];
   let p = 0;
   for (let i = 1; i < steps; i++) {
     const t = i / steps;
@@ -44,15 +44,15 @@ function penFrames(L, r) {
 
 /* Returns how long the whole group takes, so the caller can start the next one
    when this one is actually finished rather than on a fixed grid. */
-export function animateIn(group, delay = 0, seed = 1) {
-  const strokes = [...group.querySelectorAll('path.s')];
-  const fills = [...group.querySelectorAll('path.f')];
+export function animateIn(group: Element, delay = 0, seed = 1): number {
+  const strokes = [...group.querySelectorAll<SVGPathElement>('path.s')];
+  const fills = [...group.querySelectorAll<SVGPathElement>('path.f')];
   const texts = [...group.querySelectorAll('text')];
-  const was = el => el.getAttribute('opacity') || 1;
+  const was = (el: Element): string | number => el.getAttribute('opacity') || 1;
   if (prefersStill) return 0;
 
   const r = rnd(seed);
-  const appear = (el, to, opts) =>
+  const appear = (el: Element, to: string | number, opts: KeyframeAnimationOptions) =>
     el.animate([{ opacity: 0 }, { opacity: to }], { fill: 'backwards', easing: 'ease-out', ...opts });
 
   // A running clock rather than a fixed stagger: each stroke starts when the
@@ -70,7 +70,7 @@ export function animateIn(group, delay = 0, seed = 1) {
     try { L = p.getTotalLength(); } catch { L = 0; }
     if (!L) continue;
     const dur = Math.min(1000, Math.max(220, L * (0.75 + r() * 0.4)));
-    p.style.strokeDasharray = L;             // with offset 0 this draws the whole line
+    p.style.strokeDasharray = String(L);  // with offset 0 this draws the whole line
     p.animate(penFrames(L, r), { duration: dur, delay: t, fill: 'backwards' })
       .finished.then(() => { p.style.strokeDasharray = ''; }, () => {});
     // Start the next stroke before this one has quite finished, and cap the
@@ -88,7 +88,7 @@ export function animateIn(group, delay = 0, seed = 1) {
 
 
 /* A stable seed for a board key, so a box always draws itself the same way. */
-export function seedOf(key) {
+export function seedOf(key: string): number {
   let h = 2166136261;
   for (let i = 0; i < key.length; i++) { h ^= key.charCodeAt(i); h = Math.imul(h, 16777619); }
   return h >>> 0;

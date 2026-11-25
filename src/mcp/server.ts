@@ -9,30 +9,42 @@
 
 import path from 'node:path';
 import { resolveBoard, claimSession } from '../board/server.js';
+import type { Board } from '../board/state.js';
 
 /* This process is the conversation, and it has to say so before anything
    resolves a board. The environment says otherwise: opencode starts every MCP
    server from one long-lived daemon, so four sessions read the same pane id
-   and were handed the same board — see claimSession in board/server.js. */
+   and were handed the same board — see claimSession in board/server.ts. */
 claimSession();
 
 const KINDS = 'client, gateway, service, compute, datastore, cache, queue, external, note, formula, blob, vessel, particle, source';
 
 /* The board for this session, started if need be. One server holds every
    board, so this is usually a file read and nothing more. */
-const url = async () => {
+const url = async (): Promise<string> => {
   const u = await resolveBoard();
   if (!u) throw new Error('could not start a board');
   return u;
 };
 
-async function send(ops, { audit = false } = {}) {
+/* What POST /op answers, as far as this reads it. */
+interface OpReply {
+  errors?: string[];
+  warnings?: string[];
+  nodes?: number;
+  edges?: number;
+  steps?: number;
+  amended?: { chapter: number, title?: string, nodes: number, edges: number, steps: number };
+  audit?: { lines?: string[] } | null;
+}
+
+async function send(ops: unknown, { audit = false }: { audit?: boolean } = {}): Promise<string> {
   const u = await url();
   const r = await fetch(u + '/op', {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ ops: [].concat(ops), ...(audit ? { audit: true } : {}) }),
+    body: JSON.stringify({ ops: ([] as unknown[]).concat(ops), ...(audit ? { audit: true } : {}) }),
   });
-  const b = await r.json();
+  const b: OpReply = await r.json();
   if (b.errors?.length) throw new Error(b.errors.join('; '));
   /* The counts are the whole of what an agent learns about what it just drew,
      so anything the board could not draw properly has to arrive in the same
@@ -268,25 +280,42 @@ const TOOLS = [
 
    A string that is not JSON gets named here for the same reason: by the time
    it reaches applyOps there is nothing left to say about it. */
-const listArg = (value, what) => {
+const listArg = (value: unknown, what: string): unknown[] => {
   if (typeof value === 'string') {
-    let parsed;
+    let parsed: unknown;
     try {
       parsed = JSON.parse(value);
     } catch (e) {
       throw new Error(
-        `${what} arrived as a string, and it is not valid JSON: ${e.message}. ` +
+        `${what} arrived as a string, and it is not valid JSON: ${(e as Error).message}. ` +
         `Pass ${what} as an object or an array of objects, or as a JSON string of one.`);
     }
-    return [].concat(parsed);
+    return ([] as unknown[]).concat(parsed);
   }
-  return [].concat(value);
+  return ([] as unknown[]).concat(value);
 };
 
-async function call(name, args = {}) {
+/* The arguments the tool schemas above advertise. A client is taken at the
+   schema's word, as it always was: what is not a string where one is asked for
+   fails inside the call and comes back as that tool's error. */
+interface Args {
+  text?: string;
+  step?: number | null;
+  edge?: string;
+  ops?: unknown;
+  tags?: unknown;
+  title?: string;
+  chapter?: number | string;
+  keepTitle?: boolean;
+  path?: string;
+  tab?: boolean;
+  size?: string;
+}
+
+async function call(name: string | undefined, args: Args = {}): Promise<string> {
   switch (name) {
     case 'board_say': {
-      const op = { op: 'say', text: String(args.text ?? '') };
+      const op: { op: 'say', text: string, step?: number, edge?: string } = { op: 'say', text: String(args.text ?? '') };
       if (args.step != null) op.step = Number(args.step);
       if (args.edge) op.edge = String(args.edge);
       return send([op]);
@@ -306,12 +335,12 @@ async function call(name, args = {}) {
 
     case 'board_tag': {
       const tags = listArg(args.tags, 'tags');
-      return send(tags.map(t => ({ op: 'tag', ...t })));
+      return send(tags.map(t => ({ op: 'tag', ...(t as Record<string, unknown>) })));
     }
 
     case 'board_script': {
       const u = await url();
-      const b = await (await fetch(u + '/state')).json();
+      const b: Board = await (await fetch(u + '/state')).json();
       const { scriptSteps, tagReport } = await import('../board/script.js');
       const at = scriptSteps(b);
       if (!b.transcript.length) return 'nothing said yet';
@@ -334,7 +363,7 @@ async function call(name, args = {}) {
 
     case 'board_replay': {
       const u = await url();
-      const r = await (await fetch(u + '/replay')).json();
+      const r: { ops: number, viewers: number } = await (await fetch(u + '/replay')).json();
       if (!r.ops) return 'nothing has been drawn yet, so there is nothing to replay';
       return r.viewers
         ? `replaying ${r.ops} ops for ${r.viewers} viewer${r.viewers === 1 ? '' : 's'}`
@@ -386,15 +415,15 @@ async function call(name, args = {}) {
 
 /* ---------- JSON-RPC over stdio ---------- */
 
-const write = msg => process.stdout.write(JSON.stringify(msg) + '\n');
-const ok = (id, result) => write({ jsonrpc: '2.0', id, result });
-const fail = (id, message) => write({ jsonrpc: '2.0', id, error: { code: -32000, message } });
+const write = (msg: unknown): boolean => process.stdout.write(JSON.stringify(msg) + '\n');
+const ok = (id: unknown, result: unknown): boolean => write({ jsonrpc: '2.0', id, result });
+const fail = (id: unknown, message: string): boolean => write({ jsonrpc: '2.0', id, error: { code: -32000, message } });
 
 let buf = '';
 process.stdin.setEncoding('utf8');
-process.stdin.on('data', chunk => {
+process.stdin.on('data', (chunk: string) => {
   buf += chunk;
-  let i;
+  let i: number;
   while ((i = buf.indexOf('\n')) >= 0) {
     const line = buf.slice(0, i).trim();
     buf = buf.slice(i + 1);
@@ -402,8 +431,15 @@ process.stdin.on('data', chunk => {
   }
 });
 
-async function handle(line) {
-  let msg;
+/* A JSON-RPC message, as far as this reads one. */
+interface Message {
+  id?: unknown;
+  method?: string;
+  params?: { protocolVersion?: string, name?: string, arguments?: Args };
+}
+
+async function handle(line: string): Promise<boolean | undefined> {
+  let msg: Message;
   try { msg = JSON.parse(line); } catch { return; }
   const { id, method, params } = msg;
 
@@ -421,7 +457,7 @@ async function handle(line) {
       const text = await call(params?.name, params?.arguments || {});
       return ok(id, { content: [{ type: 'text', text: String(text) }] });
     } catch (e) {
-      return ok(id, { content: [{ type: 'text', text: 'spiega: ' + e.message }], isError: true });
+      return ok(id, { content: [{ type: 'text', text: 'spiega: ' + (e as Error).message }], isError: true });
     }
   }
   if (method === 'ping') return ok(id, {});

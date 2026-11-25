@@ -75,12 +75,23 @@ do not depend on \`spiega\` being on PATH — which in an agent's tool shell it
 often is not. If neither route works, say so in one line. A board that could
 not be opened looks exactly like one you never thought of.`;
 
+/* The two calls it makes on a filesystem, which is passed in so a test can
+   hand it a map. */
+export interface BlockFS {
+  existsSync(file: string): boolean;
+  readFileSync(file: string, encoding: 'utf8'): string;
+}
+
+export type BlockResult =
+  | { how: 'unchanged'; changed: false }
+  | { how: 'updated' | 'created' | 'added'; changed: true; text: string };
+
 /* Put the block in a file, or update the one already there.
 
    Returns what happened, so a caller can tell the difference between work and
    a no-op: 'created', 'added', 'updated', or 'unchanged'. Never writes a file
    it did not change. */
-export function upsertBlock(fs, file, block = BLOCK) {
+export function upsertBlock(fs: BlockFS, file: string, block = BLOCK): BlockResult {
   const body = `${START}\n${block}\n${END}`;
   const exists = fs.existsSync(file);
   const before = exists ? fs.readFileSync(file, 'utf8') : '';
@@ -88,7 +99,7 @@ export function upsertBlock(fs, file, block = BLOCK) {
   const i = before.indexOf(START);
   const j = before.indexOf(END);
 
-  let after, how;
+  let after: string, how: 'updated' | 'created' | 'added';
   if (i >= 0 && j > i) {
     const current = before.slice(i, j + END.length);
     if (current === body) return { how: 'unchanged', changed: false };
@@ -109,7 +120,7 @@ export function upsertBlock(fs, file, block = BLOCK) {
 }
 
 /* Take the block back out, leaving the rest of the file as it was. */
-export function removeBlock(text) {
+export function removeBlock(text: string): { changed: boolean; text: string } {
   const i = text.indexOf(START);
   const j = text.indexOf(END);
   if (i < 0 || j < i) return { changed: false, text };
