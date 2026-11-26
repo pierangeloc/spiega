@@ -438,6 +438,26 @@ const reportBin = (home: string, info: BinInfo, rec: NodeRecord | null): void =>
   }
 };
 
+/* The entry install writes, over the one already there — keeping anything in
+   it that install does not write (#202).
+
+   Install owns where spiega is and how to run it: `type`, `command`, `args`,
+   and whatever else the entry below names. Updating those is the point of
+   re-running it. Everything else in that entry was put there by a person, by
+   hand, and a reinstall that drops it is a reinstall that silently undoes
+   somebody's configuration — `SPIEGA_MCP_FLAT_SCHEMA=1` is the case that found
+   this, where the client goes back to the `$ref` shape it could not read and
+   nothing anywhere says why.
+
+   A key install writes always wins, so a stale `args` is still corrected.
+   Generic rather than a list of `env` and `environment`, because the harnesses
+   below spell that key three ways and the next one will spell it a fourth. */
+const keepTheirs = (existing: unknown, value: unknown): unknown => {
+  if (!existing || typeof existing !== 'object' || Array.isArray(existing)) return value;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return { ...existing as Record<string, unknown>, ...value as Record<string, unknown> };
+};
+
 /* One MCP registration, written into whatever shape a harness expects. The
    three shapes below are not guesses: each was read off a working codegraph
    entry in that harness's own config on a real machine. */
@@ -448,8 +468,8 @@ const mcpJSON = (file: string, key: string, value: unknown): [string, string, st
   let node: Record<string, unknown> = cfg;
   for (const k of parts) node = container(node, k, name);
   const before = JSON.stringify(node.spiega);
-  node.spiega = value;
-  if (before === JSON.stringify(value)) return [file, 'already registered', 'unchanged'];
+  node.spiega = keepTheirs(node.spiega, value);
+  if (before === JSON.stringify(node.spiega)) return [file, 'already registered', 'unchanged'];
   const b = backup(file);
   writeJSON(file, cfg);
   return [file, b ? `backed up to ${path.basename(b)}` : 'created', 'written'];
@@ -567,7 +587,10 @@ const makeTargets = (home: string, config: string): Record<string, Target> => ({
       const file = path.join(config, 'opencode', 'opencode.json');
       const cfg = expectObject(readJSON(file), path.basename(file));
       const mcp = container(cfg, 'mcp', path.basename(file));
-      const want = { type: 'local', command: ['node', MCP_ENTRY], enabled: true };
+      // Its own write rather than mcpJSON's, because opencode's entry shape is
+      // its own — but it keeps a person's hand edits the same way (#202), and
+      // `environment` here is the key docs/install.md tells them to add.
+      const want = keepTheirs(mcp.spiega, { type: 'local', command: ['node', MCP_ENTRY], enabled: true });
       let note: string, wrote = false;
       if (JSON.stringify(mcp.spiega) === JSON.stringify(want)) note = 'MCP already registered';
       else { const b = backup(file); mcp.spiega = want; writeJSON(file, cfg); note = b ? 'MCP registered, config backed up' : 'MCP registered'; wrote = true; }

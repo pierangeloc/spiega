@@ -273,8 +273,10 @@ mode, and the risk #136 named is entirely client-side: a client that cannot
 follow a `$ref` lists no spiega tools at all, which looks like spiega not being
 installed. `SPIEGA_MCP_FLAT_SCHEMA=1` is the one-line answer if one of them
 chokes, the table in [install.md](install.md) names who has been checked and
-when, and #202 is the plumbing to make `spiega install` keep that variable once
-a client is found to need it. If someone reports missing tools, start there.
+when, and a reinstall now keeps that variable rather than dropping it (#202) —
+which turned out to be general: install was rewriting every MCP entry whole, so
+the flat-schema variable was one instance of a reinstall discarding anything a
+person had added by hand. If someone reports missing tools, start there.
 
 The round left four follow-ups rather than a clean close, all from reading the
 advertisement rather than the code: **#200** (`board_amend` advertises `title`,
@@ -283,13 +285,14 @@ advertised), **#202** (install drops the flat-schema variable), **#203**
 (`initialize` echoes any `protocolVersion` and reports version `0.1.0`). None
 is a port, and none blocks anything.
 
-#200, #201 and #203 are now closed, and the reading that found them is the
-thing to take from the round: every one came from looking at what a client is
-*told*, which no test was asserting because the tests all asked what the board
-*does*. #200 and #201 both resolved by making one list serve two purposes
-instead of two lists serve one — board_amend's union comes off the reducer's
-own `NOT_AMENDABLE`, and the `_` prefix that already meant "internal" is what
-hides a field from the advertisement.
+All four are now closed, and the reading that found them is the thing to take
+from the round: every one came from looking at what a client is *told*, which
+no test was asserting because the tests all asked what the board *does*. #200
+and #201 both resolved by making one list serve two purposes instead of two
+lists serve one — board_amend's union comes off the reducer's own
+`NOT_AMENDABLE`, and the `_` prefix that already meant "internal" is what hides
+a field from the advertisement. #202 was the one worth more than its report,
+as above: the variable was an instance, not the bug.
 
 ## What to check before calling any of these done
 
