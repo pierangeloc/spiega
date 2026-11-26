@@ -1611,6 +1611,71 @@ test('effect/cli install preserves agent configs and accepts both bin-dir spelli
   }
 });
 
+/* #202: a reinstall keeps what a person put in spiega's MCP entry by hand.
+
+   `SPIEGA_MCP_FLAT_SCHEMA=1` is the case that found this — docs/install.md
+   tells someone whose client cannot follow a `$ref` to set it in that entry,
+   and install rewrote the entry whole, so the next `spiega install` sent the
+   client back to the shape it could not read with nothing anywhere saying why.
+   Nobody reports that as a bug, because the tools simply stop being there.
+
+   Both shapes, because the two are written by different code: opencode's entry
+   is built in its own target and spells the key `environment`, every other
+   harness goes through mcpJSON and spells it `env`. And a stale path still has
+   to be corrected — preserving hand edits must not mean refusing to update. */
+test('a reinstall keeps hand edits in spiega\'s MCP entry, and still fixes a stale path (#202)', async () => {
+  const cp = await import('node:child_process');
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'spiega-mcp-env-'));
+  const config = path.join(home, 'profile');
+  const env = { ...isolatedEnv(home), XDG_CONFIG_HOME: config };
+  const run = args => cp.execFileSync(process.execPath, [path.join(ROOT, 'src/cli.js'), 'install', ...args], {
+    env, cwd: home, encoding: 'utf8',
+  });
+  const seed = (file, at, entry) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ [at]: { spiega: entry } }));
+  };
+  const entry = file => {
+    const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return (cfg.mcp || cfg.mcpServers).spiega;
+  };
+  try {
+    // opencode: its own writer, `environment`, `command` as an array
+    const oc = path.join(config, 'opencode', 'opencode.json');
+    seed(oc, 'mcp', {
+      type: 'local', enabled: true, command: ['node', '/gone/server.js'],
+      environment: { SPIEGA_MCP_FLAT_SCHEMA: '1' },
+    });
+    fs.writeFileSync(path.join(config, 'opencode', 'AGENTS.md'), 'Before\n');
+    run(['opencode', `--bin-dir=${path.join(home, 'bin')}`, '--no-path']);
+    assert.deepEqual(entry(oc).environment, { SPIEGA_MCP_FLAT_SCHEMA: '1' },
+      'opencode keeps the variable docs/install.md told the person to add');
+    assert.notDeepEqual(entry(oc).command, ['node', '/gone/server.js'],
+      'and the stale entry path is still corrected');
+    assert.equal(entry(oc).command[0], 'node');
+
+    // claude: through mcpJSON, `env`, `args`
+    const cc = path.join(home, '.claude.json');
+    seed(cc, 'mcpServers', {
+      type: 'stdio', command: 'node', args: ['/gone/server.js'],
+      env: { SPIEGA_MCP_FLAT_SCHEMA: '1' },
+    });
+    run(['claude', `--bin-dir=${path.join(home, 'bin')}`, '--no-path']);
+    assert.deepEqual(entry(cc).env, { SPIEGA_MCP_FLAT_SCHEMA: '1' },
+      'the mcpJSON shape keeps it too');
+    assert.notDeepEqual(entry(cc).args, ['/gone/server.js']);
+
+    /* And "already registered" still means it: a second run over an entry that
+       is now correct must not report a change it did not make, or the output
+       stops being worth reading. */
+    assert.match(run(['claude', `--bin-dir=${path.join(home, 'bin')}`, '--no-path']),
+      /already current/);
+    assert.deepEqual(entry(cc).env, { SPIEGA_MCP_FLAT_SCHEMA: '1' });
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 /* The port's own proof: install and doctor read home and the XDG config root
    from a SpiegaHome service, so a test can point them at a temp directory with
    a Layer instead of mutating process.env. The same install that the CLI runs

@@ -176,8 +176,9 @@ rebuild, no reinstall. In Claude Code, Claude Desktop and Cursor that is an
 ```
 
 If that fixes it, the client is the one that needs the flat shape: say so in
-an issue, so this table can name it. Until then, note that `spiega install`
-rewrites spiega's entry whole, so re-running it drops the variable.
+an issue, so this table can name it. The variable survives a reinstall:
+`spiega install` rewrites where spiega is and how to run it, and keeps
+anything else in that entry that you put there (#202).
 
 ## Updating, and checking that it took
 
