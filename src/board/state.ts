@@ -185,8 +185,16 @@ function chapterWanted(board: Board, want: number | string | undefined): number 
 /* What an amendment may not carry. Each of these is about the explanation as a
    whole, not about one chapter, and inside an amendment each would do
    something nobody could mean: `clear` would wipe the board from within an
-   edit to one chapter of it. */
-const NOT_AMENDABLE = new Set(['amend', 'chapter', 'clear', 'title']);
+   edit to one chapter of it.
+
+   Exported because board_amend's advertised schema is built from it
+   (tools/op-schema.js). The rule and the advertisement were two lists for one
+   decision, and the schema's copy told a model it could send `title` — which
+   this one then refused, with a sentence (#200). One list cannot drift. It
+   lives here rather than in @spiega/core because this module is bundled into
+   the board page and may not value-import a bare specifier; the generator
+   runs in node and reaches it by path. */
+export const NOT_AMENDABLE = new Set(['amend', 'chapter', 'clear', 'title']);
 
 /* Draw into a chapter that is no longer the one being drawn on.
 

@@ -168,7 +168,12 @@ const StepFields = {
   label: str,
   /* Written onto the live flow by the renderer as it numbers the hops, and
      re-emitted inside a `flow` op when a long board is compacted — so a log
-     this schema has to read back carries them. */
+     this schema has to read back carries them.
+
+     The leading underscore is load-bearing: tools/op-schema.js drops
+     `_`-prefixed fields from what MCP advertises, so these are accepted and
+     never offered (#201). A model told about `_n` has learnt noise at best,
+     and at worst that it may number the hops itself. */
   _n: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
   _i: num,
 };
