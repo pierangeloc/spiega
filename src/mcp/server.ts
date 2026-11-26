@@ -71,8 +71,26 @@ async function send(ops: unknown, { audit = false }: { audit?: boolean } = {}): 
    The kinds board_draw's prose names come from the same file, so the prose
    and the schema's own `kind` description are one list. They used to be two,
    and the one typed out here had been missing `field` all along. */
-const { kinds: KINDS, op: OP_SCHEMA }: { kinds: string[], op: object } =
+const { kinds: KINDS, op: OP_SCHEMA, amendOp: AMEND_OP_SCHEMA }:
+  { kinds: string[], op: object, amendOp: object } =
   JSON.parse(fs.readFileSync(new URL('./op-schema.json', import.meta.url), 'utf8'));
+
+/* The one revision this loop implements. ADR 0003 says it plainly: newer ones
+   are work rather than an upgrade, so the honest answer to a client asking for
+   one is this, which is also what the spec asks for — a server that does not
+   speak the requested revision replies with one it does.
+
+   Echoing the client's value, as this did, claimed fluency in revisions that
+   had not been written yet. */
+const PROTOCOL = '2024-11-05';
+
+/* Read, not typed out. The number a client lists is the first thing anybody
+   checks when they suspect a stale install, so a hardcoded one is worse than
+   no number at all — it is a wrong answer to exactly that question. Same file
+   `spiega --version` reads, two levels up from this module in both trees,
+   because dist/ keeps the repository's own layout. */
+const { version: VERSION }: { version: string } =
+  JSON.parse(fs.readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 
 /* `ops` is one op or an array of them, and the union is some 7 KB, so by
    default it is stated once per tool under `$defs` and pointed at twice. The
@@ -85,13 +103,22 @@ const { kinds: KINDS, op: OP_SCHEMA }: { kinds: string[], op: object } =
    follow one. docs/install.md says which clients need it. */
 const FLAT = process.env.SPIEGA_MCP_FLAT_SCHEMA === '1';
 
-const withOps = (description: string, schema: { required: string[], properties: Record<string, object> }) => {
-  const one = FLAT ? OP_SCHEMA : { $ref: '#/$defs/op' };
+/* `union` is which of the two generated unions this tool takes: board_amend's
+   is the narrower one, because the reducer refuses `title` and `clear` inside
+   an amendment and a schema that offers them is a promise the board breaks
+   (#200). Each tool's schema is its own document, `$defs` and all, so the two
+   are never shared bytes either way. */
+const withOps = (
+  description: string,
+  schema: { required: string[], properties: Record<string, object> },
+  union: object = OP_SCHEMA,
+) => {
+  const one = FLAT ? union : { $ref: '#/$defs/op' };
   return {
     type: 'object',
     ...schema,
     properties: { ...schema.properties, ops: { description, anyOf: [one, { type: 'array', items: one }] } },
-    ...(FLAT ? {} : { $defs: { op: OP_SCHEMA } }),
+    ...(FLAT ? {} : { $defs: { op: union } }),
   };
 };
 
@@ -232,7 +259,7 @@ const TOOLS = [
     name: 'board_amend',
     description:
       'Add to a chapter you have already left, or correct it — the box you forgot, a label that was wrong, ' +
-      'one more line of script. Takes the same ops as board_draw, aimed at one chapter by its number on the ' +
+      'one more line of script. Takes board_draw\'s ops, aimed at one chapter by its number on the ' +
       'strip or by its title.\n' +
       'What is being drawn now is untouched, and so is anyone reading it: the amendment lands in that chapter ' +
       'and nowhere else, and the tab marks itself so the person can see something changed back there. ' +
@@ -240,15 +267,20 @@ const TOOLS = [
       'than saying "I have added X to chapter 2".\n' +
       'Drawing the same id again corrects it, so a fix is the op again with the right fields. ' +
       'Ids are per chapter: the ids in this chapter are its own.',
-    inputSchema: withOps('One op object, or an array of them, as board_draw takes.', {
-      required: ['chapter', 'ops'],
-      properties: {
-        chapter: {
-          description: 'Which chapter: its number on the strip, counting from 1, or its exact title.',
-          oneOf: [{ type: 'integer' }, { type: 'string' }],
+    inputSchema: withOps(
+      'One op object, or an array of them, as board_draw takes — minus the ones about the whole ' +
+      'explanation rather than one chapter of it. Use board_draw for those.',
+      {
+        required: ['chapter', 'ops'],
+        properties: {
+          chapter: {
+            description: 'Which chapter: its number on the strip, counting from 1, or its exact title.',
+            oneOf: [{ type: 'integer' }, { type: 'string' }],
+          },
         },
       },
-    }),
+      AMEND_OP_SCHEMA,
+    ),
   },
   {
     name: 'board_clear',
@@ -465,9 +497,9 @@ async function handle(line: string): Promise<boolean | undefined> {
 
   if (method === 'initialize') {
     return ok(id, {
-      protocolVersion: params?.protocolVersion || '2024-11-05',
+      protocolVersion: PROTOCOL,
       capabilities: { tools: {} },
-      serverInfo: { name: 'spiega', version: '0.1.0' },
+      serverInfo: { name: 'spiega', version: VERSION },
     });
   }
   if (method === 'notifications/initialized' || id == null) return;

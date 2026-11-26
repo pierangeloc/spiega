@@ -2675,6 +2675,51 @@ await atest('board_draw and board_amend advertise the op union, derived from it 
   for (const op of Object.keys(OWN_TOOL))
     assert.ok(!names(union).includes(op), `${op} has ${OWN_TOOL[op]}, and is not advertised a second time`);
 
+  /* #200: board_amend advertised the same twelve and then refused one of them.
+     The narrower union comes off the reducer's own NOT_AMENDABLE, so the rule
+     and the advertisement cannot drift — which is the whole point, and is why
+     the list is asserted against the reducer rather than typed out again. */
+  const { NOT_AMENDABLE } = await import('../src/board/state.js');
+  const amendUnion = advertised(undefined, { amendable: true });
+  assert.deepEqual(names(amendUnion), names(union).filter(n => !NOT_AMENDABLE.has(n)),
+    'board_amend advertises board_draw\'s ops minus the ones the reducer refuses in an amendment');
+  assert.ok(!names(amendUnion).includes('title'), 'title is about the explanation, not one chapter of it');
+  assert.ok(names(amendUnion).length === names(union).length - 1,
+    'exactly one of the advertised twelve is refused by an amendment today');
+
+  /* And the rule is the one the reducer actually applies: every op the
+     narrower union leaves out comes back refused, by name, over the real
+     thing. A list the generator believes and the reducer does not is the bug
+     #200 was. */
+  for (const op of NOT_AMENDABLE) {
+    assert.ok(!names(amendUnion).includes(op), `${op} is not advertised to board_amend`);
+  }
+
+  /* #201: `_n` and `_i` are written onto the live flow by the renderer and
+     re-emitted inside a compacted `flow`, so the union reads them — and a
+     model is told about neither. Checked on `step` and inside `flow.steps`,
+     since the fields sit on both. */
+  const branch = n => union.anyOf.find(b => b.properties.op.enum[0] === n);
+  for (const [where, props] of [
+    ['step', branch('step').properties],
+    ['flow.steps', branch('flow').properties.steps.items.properties],
+  ]) {
+    for (const f of ['_n', '_i'])
+      assert.ok(!(f in props), `${where} advertises ${f}, which is the renderer's to write`);
+    assert.ok('edge' in props, `${where} still advertises the fields a model does set`);
+  }
+  assert.ok(!JSON.stringify(union).match(/"_[a-z]"/), 'no underscored field is advertised anywhere in the union');
+
+  // Still accepted, though: a compacted log carries them and has to read back.
+  const { reasonFor } = await import('../packages/core/src/schema/op.js');
+  for (const op of [
+    { op: 'step', edge: 'a>b', _n: 3, _i: 0 },
+    { op: 'flow', steps: [{ edge: 'a>b', _n: 1, _i: 0 }] },
+  ]) {
+    assert.equal(reasonFor(op), null,
+      `the union still accepts ${op.op} with the fields it no longer advertises`);
+  }
+
   // An op added to the union is advertised without anyone listing it, and a
   // field changed in it changes what the client is told.
   const changed = advertised({
@@ -2743,9 +2788,9 @@ await atest('board_draw and board_amend advertise the op union, derived from it 
 
   const shared = await list({});
   const flat = await list({ SPIEGA_MCP_FLAT_SCHEMA: '1' });
-  for (const name of ['board_draw', 'board_amend']) {
+  for (const [name, mine] of [['board_draw', union], ['board_amend', amendUnion]]) {
     const s = shared.tools.find(t => t.name === name).inputSchema;
-    assert.deepEqual(s.$defs.op, union, `${name} carries the generated union under $defs`);
+    assert.deepEqual(s.$defs.op, mine, `${name} carries its own generated union under $defs`);
     assert.deepEqual(s.properties.ops.anyOf,
       [{ $ref: '#/$defs/op' }, { type: 'array', items: { $ref: '#/$defs/op' } }],
       `${name} takes one op or an array of them`);
@@ -2754,8 +2799,8 @@ await atest('board_draw and board_amend advertise the op union, derived from it 
 
     const f = flat.tools.find(t => t.name === name).inputSchema;
     assert.equal(f.$defs, undefined, `the flat ${name} carries no $defs`);
-    assert.deepEqual(f.properties.ops.anyOf, [union, { type: 'array', items: union }],
-      `the flat ${name} inlines the union in both places`);
+    assert.deepEqual(f.properties.ops.anyOf, [mine, { type: 'array', items: mine }],
+      `the flat ${name} inlines its own union in both places`);
   }
   assert.deepEqual(shared.tools.find(t => t.name === 'board_amend').inputSchema.required, ['chapter', 'ops']);
   const draw = shared.tools.find(t => t.name === 'board_draw');
@@ -2763,6 +2808,56 @@ await atest('board_draw and board_amend advertise the op union, derived from it 
   assert.ok(draw.description.includes(`kinds: ${KINDS.join(', ')}\n`),
     'board_draw\'s prose names the same kinds as its schema, in the same order');
   assert.ok(!flat.line.includes('"$ref"'), 'SPIEGA_MCP_FLAT_SCHEMA=1 leaves no $ref anywhere in tools/list');
+});
+
+/* #203: what the server says about itself in the first message of every
+   session.
+
+   It used to echo whatever `protocolVersion` the client asked for, so it
+   claimed to speak revisions that did not exist, and it reported version
+   0.1.0 while the package was at 0.5.0 — a wrong answer to the one question
+   somebody asks when they suspect a stale install, which is exactly when they
+   look. Both are checked over the real pipe, because a constant read out of
+   the module under test proves nothing about what a client receives. */
+await atest('initialize answers with a revision it speaks and the version it is (#203)', async () => {
+  const { spawn } = await import('node:child_process');
+  const { version } = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+
+  const init = params => new Promise((res, rej) => {
+    const child = spawn(process.execPath, [path.join(ROOT, 'src/mcp/server.js')], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, SPIEGA_URL: 'http://127.0.0.1:1/b/none' },
+    });
+    const t = setTimeout(() => { child.kill('SIGKILL'); rej(new Error('no reply to initialize')); }, 8000);
+    let out = '', err = '';
+    child.stderr.on('data', d => { err += d; });
+    child.stdout.on('data', d => {
+      out += d;
+      const i = out.indexOf('\n');
+      if (i < 0) return;
+      clearTimeout(t);
+      child.stdin.end();
+      res(JSON.parse(out.slice(0, i)).result);
+    });
+    child.on('exit', code => { if (code) { clearTimeout(t); rej(new Error(err || `exited ${code}`)); } });
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params }) + '\n');
+  });
+
+  const SPOKEN = '2024-11-05';   // ADR 0003: newer revisions are work, not an upgrade
+  for (const [what, params] of [
+    ['the revision it speaks', { protocolVersion: SPOKEN }],
+    ['a revision it does not', { protocolVersion: '2025-06-18' }],
+    ['one that was never a revision', { protocolVersion: '1999-01-01' }],
+    ['no revision at all', {}],
+  ]) {
+    const r = await init(params);
+    assert.equal(r.protocolVersion, SPOKEN,
+      `a client asking for ${what} is answered with the one this server implements`);
+    assert.deepEqual(r.capabilities, { tools: {} });
+    assert.equal(r.serverInfo.name, 'spiega');
+    assert.equal(r.serverInfo.version, version,
+      'serverInfo.version is read from package.json, as `spiega --version` reads it');
+  }
 });
 
 /* #136, the other half: the tool advertising a schema must not change what

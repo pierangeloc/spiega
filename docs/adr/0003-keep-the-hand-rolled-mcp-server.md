@@ -82,9 +82,17 @@ and importing `effect` in order to generate costs 115 ms.
 - What we give up, said plainly: the protocol revision is pinned at 2024-11-05
   and newer ones are work rather than an upgrade; resources, prompts and
   structured output would each be hand-written; and the `initialize` handler
-  currently echoes whatever `protocolVersion` a client asks for, which the
-  module would have got right for free. These are worth revisiting if a client
-  ever needs one of them — not before.
+  echoed whatever `protocolVersion` a client asked for, which the module would
+  have got right for free. These are worth revisiting if a client ever needs
+  one of them — not before.
+
+  The echo was the cheapest of the three to lose, and it is fixed (#203): the
+  handler answers `2024-11-05` whatever is asked for, which is what the spec
+  asks of a server that does not speak the client's revision, and makes the
+  pin above a thing the server says rather than a thing it hides. The other
+  two stand as written. Worth noting for the next person weighing this ADR:
+  the decision cost a handful of lines here, not a feature — which is roughly
+  the exchange rate the rest of it should be judged at.
 - **What would reopen this:** an MCP feature we actually want that the
   hand-rolled loop makes awkward — resources, or a second transport — or the
   module reaching stable while we happen to be bundling that entry anyway. The

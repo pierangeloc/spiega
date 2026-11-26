@@ -29,6 +29,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Schema } from 'effect';
 import { OPS, KINDS } from '../packages/core/src/schema/op.js';
+import { NOT_AMENDABLE } from '../src/board/state.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -50,13 +51,44 @@ export const OWN_TOOL = {
   clear: 'board_clear',
 };
 
+/* Fields the union accepts and the advertisement hides, found by the leading
+   underscore they already carry (#201).
+
+   `_n` and `_i` are written onto the live flow by the renderer and come back
+   inside a `flow` op when a long board is compacted, so the union has to read
+   them; a model has no use for either, and a model that decides to set one is
+   numbering hops the renderer owns. Recursive because `flow` carries a list of
+   steps, and the fields are on each of those as well as on `step` itself.
+
+   The prefix is the annotation rather than a second mechanism beside it: both
+   fields already say `internal` in the only notation the file has, and op.ts
+   says so where they are declared. Nothing else here starts with one. */
+const hideInternal = s => {
+  if (Array.isArray(s)) return s.map(hideInternal);
+  if (!s || typeof s !== 'object') return s;
+  return Object.fromEntries(Object.entries(s).flatMap(([k, v]) => {
+    if (k === 'properties') {
+      return [[k, Object.fromEntries(Object.entries(v)
+        .filter(([name]) => !name.startsWith('_'))
+        .map(([name, sub]) => [name, hideInternal(sub)]))]];
+    }
+    if (k === 'required' && Array.isArray(v)) return [[k, v.filter(name => !name.startsWith('_'))]];
+    return [[k, hideInternal(v)]];
+  }));
+};
+
 /* The JSON Schema for one advertised op, as an alternation of their shapes.
 
    Takes the table of ops rather than importing it, so the suite can hand it a
    table with an op added or changed and see the advertisement follow — which
-   is the only proof that it is derived rather than merely equal today. */
-export function advertised(ops = OPS) {
-  const names = Object.keys(ops).filter(n => !(n in OWN_TOOL));
+   is the only proof that it is derived rather than merely equal today.
+
+   `amendable` drops the ops an amendment refuses, from the reducer's own list
+   (#200). board_amend used to advertise `title` and then refuse it, which is
+   the schema telling a model something the board disagrees with. */
+export function advertised(ops = OPS, { amendable = false } = {}) {
+  const names = Object.keys(ops).filter(n =>
+    !(n in OWN_TOOL) && !(amendable && NOT_AMENDABLE.has(n)));
   const doc = Schema.toJsonSchemaDocument(Schema.Union(names.map(n => ops[n])));
 
   /* The server nests this under `$defs/op` of each tool's inputSchema, or
@@ -68,14 +100,23 @@ export function advertised(ops = OPS) {
     throw new Error('the op union now generates shared definitions ($ref), ' +
       'which the MCP tool schemas do not carry — see src/mcp/server.ts');
   }
-  return doc.schema;
+  return hideInternal(doc.schema);
 }
 
-/* What the MCP server reads: the op schema, and the kinds board_draw's prose
-   names. The kinds ride along because the prose and the schema sit in the
-   same tool, a few lines apart, and a list typed out by hand in the server
-   was the stale one of the two (#136). */
-export const generated = () => ({ kinds: [...KINDS], op: advertised() });
+/* What the MCP server reads: the two op schemas, and the kinds board_draw's
+   prose names. The kinds ride along because the prose and the schema sit in
+   the same tool, a few lines apart, and a list typed out by hand in the server
+   was the stale one of the two (#136).
+
+   Two unions rather than one because board_draw and board_amend do not accept
+   the same ops. They are separate documents on the wire in any case — each
+   tool carries its own `$defs` — so the narrower one costs nothing: amendOp is
+   the smaller of the two. */
+export const generated = () => ({
+  kinds: [...KINDS],
+  op: advertised(),
+  amendOp: advertised(OPS, { amendable: true }),
+});
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const out = process.argv[2] ? path.resolve(process.argv[2]) : path.join(ROOT, 'src', 'mcp', 'op-schema.json');

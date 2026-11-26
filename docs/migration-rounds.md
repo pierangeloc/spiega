@@ -285,6 +285,15 @@ advertised), **#202** (install drops the flat-schema variable), **#203**
 (`initialize` echoes any `protocolVersion` and reports version `0.1.0`). None
 is a port, and none blocks anything.
 
+All four are now closed, and the reading that found them is the thing to take
+from the round: every one came from looking at what a client is *told*, which
+no test was asserting because the tests all asked what the board *does*. #200
+and #201 both resolved by making one list serve two purposes instead of two
+lists serve one — board_amend's union comes off the reducer's own
+`NOT_AMENDABLE`, and the `_` prefix that already meant "internal" is what hides
+a field from the advertisement. #202 was the one worth more than its report,
+as above: the variable was an instance, not the bug.
+
 ## What to check before calling any of these done
 
 The oracle is not the suite alone.
