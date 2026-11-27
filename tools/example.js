@@ -112,8 +112,20 @@ function mapSheet(spec) {
     const limit = next && sameRow(a, b) ? Math.max(24, Math.min(84, b.x - a.x - a.w - 4)) : next ? 84 : 200;
     const narrow = limit < 60, padding = narrow ? 7 : 14, charWidth = narrow ? 5.4 : 5.6;
     const max = Math.max(1, Math.floor((limit - padding) / charWidth));
-    const lines = (linkLabel(link).match(new RegExp(`.{1,${max}}(?:\\s|$)|.{1,${max}}`, 'g')) || [''])
-      .map(s => s.trim()).filter(Boolean);
+    // A word wider than a same-row gutter keeps its spelling and moves out of
+    // the gutter, just as the page's min-content pill does.
+    let lines;
+    if (next && sameRow(a, b)) {
+      lines = [];
+      for (const word of linkLabel(link).match(/\S+/g) || []) {
+        const last = lines.length - 1;
+        if (!narrow && last >= 0 && lines[last].length + 1 + word.length <= max) lines[last] += ` ${word}`;
+        else lines.push(word);
+      }
+    } else {
+      lines = (linkLabel(link).match(new RegExp(`.{1,${max}}(?:\\s|$)|.{1,${max}}`, 'g')) || [''])
+        .map(s => s.trim()).filter(Boolean);
+    }
     if (!lines.length) lines.push('');
     const w = Math.max(...lines.map(s => s.length)) * charWidth + padding, h = lines.length * 11.7 + 6;
     const mid = narrow ? [ink.mid[0], ink.mid[1] - h / 2 - 5] : ink.mid;

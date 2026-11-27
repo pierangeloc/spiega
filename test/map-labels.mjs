@@ -40,6 +40,26 @@ try {
   assert.match(svg, /<rect class="maplabel"[^>]*fill="#f8f6f0"/, 'shared labels knock the line out');
   assert.match(svg, /<rect class="maplabel"[^>]*fill="#f2efe7"/, 'then labels knock the line out');
   assert.ok(svg.lastIndexOf('<path ') < svg.indexOf('<rect class="maplabel"'), 'all pills paint over all links');
+  const pills = [...svg.matchAll(/<rect class="maplabel"([^>]*)\/>((?:<text\b[^>]*>.*?<\/text>)+)/g)];
+  const warehouse = pills.find(([, , texts]) => />warehouse<\/text>/.test(texts));
+  assert.ok(warehouse, 'warehouse stays a whole word even when it is wider than the gutter');
+  const attr = name => Number(warehouse[1].match(new RegExp(`\\b${name}="([^"]+)"`))[1]);
+  const warehouseBox = { x: attr('x'), y: attr('y'), w: attr('width'), h: attr('height') };
+  assert.ok(warehouseBox.w >= 'warehouse'.length * 5.4, 'the pill has room for the whole word');
+  assert.ok(cards.every(card => !overlap(warehouseBox, card)), 'the whole word clears every card');
+
+  // The normal 92px page gutter can also be narrower than a single long name.
+  const spec = JSON.parse(fs.readFileSync(path.join(root, 'test/boards/issue-211-map-labels.json'), 'utf8'));
+  spec.map.width = 816;
+  spec.map.gap[0] = 92;
+  const longName = 'unbrokenwarehouseidentifier';
+  for (const chapter of spec.map.chapters) chapter.nodes = chapter.nodes.map(s => s === 'warehouse' ? longName : s);
+  const longSpec = path.join(dir, 'long.json');
+  fs.writeFileSync(longSpec, JSON.stringify(spec));
+  execFileSync(process.execPath, [path.join(root, 'tools/example.js'), longSpec, out]);
+  const longSvg = fs.readFileSync(out, 'utf8');
+  assert.match(longSvg, new RegExp(`<rect class="maplabel"[^>]*/><text\\b[^>]*>${longName}</text>`),
+    'a long single word also stays whole in a normal same-row gutter');
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }

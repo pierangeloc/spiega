@@ -124,8 +124,17 @@ function drawLinks(wrap: HTMLElement, cards: HTMLElement, svg: SVGSVGElement, li
     if (next && sameRow(a, b)) {
       const available = Math.max(24, b.x - a.x - a.w - 4);
       tag.style.maxWidth = `${Math.min(84, available)}px`;
+      tag.style.minWidth = 'min-content';
+      tag.style.overflowWrap = 'normal';
       narrow = available < 60;
-      if (narrow) { tag.style.padding = '2px'; tag.style.letterSpacing = '0'; }
+      if (narrow) {
+        // A whole word is worth moving a pill out of the gutter for; breaking
+        // "warehouse" into arbitrary fragments makes the name harder to read.
+        tag.style.width = 'min-content';
+        tag.style.maxWidth = 'none';
+        tag.style.padding = '2px';
+        tag.style.letterSpacing = '0';
+      }
     }
     tag.textContent = linkLabel(link).replace(/([_./\-])/g, '$1\u200b');
     tag.title = shared ? `chapters ${link.from} and ${link.to} both draw ${link.shared.join(', ')}` : `chapter ${link.to} follows chapter ${link.from}`;
