@@ -1,0 +1,16 @@
+{
+  "title": "map link labels on a strip that wraps",
+  "map": {
+    "width": 720,
+    "card": [200, 120],
+    "gap": [44, 110],
+    "chapters": [
+      { "title": "the request", "nodes": ["gateway", "orders api"] },
+      { "title": "the write path", "nodes": ["orders api", "orders table"], "h": 96 },
+      { "title": "the read path", "nodes": ["orders table", "cache"] },
+      { "title": "reporting", "nodes": ["warehouse"], "h": 150 },
+      { "title": "backfill", "nodes": ["warehouse", "orders table"], "h": 90 },
+      { "title": "the risk", "nodes": ["cache"] }
+    ]
+  }
+}

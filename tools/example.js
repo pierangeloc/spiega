@@ -17,11 +17,11 @@ import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps } from '../src/board/state.js';
 import { specToOps, measure } from '../src/spec.js';
 import { renderSVG } from '../src/render/render.js';
-import { boardMap } from '../src/board/map.js';
-import { linkInk } from '../src/board/map-links.js';
+import { boardMap, linkLabel } from '../src/board/map.js';
+import { linkInk, mapLabelHome, mapLabelLeader, placeMapLabels, sameRow } from '../src/board/map-links.js';
 import { roughRect, stroke, text } from '../src/render/ink.js';
 import { boundaryBox } from '../src/render/layout.js';
-import { PAPER, MONO } from '../src/render/theme.js';
+import { PAPER, PANEL, INK, MUTED, RULE, MONO } from '../src/render/theme.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -103,12 +103,49 @@ function mapSheet(spec) {
       text(r.x + 12, r.y + 24, `${i + 1}  ${chapters[i].title}`, { size: 13, anchor: 'start' }) +
       text(r.x + 12, r.y + 46, chapters[i].nodes.join(', '), { size: 11, weight: 400, anchor: 'start' });
   });
+  const labels = [];
   for (const link of boardMap(board).links) {
     const a = rect[link.from - 1], b = rect[link.to - 1];
     const ink = linkInk(a, b, link);
-    body += ink.d + text(ink.mid[0], ink.mid[1], link.shared.length ? link.shared[0] : 'then', { size: 11, anchor: 'middle' });
+    body += ink.d;
+    const next = link.to === link.from + 1;
+    const limit = next && sameRow(a, b) ? Math.max(24, Math.min(84, b.x - a.x - a.w - 4)) : next ? 84 : 200;
+    const narrow = limit < 60, padding = narrow ? 7 : 14, charWidth = narrow ? 5.4 : 5.6;
+    const max = Math.max(1, Math.floor((limit - padding) / charWidth));
+    // A word wider than a same-row gutter keeps its spelling and moves out of
+    // the gutter, just as the page's min-content pill does.
+    let lines;
+    if (next && sameRow(a, b)) {
+      lines = [];
+      for (const word of linkLabel(link).match(/\S+/g) || []) {
+        const last = lines.length - 1;
+        if (!narrow && last >= 0 && lines[last].length + 1 + word.length <= max) lines[last] += ` ${word}`;
+        else lines.push(word);
+      }
+    } else {
+      lines = (linkLabel(link).match(new RegExp(`.{1,${max}}(?:\\s|$)|.{1,${max}}`, 'g')) || [''])
+        .map(s => s.trim()).filter(Boolean);
+    }
+    if (!lines.length) lines.push('');
+    const w = Math.max(...lines.map(s => s.length)) * charWidth + padding, h = lines.length * 11.7 + 6;
+    const mid = mapLabelHome(ink.mid, w, h, next && sameRow(a, b) ? limit : null);
+    labels.push({ mid, linkMid: ink.mid, link, w, h, lines, narrow, shared: link.shared.length > 0 });
   }
-  const w = width + pad * 2 + 110, h = height + pad * 2;
+  const positions = placeMapLabels(labels, rect);
+  labels.forEach((label, i) => {
+    body += mapLabelLeader(label.linkMid, positions[i], [...rect, ...positions.filter((_, j) => i !== j)], label.link);
+  });
+  labels.forEach((label, i) => {
+    const r = positions[i], color = label.shared ? INK : MUTED;
+    body += `<rect class="maplabel" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="9" ` +
+      `fill="${label.shared ? PANEL : PAPER}" stroke="${label.shared ? INK : RULE}" stroke-width="1.25"` +
+      `${label.shared ? '' : ' stroke-dasharray="3 3"'}/>`;
+    label.lines.forEach((line, j) => {
+      body += text(r.x + r.w / 2, r.y + 12 + j * 11.7, line, { size: 9, color, weight: 400, spacing: label.narrow ? 0 : 0.02 });
+    });
+  });
+  const w = Math.max(width + pad + 110, ...positions.map(r => r.x + r.w + pad)) + pad;
+  const h = Math.max(height + pad, ...positions.map(r => r.y + r.h + pad)) + pad;
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-pad} ${-pad} ${w} ${h}" width="${w}" height="${h}" ` +
     `font-family="${MONO.replace(/"/g, "'")}"><rect x="${-pad}" y="${-pad}" width="${w}" height="${h}" fill="${PAPER}" rx="6"/>${body}</svg>`;
 }

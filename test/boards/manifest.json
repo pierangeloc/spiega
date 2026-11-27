@@ -123,6 +123,11 @@
     "broke": "The map's `then` hop into chapter 4 comes down a long diagonal from the end of the first row of a wrapped strip, and its arrowhead is a plain downward chevron: the wings do not meet the line. The same fixed angle sat on the across hop, which is wrong whenever the two cards are not the same height (1→2 and 4→5 here). This board is the map, not a drawing: the spec's `map` key is a strip of six chapters wrapped at 720px, inked by the same `linkInk` the page uses.",
     "fixed": "Both `next` branches take the head's angle from the line they end, so the diagonal 3→4 hop and the slanted across hops land their heads on their own lines. Straight-across and straight-down hops keep the angles they had, and the bowed links still take theirs off the curve's last control point."
   },
+  "issue-211-map-labels": {
+    "issue": 211,
+    "broke": "The map picture printed bare labels on the lines, and narrow gutters let the words run across the cards. The live map already drew opaque pills, but a bowed link's midpoint and the label-only decluttering could put a pill over a card.",
+    "fixed": "The map and its picture place measured pills clear of every card and earlier pill, retaining the midpoint when it fits. A narrow same-row gutter wraps at word boundaries and raises its pill clear of the arrowhead; a word wider than the gutter stays whole and moves to clear space. A fine leader ties the displaced `warehouse` pill to its arrow without crossing a card. The picture paints opaque pills over the links just as the live map does. The map fixture uses the map-specific picture route, because a map is a strip of chapters rather than a board drawing."
+  },
   "issue-213-two-hops-along": {
     "issue": 213,
     "noBefore": true,
