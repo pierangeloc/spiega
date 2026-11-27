@@ -390,10 +390,19 @@ function edgeTag(at: Pt, step: number | null, label: string | undefined, { lit, 
    route planEdges returns; floating.js calls tagBox with no more than this. */
 type DrawnRoute = { e: Edge, key: string, a: Box, b: Box, pts: Pt[] };
 
-export function tagBox(r: DrawnRoute, step: number | null): { at: Pt, w: number, h: number, away: number } {
-  const { e } = r;
+/* One hop an arrow carries, as a tag: the words, the badge, and whether it is
+   the hop the flow is at. Most arrows carry one, keyed as the arrow is. An
+   arrow that carries several (#113) has a tag per hop, keyed `from>to#2` on,
+   and lights only the one being walked rather than all of them at once. */
+export type Hop = { key: string, label?: string, step: number | null, lit?: boolean, along?: number | null };
+
+/* `along` is how far down the route a hop wants to sit, for an arrow that
+   carries more than one: spread in the order they happen, so the pills read
+   as a sequence from the source to the target rather than as a pile. */
+export function tagBox(r: DrawnRoute, step: number | null, label: string | undefined = r.e.label, along: number | null = null): { at: Pt, w: number, h: number, away: number } {
+  const { w, h } = pillSize(tagLines(label, step));
+  if (along != null) return { at: stationAt(r.pts, along), w, h, away: 0 };
   const spot = tagSpot(r.pts);
-  const { w, h } = pillSize(tagLines(e.label, step));
   let at = spot.at, away = 0;
   if (w > spot.len * 0.95) {
     const { a, b } = r;
@@ -415,7 +424,10 @@ export function tagBox(r: DrawnRoute, step: number | null): { at: Pt, w: number,
    `place` is the anchor render/floating.js settled on, against everything
    else that floats; without one the tag places itself, which is right for a
    lone edge and wrong for anything with neighbours. */
-export function drawEdge(r: DrawnRoute, { step = null, state = 'idle', place = null }: { step?: number | null, state?: string, place?: Pt | null } = {}): string {
+/* `hops` is a tag per hop, each with its own anchor, for an arrow that
+   carries several; without it the arrow carries the one tag `step` and
+   `place` describe, lit with the line. */
+export function drawEdge(r: DrawnRoute, { step = null, state = 'idle', place = null, hops = null }: { step?: number | null, state?: string, place?: Pt | null, hops?: (Hop & { at: Pt | null })[] | null } = {}): string {
   const { e, pts } = r;
   const seed = hashSeed(r.key) % 100000;
   const lit = state === 'lit', dim = state === 'dim';
@@ -431,7 +443,15 @@ export function drawEdge(r: DrawnRoute, { step = null, state = 'idle', place = n
   let out = `<g class="edge" data-edge="${r.key}" opacity="${opacity}">`;
   out += stroke(d, { w: lit ? 3 : 1.9, color, dash: async ? '9 6' : null });
   out += arrowHead(end, dir, { size: lit ? 13 : 11, w: lit ? 2.6 : 1.9, color, seed });
-  if (e.label || step != null) {
+  if (hops) {
+    /* The line lights with the arrow, and of its pills only the hop being
+       walked: three hops lit at once is the flattening #113 was about, just
+       drawn three times. */
+    hops.forEach((h, i) => {
+      const at = h.at || tagBox(r, h.step, h.label, h.along ?? null).at;
+      out += `<g class="tag">${edgeTag(at, h.step, h.label, { lit: lit && !!h.lit, seed: seed + 5 + i })}</g>`;
+    });
+  } else if (e.label || step != null) {
     // On a short hop between neighbouring boxes the tag is wider than the gap,
     // so centring it on the line buries it under whatever is next door. Lift it
     // clear of both boxes instead — nudging it a few pixels is not enough, since
@@ -442,6 +462,24 @@ export function drawEdge(r: DrawnRoute, { step = null, state = 'idle', place = n
     out += `<g class="tag">${edgeTag(at, step, e.label, { lit, seed: seed + 5 })}</g>`;
   }
   return out + `</g>`;
+}
+
+/* The point on a route `f` of the way across it, measured along the way it
+   mostly runs rather than along its length. Pills sit side by side across a
+   gutter, so their spacing is a distance across it; a knee's drop counted in
+   with the rest would put two of them closer than the gutter was sized for,
+   and they would land on each other. */
+function stationAt(pts: Pt[], f: number): Pt {
+  const a = pts[0], b = pts[pts.length - 1];
+  const k = Math.abs(b[0] - a[0]) >= Math.abs(b[1] - a[1]) ? 0 : 1;
+  const want = a[k] + (b[k] - a[k]) * f;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p = pts[i], q = pts[i + 1];
+    if (p[k] === q[k] || (want - p[k]) * (want - q[k]) > 0) continue;
+    const t = (want - p[k]) / (q[k] - p[k]);
+    return [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+  }
+  return packetAt(pts, f);
 }
 
 /* A dot that rides the line — the packet, when a flow is playing. */

@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { emptyBoard, applyOps } from '../src/board/state.js';
+import { emptyBoard, applyOps, boardOps } from '../src/board/state.js';
 import { renderSVG } from '../src/render/render.js';
 import { assign, boundaryShapes, intruders, EDGE_GAP } from '../src/render/layout.js';
 import { audit } from '../src/render/audit.js';
@@ -169,8 +169,9 @@ test('a kind with no glyph is drawn, and said out loud', () => {
    the second and third landed on the first and took its label away. The agent
    was told nothing — op accepted, no fresh edge, a drawing saying the last
    thing it was told. It gave up and crammed all three into one label, which is
-   where #110's doubled step pill came from. The picture is still one arrow;
-   this is only the board saying so. */
+   where #110's doubled step pill came from. These hops carry no step, which is
+   what would make each a stop of its own (below), so they still land on the
+   first — and the board says so. */
 test('a second hop between the same two boxes is said out loud, not silently swallowed', () => {
   const b = emptyBoard();
   const { errors, warnings } = applyOps(b, [
@@ -181,7 +182,7 @@ test('a second hop between the same two boxes is said out loud, not silently swa
     { op: 'edge', from: 'ch', to: 'corr', label: 'linkCorrectionsToInvoiceRun' },
   ]);
   assert.deepEqual(errors, []);
-  assert.equal(b.edges.length, 1, 'still the one arrow — this reports the flattening, it does not fix it');
+  assert.equal(b.edges.length, 1, 'one arrow, and with no steps nothing tells these hops from corrections');
   assert.equal(warnings.length, 2, 'one per hop that was lost');
   assert.match(warnings[0], /ch>corr/);
   assert.match(warnings[0], /createCorrection/, 'names the label that was taken away');
@@ -197,6 +198,95 @@ test('an edge op that corrects or styles a line already drawn says nothing', () 
     { op: 'edge', from: 'a', to: 'b', label: 'gRPC' },
   ]);
   assert.deepEqual(warnings, [], 'a board cannot be pedantic at an author mid-sentence');
+});
+
+/* The other half of #113: the hops are now drawn, not only reported. Each one
+   that brings its step is a stop on the one arrow, keyed by the arrow as
+   before, so the flow, `settle`'s routes and `remove` all keep naming it
+   `ch>corr`. */
+const threeHops = () => [
+  { op: 'node', id: 'ch', label: 'Charging' },
+  { op: 'node', id: 'corr', label: 'Corrections' },
+  { op: 'node', id: 'inv', label: 'Invoices' },
+  { op: 'edge', from: 'ch', to: 'corr', label: 'createCorrection', step: 3 },
+  { op: 'edge', from: 'ch', to: 'inv', label: 'invoice', step: 4 },
+  { op: 'edge', from: 'ch', to: 'corr', label: 'listApprovedUpcoming', step: 5 },
+  { op: 'edge', from: 'ch', to: 'corr', label: 'linkCorrectionsToInvoiceRun', step: 7 },
+];
+
+test('a second hop between the same two boxes with a step of its own is a stop on the arrow', () => {
+  const b = emptyBoard();
+  const { errors, warnings, fresh } = applyOps(b, threeHops());
+  assert.deepEqual(errors, []);
+  assert.deepEqual(warnings, [], 'no label was lost, so nothing to say');
+  assert.deepEqual(fresh.edges, ['ch>corr', 'ch>inv'], 'still one arrow, keyed by its ends');
+  const e = b.edges.find(x => x.to === 'corr');
+  assert.equal(e.label, 'createCorrection', 'the first hop stays where anything that reads one label looks');
+  assert.equal(e.step, 3);
+  assert.deepEqual(e.then, [
+    { label: 'listApprovedUpcoming', step: 5 },
+    { label: 'linkCorrectionsToInvoiceRun', step: 7 },
+  ]);
+});
+
+test('an edge op aimed at a hop by its step corrects that hop, and one with its words renumbers it', () => {
+  const b = emptyBoard();
+  applyOps(b, threeHops());
+  const fix = applyOps(b, [{ op: 'edge', from: 'ch', to: 'corr', label: 'listApproved', step: 5 }]);
+  assert.equal(fix.warnings.length, 1, 'words were lost, so it is said');
+  assert.match(fix.warnings[0], /listApprovedUpcoming/);
+  const again = applyOps(b, [
+    { op: 'edge', from: 'ch', to: 'corr', label: 'linkCorrectionsToInvoiceRun', step: 8 },
+    { op: 'edge', from: 'ch', to: 'corr', async: true },
+  ]);
+  assert.deepEqual(again.warnings, []);
+  const e = b.edges.find(x => x.to === 'corr');
+  assert.deepEqual(e.then, [{ label: 'listApproved', step: 5 }, { label: 'linkCorrectionsToInvoiceRun', step: 8 }]);
+  assert.equal(e.async, true, 'what is about the line lands on the line');
+  assert.equal(e.label, 'createCorrection');
+});
+
+test('an arrow with several hops survives a restore and a compaction', () => {
+  const b = emptyBoard();
+  applyOps(b, threeHops());
+  const replayed = emptyBoard();
+  applyOps(replayed, b.log.map(({ at: _at, ...op }) => op));
+  assert.deepEqual(replayed.edges, b.edges, 'the log replays to the same arrow');
+  const compact = emptyBoard();
+  const { errors, warnings } = applyOps(compact, boardOps(b));
+  assert.deepEqual([errors, warnings], [[], []]);
+  assert.deepEqual(compact.edges, b.edges, 'and so does the op set that rebuilds it');
+});
+
+test('walking an arrow that carries three hops lights the pill of the step being walked, saying its own words', () => {
+  const b = emptyBoard();
+  applyOps(b, [...threeHops(), { op: 'flow', steps: [
+    { edge: 'x>y' }, { edge: 'x>y' }, { edge: 'ch>corr' }, { edge: 'ch>inv' },
+    { edge: 'ch>corr' }, { edge: 'x>y' }, { edge: 'ch>corr' },
+  ] }]);
+  const pills = active => {
+    const { svg } = renderSVG(b, { active });
+    const group = svg.match(/<g class="edge" data-edge="ch&gt;corr"[\s\S]*?<\/g><\/g>(?=<g class="edge"|<g class="node")/)
+      || svg.match(/<g class="edge" data-edge="ch>corr"[\s\S]*?(?=<g class="edge"|<g class="node")/);
+    assert.ok(group, 'the arrow is drawn');
+    return [...group[0].matchAll(/<g class="tag">([\s\S]*?)<\/g>/g)].map(m => ({
+      lit: m[1].includes('fill="#ef6a4c"'),
+      words: [...m[1].matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map(t => t[1]).join(' '),
+    }));
+  };
+  const at5 = pills(4);
+  assert.equal(at5.length, 3, 'a pill per hop, not one pill for all of them');
+  assert.deepEqual(at5.map(p => p.lit), [false, true, false], 'step 5 lights the middle pill and only it');
+  assert.match(at5[1].words, /^5 /, 'with its own badge');
+  assert.match(at5[1].words, /listApprovedUpcoming/i, 'and its own words, not step 7\'s');
+  assert.deepEqual(pills(6).map(p => p.lit), [false, false, true]);
+  assert.deepEqual(pills(null).map(p => p.lit), [false, false, false]);
+  const r = renderSVG(b, { active: 4 });
+  assert.deepEqual([...r.tags.keys()].filter(k => k.startsWith('ch>corr')).sort(), ['ch>corr', 'ch>corr#2', 'ch>corr#3']);
+  const xs = ['ch>corr', 'ch>corr#2', 'ch>corr#3'].map(k => r.tags.get(k));
+  for (let i = 1; i < xs.length; i++)
+    assert.ok(xs[i].at[0] - xs[i].w / 2 >= xs[i - 1].at[0] + xs[i - 1].w / 2,
+      'the pills sit one after another along the arrow, in the order the hops happen');
 });
 
 test('every kind the renderer draws is accepted in silence', () => {

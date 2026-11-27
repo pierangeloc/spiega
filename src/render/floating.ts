@@ -43,6 +43,7 @@
    ============================================================ */
 
 import { tagBox } from './edges.js';
+import type { Hop } from './edges.js';
 import { cuts, wireCuts, toSegment, toLine } from './geom.js';
 import { calloutCandidates, onEdges, leaderNear, target, TEXT_PAD, DOT } from './callout.js';
 import { tabSize } from './ink.js';
@@ -213,14 +214,18 @@ function cheapest(spots: number[][], costOf: (at: number[], low: number) => numb
 
 /* The pass. `planned` is what planEdges routed; `stepFor` says which number
    rides on an edge's tag, since the tag is as wide as the number and the words
-   together. Returns where every tag sits, where every boundary's tab sits, and
-   every callout placement in the shape drawCallout takes. */
-export function planFloating({ planned, boxes, callouts = [], boundaries = [], stepFor = () => null }: {
+   together. `hopsFor` is the tags an arrow carries, for the arrow that carries
+   more than one (#113); each is placed on its own, against the others like
+   anything else. Returns where every tag sits, keyed as the hop is, where
+   every boundary's tab sits, and every callout placement in the shape
+   drawCallout takes. */
+export function planFloating({ planned, boxes, callouts = [], boundaries = [], stepFor = () => null, hopsFor }: {
   planned: Route[],
   boxes: Record<string, Box>,
   callouts?: Callout[],
   boundaries?: Boundary[],
   stepFor?: (r: Route) => number | null,
+  hopsFor?: (r: Route) => Hop[],
 }): { tags: Map<string, PlacedTag>, tabs: Map<string, PlacedTag>, callouts: CalloutPlace[] } {
   const obs = obstacles(boxes, planned);
   /* A callout on an edge lands its ball on the line at a point fixed by the
@@ -260,13 +265,14 @@ export function planFloating({ planned, boxes, callouts = [], boundaries = [], s
     }
   }
 
+  const hops = hopsFor || ((r: Route): Hop[] => [{ key: r.key, label: r.e.label, step: stepFor(r) }]);
   const items = planned
-    .filter(r => r.e.label || stepFor(r) != null)
-    .map(r => ({ r, ideal: tagBox(r, stepFor(r)) }))
+    .flatMap(r => hops(r).filter(h => h.label || h.step != null).map(h =>
+      ({ r, key: h.key, ideal: tagBox(r, h.step, h.label, h.along ?? null) })))
     .sort((p, q) => (p.ideal.at[0] - q.ideal.at[0]) || (p.ideal.at[1] - q.ideal.at[1]));
 
   const tags = new Map<string, PlacedTag>();
-  for (const { r, ideal } of items) {
+  for (const { r, key, ideal } of items) {
     const { w, h } = ideal;
     const rect = (at: number[]): Rect => ({ x: at[0] - w / 2, y: at[1] - h / 2, w, h });
     const at = cheapest(tagSpots(r, ideal), (at, low) => {
@@ -297,8 +303,8 @@ export function planFloating({ planned, boxes, callouts = [], boundaries = [], s
       }
       return c + Math.max(0, own - TOUCH) * WIRE / 20;
     });
-    tags.set(r.key, { key: r.key, at, w, h });
-    obs.solids.push({ what: `tag ${r.key}`, rect: grow(rect(at), PAD / 2), float: true });
+    tags.set(key, { key, at, w, h });
+    obs.solids.push({ what: `tag ${key}`, rect: grow(rect(at), PAD / 2), float: true });
   }
 
   const calls: CalloutPlace[] = [];

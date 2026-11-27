@@ -92,7 +92,10 @@ export function measureDrawing(svg: string) {
   type Group = { attrs: string, dx: number, dy: number, fills: Words[] };
   const stack: Group[] = [];
   const nodeText: (Rect & { id: string, text: string })[] = [];
-  const tags = new Map<string, Words & { key: string }>();
+  /* Keyed by the tag's own group, like a callout: an arrow carrying several
+     hops (#113) has a pill per hop, all under the one `data-edge`, and keyed
+     by the edge they would be measured as one pill holding all their words. */
+  const tags = new Map<Group, Words & { key: string }>();
   const callouts = new Map<Group, Words>();
   const balls: Rect[] = [];
   const tabs: Words[] = [];
@@ -112,7 +115,7 @@ export function measureDrawing(svg: string) {
     const dx = stack.reduce((s, g) => s + g.dx, 0), dy = stack.reduce((s, g) => s + g.dy, 0);
     const nodeId = named('data-node');
     const edgeId = named('data-edge');
-    const inTag = stack.some(g => attr(g.attrs, 'class') === 'tag');
+    const inTag = stack.find(g => attr(g.attrs, 'class') === 'tag');
     const call = stack.find(g => attr(g.attrs, 'data-callout') != null);
     /* A boundary's name rides a card. The card is what is measured, and it is
        measured by the card and not by its words: a card over a card hides the
@@ -140,7 +143,7 @@ export function measureDrawing(svg: string) {
           tabs.push(card);
         }
       } else if (edgeId !== undefined && inTag) {
-        const t = tags.get(edgeId);
+        const t = tags.get(inTag);
         if (t) t.text = (t.text ? t.text + ' ' : '') + unescape(body);
       }
     } else if (tag === 'path' && bgroup && attr(attrs, 'class') === 'f') {
@@ -150,8 +153,7 @@ export function measureDrawing(svg: string) {
       const m = (attr(attrs, 'd') || '').match(/^M(-?[\d.]+) (-?[\d.]+)\s*a([\d.]+)/);
       if (m) balls.push({ x: Number(m[1]) + dx, y: Number(m[2]) + dy - Number(m[3]), w: Number(m[3]) * 2, h: Number(m[3]) * 2 });
     } else if (tag === 'path' && edgeId !== undefined && inTag && attr(attrs, 'class') === 'f') {
-      const k = edgeId;
-      if (!tags.has(k)) tags.set(k, { key: k, text: '', ...pathBox(attr(attrs, 'd') || '', dx, dy) });
+      if (!tags.has(inTag)) tags.set(inTag, { key: edgeId, text: '', ...pathBox(attr(attrs, 'd') || '', dx, dy) });
     }
   }
   return {

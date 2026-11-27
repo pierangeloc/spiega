@@ -12,7 +12,7 @@ MCP tool. Ops are applied in order and the board is their accumulation.
 |---|---|---|
 | `node` | a box on the board | `id` `label` `kind` `sub` and the layout hints below |
 | `note` | your own handwriting, in the left margin | `label` (`\n` for line breaks; up to 12 lines) |
-| `edge` | a labelled line between two boxes | `from` `to` `label` `async` |
+| `edge` | a labelled line between two boxes | `from` `to` `label` `async` `step` `then[]` |
 | `boundary` | a dashed enclosure around several boxes | `label` `members[]` |
 | `callout` | a label joined to a point by a leader line | `at` `label` `side` |
 | `step` | one numbered hop of the flow | `edge` `step` `lights[]` `group` |
@@ -253,6 +253,24 @@ a `step` and walking that step lights those words with that hop; leave it
 untagged and it never dims, which is right for an opening or closing remark.
 
 An edge is named `from>to`, which is how `step` and `tag` refer to one.
+
+Two boxes that talk more than once — a request, then a poll, then a write back
+— are one arrow carrying several hops. Draw each hop as its own `edge` with the
+`step` it is in the flow, and name the arrow in a `step` op once per hop:
+
+```json
+{"op":"edge","from":"ch","to":"corr","label":"createCorrection","step":3}
+{"op":"edge","from":"ch","to":"corr","label":"listApprovedUpcoming","step":5}
+{"op":"edge","from":"ch","to":"corr","label":"linkCorrectionsToInvoiceRun","step":7}
+```
+
+Each hop gets its own pill along the arrow, in order from source to target,
+and walking step 5 lights the line and the middle pill only. It is the step
+that makes a hop a new one: a second `edge` between the same two boxes with a
+new label and no step, or a step the arrow already carries, replaces that hop's
+words — which is how a typo is fixed — and the board says so when words are
+lost. `then` is the same thing said in one op: `"then":[{"label":"…","step":5}]`
+lists every hop after the first, and replaces the ones the arrow had.
 
 ### Phases of a longer explanation
 

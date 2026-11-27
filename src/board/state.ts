@@ -333,27 +333,55 @@ const upsert = <T extends object>(
 const edgeId = (e: Pick<Edge, 'from' | 'to'>): string => `${e.from}>${e.to}`;
 
 /* An edge is keyed by its ends, so a second hop between the same two boxes
-   does not draw — it lands on the first one and takes its label with it (#113).
+   lands on the arrow already there (#113). A conversation over time, request
+   then poll then write back, is one of the most ordinary shapes there is, so
+   that arrow carries the hop as a further stop — its own words and its own
+   badge, lit on its own when the flow walks to it — rather than taking the
+   first hop's label away.
 
-   A conversation over time, request then poll then write back, is one of the
-   most ordinary shapes there is, and it is the one the board flattens. Until
-   an arrow can carry several labelled stops, the least we owe the agent is to
-   say that the hop it just described is not on the board. Nothing else tells
-   it: the op is accepted, `fresh.edges` comes back empty because the edge was
-   already known, and the drawing quietly says something else.
+   What tells a further hop from a correction is its step. A typo fixed, or a
+   style or `via` added to a line already drawn, is the identical op shape and
+   must land on the hop that is there, so only an op that brings a new label
+   *and* a step the arrow does not carry yet becomes a stop. An op whose step
+   the arrow already carries is about that stop, and one with a known label
+   and a new step renumbers it. Everything about the line itself — `async`,
+   `via`, `bend` — still lands on the line, whichever hop the op was about.
+
+   An explicit `then` is the whole list of later hops at once, which is what a
+   compacted log writes, so it is taken as given. */
+const landOnPair = (was: Edge | undefined, e: Edge): Edge => {
+  if (!was || e.then !== undefined || !was.label) return e;
+  const { label, step, ...line } = e;
+  if (!label || typeof step !== 'number') return e;
+  const more = was.then || [];
+  const stops = [{ label: was.label, step: was.step }, ...more];
+  const byStep = stops.findIndex(s => s.step === step);
+  const byLabel = stops.findIndex(s => s.label === label);
+  const at = byStep >= 0 ? byStep : byLabel;
+  if (at === 0) return e;
+  if (at > 0) return { ...line, then: more.map((s, i) => (i === at - 1 ? { ...s, label, step } : s)) };
+  return { ...line, then: [...more, { label, step }] };
+};
+
+/* Said out loud when a hop's words are lost after all: the op named no step,
+   or named one that a hop with other words already carries. Nothing else
+   tells the agent — the op is accepted, `fresh.edges` comes back empty
+   because the edge was already known, and the drawing quietly says something
+   else.
 
    A warning rather than a refusal, and only when a label is actually losing
-   another label. Correcting a typo, or an `edge` op adding `via` or a style to
-   a line already drawn, is the same op shape and is exactly right; a board
-   cannot afford to be pedantic at an author mid-sentence. */
-const overwrittenLabel = (board: Board, e: Edge, warnings: string[]) => {
-  if (!e.label) return;
-  const was = board.edges.find(x => edgeId(x) === edgeId(e));
-  if (!was?.label || was.label === e.label) return;
+   another label; a board cannot afford to be pedantic at an author
+   mid-sentence. */
+const overwrittenLabel = (was: Edge | undefined, e: Edge, warnings: string[]) => {
+  if (!e.label || !was) return;
+  const aimed = e.then === undefined && typeof e.step === 'number'
+    ? [was, ...(was.then || [])].find(s => s.step === e.step)
+    : was;
+  if (!aimed?.label || aimed.label === e.label) return;
   warnings.push(
-    `edge ${edgeId(e)}: "${e.label}" replaced "${was.label}" on the one arrow between those boxes. ` +
-    'A second hop between the same two does not draw as its own line. Say both in one label, ' +
-    'or give the exchange a box of its own to turn through.');
+    `edge ${edgeId(e)}: "${e.label}" replaced "${aimed.label}" on the arrow between those boxes. ` +
+    'If it is a hop of its own, give it the step it is in the flow: a second hop between the same ' +
+    'two boxes draws as a further stop on that arrow when it carries a step the arrow does not.');
 };
 
 /* The array-valued fields a model writes by hand.
@@ -626,20 +654,34 @@ function applyOne(board: Board, op: Op, sweep: Sweep, warnings: string[] = []): 
     }
 
     case 'edge': {
-      const { op: _op, step, ...fields } = op;
+      const { op: _op, step, then, ...fields } = op;
       if (!fields.from || !fields.to) break;
       if (fields.via !== undefined && !waypoints(fields.via)) {
         return { ok: false, error: 'edge: via must be an array of finite col and row pairs', fresh };
       }
+      if (then !== undefined && !(Array.isArray(then) && then.every(s =>
+        s && typeof s === 'object' && (s.label === undefined || typeof s.label === 'string')))) {
+        return { ok: false, error: 'edge: then must be an array of hops, each with a label and a step', fresh };
+      }
+      const what = `edge ${fields.from}>${fields.to}`;
       /* `step` is the badge this arrow carries, and `null` is how an arrow is
          told not to carry one — so it passes through where a number is
          converted. */
-      const badge = step === null ? null
-        : oneNumber(step, 'step', `edge ${fields.from}>${fields.to}`, warnings);
+      const badgeOf = (v: number | string | null | undefined) =>
+        (v === null ? null : oneNumber(v, 'step', what, warnings));
+      const badge = badgeOf(step);
       const e: Edge = { ...fields, from: fields.from, to: fields.to,
-        ...(badge === undefined ? {} : { step: badge }) };
-      overwrittenLabel(board, e, warnings);
-      if (upsert(board.edges, e, edgeId, indexesFor(board).edges)) fresh.edges.push(edgeId(e));
+        ...(badge === undefined ? {} : { step: badge }),
+        ...(then === undefined ? {} : { then: then.map(s => {
+          const n = badgeOf(s.step);
+          return { ...(s.label === undefined ? {} : { label: s.label }), ...(n === undefined ? {} : { step: n }) };
+        }) }) };
+      const ix = indexesFor(board).edges;
+      const known = ix.get(edgeId(e));
+      const was = known != null && board.edges[known] && edgeId(board.edges[known]) === edgeId(e)
+        ? board.edges[known] : board.edges.find(x => edgeId(x) === edgeId(e));
+      overwrittenLabel(was, e, warnings);
+      if (upsert(board.edges, landOnPair(was, e), edgeId, ix)) fresh.edges.push(edgeId(e));
       break;
     }
 

@@ -40,6 +40,7 @@ export type LayoutNode = {
 
 export type LayoutEdge = {
   from: string, to: string, label?: string, step?: number | null, bend?: string, via?: Placement[],
+  then?: { label?: string, step?: number | null }[],
 };
 
 export type LayoutBoundary = { members?: string[] };
@@ -70,6 +71,14 @@ const PAD = 64;
 const EDGE_GAP = 8;
 const KNEE = 0.42;
 const TAG_AIR = 10;
+const HOP_AIR = 12;   // between two pills of one arrow's hops, so they read as two
+const HOP_END = 22;   // before the first and after the last, clear of the box and the arrowhead
+
+/* How long a line must be to carry these pills one after another (#113),
+   with air between them and at both ends. The gutter is sized by it here and
+   the pills are spaced by it in render.js, so the two cannot disagree. */
+export const hopRow = (ws: number[]): number =>
+  ws.reduce((t, w) => t + w, 0) + HOP_AIR * Math.max(0, ws.length - 1) + HOP_END * 2;
 
 /* A boundary's wall stands BOUNDARY_PAD outside its members and its name rides
    a tab TAB_RISE above that. A box that is not a member has to clear the wall,
@@ -318,19 +327,30 @@ export function layout(
      is no placing a tag into a gap it cannot fit. A loop's return runs along
      the floor and never enters a gutter, so it asks for nothing. */
   const crossing: number[] = colKeys.map(() => 0);
+  /* An arrow carrying several hops (#113) between neighbouring columns hangs
+     its pills one after another along the gutter, in the order they happen,
+     so that gutter is as long as the row of them. A longer arrow already runs
+     past whole columns and asks only for its widest. */
+  const inLine: number[] = colKeys.map(() => 0);
   for (const e of spec.edges || []) {
     if (back.has(`${e.from}>${e.to}`)) continue;
     const a = placed[e.from], b = placed[e.to];
     if (!a || !b || a.col === b.col) continue;
-    const step = stepFor(e);
-    if (!e.label && step == null) continue;
-    const { w } = pillSize(tagLines(e.label, step));
+    const ws = [{ label: e.label, step: stepFor(e) }, ...(e.then || [])]
+      .filter(t => t.label || t.step != null)
+      .map(t => pillSize(tagLines(t.label, t.step ?? null)).w);
+    const w = Math.max(0, ...ws);
+    if (!w) continue;
     const lo = Math.min(a.col, b.col), hi = Math.max(a.col, b.col);
     colKeys.forEach((c, i) => {
-      if (i + 1 < colKeys.length && lo <= c && hi >= colKeys[i + 1]) crossing[i] = Math.max(crossing[i], w);
+      if (i + 1 < colKeys.length && lo <= c && hi >= colKeys[i + 1]) {
+        crossing[i] = Math.max(crossing[i], w);
+        if (ws.length > 1 && lo === c && hi === colKeys[i + 1]) inLine[i] = Math.max(inLine[i], hopRow(ws));
+      }
     });
   }
-  const gap = crossing.map(w => (w ? gutterFor(w) : COL_GAP));
+  const gap = crossing.map((w, i) => Math.max(w ? gutterFor(w) : COL_GAP,
+    inLine[i] ? Math.ceil(inLine[i] + EDGE_GAP * 2) : 0));
 
   const boxes: Record<string, Box> = {};
   let x = PAD;
@@ -639,4 +659,4 @@ function separate(groups: string[][], boxes: Record<string, Box>): Record<string
   return y;
 }
 
-export { COL_GAP, ROW_GAP, PAD, EDGE_GAP, KNEE };
+export { COL_GAP, ROW_GAP, PAD, EDGE_GAP, KNEE, HOP_AIR, HOP_END };
