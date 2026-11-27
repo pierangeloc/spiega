@@ -133,5 +133,10 @@
     "noBefore": true,
     "broke": "Not a bug, and there is no frozen `-before` picture because this board draws the same before and after #213. It pins the threshold: #213 took three hops off the line because three pills end to end read as a chain of boxes, and this is the case it left alone. Two hops on one arrow are two labels on it.",
     "fixed": "The two hops of `ch>corr` sit one after the other along the line, in the order they happen, with no tick: `3 createCorrection` and then `5 invoice run: listApprovedUpcoming`, lit because the picture is at step 5. A third hop on the same arrow is `issue-113-three-hops-one-pair`, where the pills stand off the line instead."
+  },
+  "issue-217-routing-clearance": {
+    "issue": 217,
+    "broke": "The ch>db arrow passed only 2 board units above corrections-api, which it does not touch. At step 2 the bright, thick line against the dim box looked as though it ended there. This is the same board as #113, but its frozen before is a separate picture: the #113 before records the earlier missing-hops bug and must stay frozen.",
+    "fixed": "The knee turns after corrections-api instead of before it, giving the unrelated box 12.2 units of clearance. With #215's wider pills the board is 1675 units wide both before and after this routing change, with no box crossings or line crossings. Ordinary knees try either side of an unrelated box with 12 units of air, but stay between their endpoints and cannot introduce a new collision or graze. A straight, back-edge or settled-waypoint route, or a knee with no safe candidate, can still graze; the audit reports it rather than silently changing the author's line or worsening the drawing."
   }
 }

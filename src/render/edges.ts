@@ -13,6 +13,7 @@ import { roughLine, roughPoly, roughRect, roughEllipse, stroke, fill, text, arro
 import type { Pt } from './ink.js';
 import type { Edge } from '@spiega/core';
 import { backEdges, KNEE, EDGE_GAP } from './layout.js';
+import { CLEARANCE, crossings, grazingArrows } from './audit.js';
 
 const GAP = EDGE_GAP;      // breathing room between a box edge and its line
 const FAN = 0.52;          // how much of a side's length the fan may spread over
@@ -211,7 +212,78 @@ export function planEdges(edges: Edge[], boxes: Record<string, Box>, lanes: Reco
   spreadKnees(rec);
 
   for (const r of rec) r.pts = route(r);
+  clearKnees(rec, boxes);
   return rec;
+}
+
+/* A knee need not turn before an unrelated box: it can turn after it, provided
+   both horizontal runs then clear everything. Try the box's two sides with
+   12 units of paper, just beyond the audit's 10-unit warning threshold. That
+   leaves room for the hand's wobble and a lit 3px stroke without buying more
+   board width. Candidates stay between the endpoints, so this pass cannot
+   widen the layout. Prefer the least remaining clearance deficit, then the
+   smallest movement; never exchange a graze for a new box or line collision.
+
+   This is deliberately local: authored straight lines, back edges and settled
+   waypoint routes have different constraints, and an endpoint trapped beside
+   a box may have no safe knee at all. The audit still reports those cases. */
+const KNEE_CLEARANCE = CLEARANCE + 2;
+function clearKnees(rec: Route[], boxes: Record<string, Box>): void {
+  for (const r of rec) {
+    if (r.back || r.via?.length || r.e.bend === 'straight' || r.pts.length !== 4 ||
+        (r.sa !== 'left' && r.sa !== 'right')) continue;
+    const obstacles = Object.entries(boxes).filter(([id]) => id !== r.e.from && id !== r.e.to).map(([, b]) => b);
+    const distances = (pts: Pt[]): number[] => obstacles.map(b => routeDistance(pts, b));
+    const old = distances(r.pts);
+    if (!old.some(d => d > 0 && d < CLEARANCE) &&
+        (!old.some(d => d === 0) || !grazingArrows({ boxes, planned: [r] }).length)) continue;
+    const a = r.pts[0], b = r.pts[3], knee = r.pts[1][0];
+    const lo = Math.min(a[0], b[0]), hi = Math.max(a[0], b[0]);
+    const candidates = obstacles.flatMap(o => [o.x - KNEE_CLEARANCE, o.x + o.w + KNEE_CLEARANCE]);
+    const deficit = (ds: number[]) => ds.reduce((sum, d) => sum + Math.max(0, CLEARANCE - d), 0);
+    let best = deficit(old), shift = 0, chosen = r.pts;
+    for (const x of candidates) {
+      if (x < lo || x > hi) continue;
+      const pts: Pt[] = [a, [x, a[1]], [x, b[1]], b];
+      const ds = distances(pts), cost = deficit(ds), move = Math.abs(x - knee);
+      if (cost > best || (cost === best && move >= shift)) continue;
+      if (ds.some((d, i) => (d === 0 && old[i] > 0) || (d < CLEARANCE && old[i] >= CLEARANCE))) continue;
+      const candidate = { ...r, pts };
+      if (rec.some(other => other !== r &&
+        (crossings([candidate, other]) > crossings([r, other]) ||
+         (overlapping(pts, other.pts) && !overlapping(r.pts, other.pts))))) continue;
+      best = cost; shift = move; chosen = pts;
+    }
+    r.pts = chosen;
+  }
+}
+
+/* All candidate segments are axis-aligned. Distance to the whole box, not a
+   sample of it, catches a short pass at a corner as well as a long one. */
+function routeDistance(pts: Pt[], b: Box): number {
+  let closest = Infinity;
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+    const dx = Math.max(b.x - Math.max(x0, x1), 0, Math.min(x0, x1) - b.x - b.w);
+    const dy = Math.max(b.y - Math.max(y0, y1), 0, Math.min(y0, y1) - bottomOf(b));
+    closest = Math.min(closest, Math.hypot(dx, dy));
+  }
+  return closest;
+}
+
+/* Crossings are not the only way to lose a line: two parallel runs laid on
+   top of each other read as one. Ignore a single shared endpoint. */
+function overlapping(a: Pt[], b: Pt[]): boolean {
+  for (let i = 1; i < a.length; i++) for (let j = 1; j < b.length; j++) {
+    const p = a[i - 1], q = a[i], s = b[j - 1], t = b[j];
+    for (const axis of [0, 1] as const) {
+      const other = 1 - axis;
+      if (p[other] === q[other] && s[other] === t[other] && p[other] === s[other] &&
+          Math.min(Math.max(p[axis], q[axis]), Math.max(s[axis], t[axis])) >
+          Math.max(Math.min(p[axis], q[axis]), Math.min(s[axis], t[axis]))) return true;
+    }
+  }
+  return false;
 }
 
 /* Lines that converge on one box turn in the same place, which draws them as
