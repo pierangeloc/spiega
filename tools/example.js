@@ -35,6 +35,9 @@ function crop(spec, r, pad) {
   for (const b of Object.values(r.boxes)) { take(b.x, b.y); take(b.x + b.w, b.y + b.h); }
   for (const e of r.planned) for (const [x, y] of e.pts || []) take(x, y);
   for (const c of r.callouts) { take(c.box.x, c.box.y); take(c.box.x + c.box.w, c.box.y + c.box.h); }
+  /* An arrow's hops stacked off its line (#213) stand a staircase clear of
+     the route, where nothing above has reached, and would be cropped away. */
+  for (const t of r.tags.values()) if (t.tick) { take(t.at[0] - t.w / 2, t.at[1] - t.h / 2); take(t.at[0] + t.w / 2, t.at[1] + t.h / 2); }
   /* A boundary's name rides a tab that stands 11px above its dashed wall, and
      the wall itself stands 26px outside its members — further out than the
      boxes this crop started from. Without the tab the enclosure is cropped

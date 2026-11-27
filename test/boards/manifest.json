@@ -116,11 +116,17 @@
   "issue-113-three-hops-one-pair": {
     "issue": 113,
     "broke": "city-hubs-api calls corrections-api three times — create, then list what is approved, then link — at steps 3, 5 and 7. An edge is keyed by its two ends, so the second and third `edge` ops landed on the first and took its label away. The board drew one arrow saying `7 linkCorrectionsToInvoiceRun`, and this picture is it at step 5: the hop being walked is a listing, and the one lit pill on the board is about step 7. Walking 3, 5 and 7 lit the same line with the same words each time.",
-    "fixed": "The arrow is still one arrow, keyed `ch>corr`, and now carries a pill per hop: an `edge` op bringing a new label and a step the arrow does not carry yet is a further stop on it. The pills sit one after another along the line, in the order the hops happen, the gutter between the two columns being as long as the row of them. Walking step 5 lights the line and the middle pill, saying `5 invoice run: listApprovedUpcoming`; the other two are drawn as they are when nothing is lit."
+    "fixed": "The arrow is still one arrow, keyed `ch>corr`, and now carries a pill per hop: an `edge` op bringing a new label and a step the arrow does not carry yet is a further stop on it. Walking step 5 lights the line and the pill of hop 5, saying `5 invoice run: listApprovedUpcoming`; the other two are drawn as they are when nothing is lit. #212 first laid the three pills end to end along the line, with the gutter as long as the row; they read as a chain of boxes, and the board widened to seat them (#213). Three or more hops now stand off the line as a staircase, each tied by a tick to a dot at its own point on the route, the dots in the order the hops happen and the rows reading down in the same order. The gutter asks for one pill rather than the row, and the board is 1505 wide where #212 drew it 1699."
   },
   "issue-196-map-arrowheads": {
     "issue": 196,
     "broke": "The map's `then` hop into chapter 4 comes down a long diagonal from the end of the first row of a wrapped strip, and its arrowhead is a plain downward chevron: the wings do not meet the line. The same fixed angle sat on the across hop, which is wrong whenever the two cards are not the same height (1→2 and 4→5 here). This board is the map, not a drawing: the spec's `map` key is a strip of six chapters wrapped at 720px, inked by the same `linkInk` the page uses.",
     "fixed": "Both `next` branches take the head's angle from the line they end, so the diagonal 3→4 hop and the slanted across hops land their heads on their own lines. Straight-across and straight-down hops keep the angles they had, and the bowed links still take theirs off the curve's last control point."
+  },
+  "issue-213-two-hops-along": {
+    "issue": 213,
+    "noBefore": true,
+    "broke": "Not a bug, and there is no frozen `-before` picture because this board draws the same before and after #213. It pins the threshold: #213 took three hops off the line because three pills end to end read as a chain of boxes, and this is the case it left alone. Two hops on one arrow are two labels on it.",
+    "fixed": "The two hops of `ch>corr` sit one after the other along the line, in the order they happen, with no tick: `3 createCorrection` and then `5 invoice run: listApprovedUpcoming`, lit because the picture is at step 5. A third hop on the same arrow is `issue-113-three-hops-one-pair`, where the pills stand off the line instead."
   }
 }

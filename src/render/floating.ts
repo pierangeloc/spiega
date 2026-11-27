@@ -46,7 +46,8 @@ import { tagBox } from './edges.js';
 import type { Hop } from './edges.js';
 import { cuts, wireCuts, toSegment, toLine } from './geom.js';
 import { calloutCandidates, onEdges, leaderNear, target, TEXT_PAD, DOT } from './callout.js';
-import { tabSize } from './ink.js';
+import { tabSize, pillSize, tagLines } from './ink.js';
+import { CASCADE, TICK_STEP, TICK_INSET, TICK_GAP, STACK_PAD, HOP_END } from './layout.js';
 import type { Box } from './layout.js';
 import type { Callout, Edge } from '@spiega/core';
 
@@ -68,7 +69,7 @@ type Boundary = { id: string, label?: string, names?: (string | undefined)[], ti
 type Solid = { rect: Rect, what: string, float?: boolean, weight?: number };
 type Wire = { key: string, pts: number[][] };
 type Obstacles = { solids: Solid[], wires: Wire[] };
-type PlacedTag = { key: string, at: number[], w: number, h: number };
+type PlacedTag = { key: string, at: number[], w: number, h: number, tick?: { from: number[], to: number[] } };
 
 const SOLID = 1000;       // a word on a word, or a pill under a box
 const ARROW = 200;        // a pill over an arrowhead: the line is still there, which way it goes is not
@@ -176,6 +177,103 @@ function tagSpots(r: Route, ideal: { at: number[], w: number, h: number, away: n
   return out;
 }
 
+/* Where an arrow's route crosses the vertical through `x`: every height, so
+   a caller can take the one nearest the side it stands on. A knee's drop at
+   exactly `x` gives both of its ends. */
+function crossingsAt(pts: number[][], x: number): number[] {
+  const ys: number[] = [];
+  for (let i = 1; i < pts.length; i++) {
+    const p = pts[i - 1], q = pts[i];
+    if ((x - p[0]) * (x - q[0]) > 0) continue;
+    if (p[0] === q[0]) ys.push(p[1], q[1]);
+    else ys.push(p[1] + (q[1] - p[1]) * (x - p[0]) / (q[0] - p[0]));
+  }
+  return ys;
+}
+
+/* The ways a staircase of hop pills (#213) could sit on one arrow, best
+   first: above the line and then below it, each centred along the route and
+   then slid towards either end.
+
+   Above, the rows read down in the order the hops happen and each pill runs
+   on towards the target from its tick, so the last hop is the row nearest the
+   line. Below is the same staircase mirrored — each pill runs back towards
+   the source from its tick, and the first hop is nearest — so it still reads
+   down in order. Either way a tick only ever passes the pills of hops that
+   come after it along the line, and those start further along than it. The
+   whole stack stands clear of every part of the route under it, a knee's
+   drop included, so the arrow stays a line with labels beside it. */
+type StackPill = { at: number[], w: number, h: number, tick: { from: number[], to: number[] } };
+function stackSpots(r: Route, sizes: { w: number, h: number }[]): StackPill[][] {
+  const pts = r.pts, A = pts[0], B = pts[pts.length - 1];
+  const dir = B[0] >= A[0] ? 1 : -1;
+  const run = Math.abs(B[0] - A[0]);
+  const n = sizes.length;
+  const xAt = (s: number) => A[0] + dir * s;
+  const out: StackPill[][] = [];
+  for (const above of [true, false]) {
+    // where each pill starts and ends along the route, from the first tick
+    const spans = sizes.map((z, k) => above
+      ? [k * TICK_STEP - TICK_INSET, k * TICK_STEP - TICK_INSET + z.w]
+      : [k * TICK_STEP + TICK_INSET - z.w, k * TICK_STEP + TICK_INSET]);
+    const f0 = Math.min(...spans.map(s => s[0])), f1 = Math.max(...spans.map(s => s[1]));
+    const slack = Math.max(0, run - HOP_END * 2 - (f1 - f0));
+    for (const slide of [0.5, 0.25, 0.75, 0, 1]) {
+      const s0 = HOP_END - f0 + slack * slide;
+      const xs = [xAt(s0 + f0), xAt(s0 + f1)];
+      const ys = [...crossingsAt(pts, xs[0]), ...crossingsAt(pts, xs[1]),
+        ...pts.filter(p => (p[0] - xs[0]) * (p[0] - xs[1]) <= 0).map(p => p[1])];
+      if (!ys.length) continue;
+      let edge = above ? Math.min(...ys) - TICK_GAP : Math.max(...ys) + TICK_GAP;
+      const stack: StackPill[] = new Array(n);
+      const order = above ? sizes.map((_, k) => n - 1 - k) : sizes.map((_, k) => k);
+      for (const k of order) {
+        const { w, h } = sizes[k];
+        const cy = above ? edge - h / 2 : edge + h / 2;
+        edge = above ? edge - h - STACK_PAD : edge + h + STACK_PAD;
+        const x = xAt(s0 + k * TICK_STEP);
+        const at = [xAt(s0 + (spans[k][0] + spans[k][1]) / 2), cy];
+        const hits = crossingsAt(pts, x);
+        const lands = hits.length ? (above ? Math.min(...hits) : Math.max(...hits)) : cy;
+        stack[k] = { at, w, h, tick: { from: [x, above ? cy + h / 2 : cy - h / 2], to: [x, lands] } };
+      }
+      out.push(stack);
+    }
+  }
+  return out;
+}
+
+/* Settle one arrow's staircase against everything already placed, and put it
+   on the board. Scored as a pill is — a solid under a word costs a great
+   deal, another line through one costs a little — plus a tick that passes
+   through a box, which strikes it through the way a callout's leader would.
+   A pill off its own line costs nothing here, as it would for a single tag:
+   these are off it on purpose, and the tick says which point is theirs. */
+function placeStack(r: Route, stack: Hop[], obs: Obstacles, tags: Map<string, PlacedTag>) {
+  const sizes = stack.map(h => pillSize(tagLines(h.label, h.step)));
+  const rect = (p: StackPill): Rect => ({ x: p.at[0] - p.w / 2, y: p.at[1] - p.h / 2, w: p.w, h: p.h });
+  let best: StackPill[] | null = null, low = Infinity;
+  for (const spot of stackSpots(r, sizes)) {
+    let c = 0;
+    for (const p of spot) {
+      const box = rect(p);
+      c += solidCost(grow(box, PAD / 2), obs.solids);
+      for (const wire of obs.wires) if (wire.key !== r.key && wireCuts(wire.pts, grow(box, -1))) c += WIRE;
+      for (const s of obs.solids) if (!s.float && !s.weight && cuts(p.tick.from, p.tick.to, s.rect)) c += SOLID / 2;
+      if (c >= low) break;
+    }
+    if (c < low) { low = c; best = spot; }
+    if (c === 0) break;
+  }
+  if (!best) return;
+  best.forEach((p, k) => {
+    const key = stack[k].key;
+    tags.set(key, { key, at: p.at, w: p.w, h: p.h, tick: p.tick });
+    obs.solids.push({ what: `tag ${key}`, rect: grow(rect(p), PAD / 2), float: true });
+    obs.wires.push({ key: r.key, pts: [p.tick.from, p.tick.to] });
+  });
+}
+
 /* Where a boundary's tab could sit, best first.
 
    It slides along the top of its own wall, the way a tag slides along its own
@@ -266,13 +364,31 @@ export function planFloating({ planned, boxes, callouts = [], boundaries = [], s
   }
 
   const hops = hopsFor || ((r: Route): Hop[] => [{ key: r.key, label: r.e.label, step: stepFor(r) }]);
-  const items = planned
-    .flatMap(r => hops(r).filter(h => h.label || h.step != null).map(h =>
-      ({ r, key: h.key, ideal: tagBox(r, h.step, h.label, h.along ?? null) })))
+  /* An arrow carrying CASCADE hops or more is placed as one staircase rather
+     than as pills each finding its own spot along the line (#213), so long as
+     it runs across the board: one that runs down a column has its pills
+     stacked along the line already, and keeps them there. */
+  const across = (r: Route) => {
+    const A = r.pts[0], B = r.pts[r.pts.length - 1];
+    return !!A && !!B && Math.abs(B[0] - A[0]) >= Math.abs(B[1] - A[1]) && A[0] !== B[0];
+  };
+  type One = { r: Route, key: string, ideal: { at: number[], w: number, h: number, away: number } };
+  type Stack = { r: Route, stack: Hop[], ideal: { at: number[] } };
+  const items: (One | Stack)[] = planned
+    .flatMap((r): (One | Stack)[] => {
+      const own = hops(r).filter(h => h.label || h.step != null);
+      if (own.length >= CASCADE && across(r)) {
+        const A = r.pts[0], B = r.pts[r.pts.length - 1];
+        return [{ r, stack: own, ideal: { at: [(A[0] + B[0]) / 2, (A[1] + B[1]) / 2] } }];
+      }
+      return own.map(h => ({ r, key: h.key, ideal: tagBox(r, h.step, h.label, h.along ?? null) }));
+    })
     .sort((p, q) => (p.ideal.at[0] - q.ideal.at[0]) || (p.ideal.at[1] - q.ideal.at[1]));
 
   const tags = new Map<string, PlacedTag>();
-  for (const { r, key, ideal } of items) {
+  for (const item of items) {
+    if ('stack' in item) { placeStack(item.r, item.stack, obs, tags); continue; }
+    const { r, key, ideal } = item;
     const { w, h } = ideal;
     const rect = (at: number[]): Rect => ({ x: at[0] - w / 2, y: at[1] - h / 2, w, h });
     const at = cheapest(tagSpots(r, ideal), (at, low) => {

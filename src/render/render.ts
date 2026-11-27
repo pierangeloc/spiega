@@ -251,7 +251,12 @@ export function renderSVG(
     const state = !focus ? 'idle'
       : focus.edges.has(r.key) ? 'lit'
       : focus.context.edges.has(r.key) ? 'idle' : 'dim';
-    const hops = r.e.then?.length ? hopsFor(r).map(h => ({ ...h, at: tags.get(h.key)?.at || null })) : null;
+    const hops = r.e.then?.length
+      ? hopsFor(r).map(h => {
+        const t = tags.get(h.key);
+        return { ...h, at: t?.at || null, tick: t?.tick || null };
+      })
+      : null;
     body += drawEdge(r, { step: stepFor(r), state, place: tags.get(r.key)?.at || null, hops });
   }
 

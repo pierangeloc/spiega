@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps, boardOps } from '../src/board/state.js';
 import { renderSVG } from '../src/render/render.js';
-import { assign, boundaryShapes, intruders, EDGE_GAP } from '../src/render/layout.js';
+import { assign, boundaryShapes, intruders, EDGE_GAP, hopRow } from '../src/render/layout.js';
 import { audit } from '../src/render/audit.js';
 import { tagBox } from '../src/render/edges.js';
 import { snapshotHTML } from '../src/board/snapshot.js';
@@ -284,10 +284,67 @@ test('walking an arrow that carries three hops lights the pill of the step being
   assert.deepEqual(pills(null).map(p => p.lit), [false, false, false]);
   const r = renderSVG(b, { active: 4 });
   assert.deepEqual([...r.tags.keys()].filter(k => k.startsWith('ch>corr')).sort(), ['ch>corr', 'ch>corr#2', 'ch>corr#3']);
-  const xs = ['ch>corr', 'ch>corr#2', 'ch>corr#3'].map(k => r.tags.get(k));
-  for (let i = 1; i < xs.length; i++)
-    assert.ok(xs[i].at[0] - xs[i].w / 2 >= xs[i - 1].at[0] + xs[i - 1].w / 2,
-      'the pills sit one after another along the arrow, in the order the hops happen');
+});
+
+/* #213: three pills laid end to end along the line were 12 units apart on a
+   board the page fits at about a third, so no line showed between them and
+   the row read as a chain of boxes — and the gutter grew to seat the row. From
+   three hops on the pills come off the line as a staircase, each tied by a
+   tick to its own point on the route, and the gutter asks for one pill. */
+const rectOf = t => ({ x: t.at[0] - t.w / 2, y: t.at[1] - t.h / 2, w: t.w, h: t.h });
+const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+const routeThrough = (pts, rc) => pts.slice(1).some((q, i) => {
+  const p = pts[i];
+  for (let k = 0; k <= 40; k++) {
+    const x = p[0] + (q[0] - p[0]) * k / 40, y = p[1] + (q[1] - p[1]) * k / 40;
+    if (x > rc.x && x < rc.x + rc.w && y > rc.y && y < rc.y + rc.h) return true;
+  }
+  return false;
+});
+
+test('three hops on one arrow stand off the line, each ticked to its own point on it, in order', () => {
+  const b = emptyBoard();
+  applyOps(b, threeHops());
+  const r = renderSVG(b);
+  const route = r.planned.find(p => p.key === 'ch>corr').pts;
+  const pills = ['ch>corr', 'ch>corr#2', 'ch>corr#3'].map(k => r.tags.get(k));
+  for (const p of pills) {
+    assert.ok(p.tick, 'every pill is tied to the route by a tick');
+    assert.ok(!routeThrough(route, rectOf(p)), 'and stands clear of the line it labels');
+  }
+  const lands = pills.map(p => p.tick.to[0]);
+  assert.deepEqual(lands, [...lands].sort((x, y) => x - y), 'the ticks land along the route in the order the hops happen');
+  assert.ok(lands[1] - lands[0] >= 20 && lands[2] - lands[1] >= 20, 'far enough apart to be three points');
+  const ys = pills.map(p => p.at[1]);
+  assert.deepEqual(ys, [...ys].sort((x, y) => x - y), 'and the rows read down in the same order');
+  for (let i = 0; i < pills.length; i++)
+    for (let j = 0; j < pills.length; j++) {
+      if (i === j) continue;
+      assert.ok(!overlap(rectOf(pills[i]), rectOf(pills[j])), 'no pill lies on another');
+      const t = pills[i].tick, rc = rectOf(pills[j]);
+      assert.ok(!(t.from[0] > rc.x && t.from[0] < rc.x + rc.w &&
+        Math.min(t.from[1], t.to[1]) < rc.y + rc.h && Math.max(t.from[1], t.to[1]) > rc.y),
+      'and no tick runs under a pill that is not its own');
+    }
+  const ch = r.boxes.ch, corr = r.boxes.corr;
+  const row = hopRow(pills.map(p => p.w));
+  assert.ok(corr.x - (ch.x + ch.w) < row,
+    `the gutter no longer carries the row: ${corr.x - (ch.x + ch.w)} against a row of ${row}`);
+  assert.equal((r.svg.match(/<g class="tag">/g) || []).length, 4, 'one pill per hop, and the other arrow\'s');
+});
+
+test('two hops on one arrow still sit along the line, untied', () => {
+  const b = emptyBoard();
+  applyOps(b, threeHops().slice(0, -1));
+  const r = renderSVG(b);
+  const route = r.planned.find(p => p.key === 'ch>corr').pts;
+  const pills = ['ch>corr', 'ch>corr#2'].map(k => r.tags.get(k));
+  for (const p of pills) {
+    assert.ok(!p.tick, 'two read as two labels on the arrow, so nothing comes off it');
+    assert.ok(routeThrough(route, rectOf(p)), 'each sits on its own line');
+  }
+  assert.ok(pills[1].at[0] - pills[1].w / 2 >= pills[0].at[0] + pills[0].w / 2,
+    'one after the other, in the order the hops happen');
 });
 
 test('every kind the renderer draws is accepted in silence', () => {
