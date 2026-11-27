@@ -305,10 +305,19 @@ export function tagLines(label?: string, step: number | null = null): string[] {
   return wrapText(lettering(words), TAG_CHARS, TAG_LINES);
 }
 
-/* How wide a pill is, and how tall, for these lines. */
+/* How wide a pill is, and how tall, for these lines.
+
+   The pill backs the words lettered on it, so its per-character coefficient
+   has to agree with what `text()` writes — monospace advance plus
+   letter-spacing, the same arithmetic `audit.ts` measures. A long unbroken
+   identifier used to spill past its own border, because this ignored
+   letter-spacing (#215). */
+
+const PILL_ADVANCE = 0.6;
+export const PILL_SPACING = 0.09;
 export function pillSize(lines: string[], { size = TAG_SIZE, padX = TAG_PAD_X, h = TAG_H }: { size?: number, padX?: number, h?: number } = {}): { w: number, h: number } {
   const longest = Math.max(0, ...lines.map(l => l.length));
-  return { w: longest * size * 0.62 + padX * 2, h: h + Math.max(0, lines.length - 1) * size * 1.2 };
+  return { w: longest * size * (PILL_ADVANCE + PILL_SPACING) + padX * 2, h: h + Math.max(0, lines.length - 1) * size * 1.2 };
 }
 
 /* A boundary's name rides a little card on the enclosure's wall. It is
