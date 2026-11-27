@@ -126,7 +126,7 @@
   "issue-211-map-labels": {
     "issue": 211,
     "broke": "The map picture printed bare labels on the lines, and narrow gutters let the words run across the cards. The live map already drew opaque pills, but a bowed link's midpoint and the label-only decluttering could put a pill over a card.",
-    "fixed": "The map and its picture place measured pills clear of every card and earlier pill, retaining the midpoint when it fits. A narrow same-row gutter wraps at word boundaries and raises its pill clear of the arrowhead; a word wider than the gutter stays whole and moves to clear space. The picture now paints opaque pills over the links just as the live map does. The map fixture uses the map-specific picture route, because a map is a strip of chapters rather than a board drawing."
+    "fixed": "The map and its picture place measured pills clear of every card and earlier pill, retaining the midpoint when it fits. A narrow same-row gutter wraps at word boundaries and raises its pill clear of the arrowhead; a word wider than the gutter stays whole and moves to clear space. A fine leader ties the displaced `warehouse` pill to its arrow without crossing a card. The picture paints opaque pills over the links just as the live map does. The map fixture uses the map-specific picture route, because a map is a strip of chapters rather than a board drawing."
   },
   "issue-213-two-hops-along": {
     "issue": 213,

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { boardMap, linkLabel, type MapLink } from '../../../../src/board/map.js';
 import { ledeText } from '../../../../src/board/tape.js';
 import { renderSVG } from '../../../../src/render/render.js';
-import { linkInk, placeMapLabels, sameRow } from '../../../../src/board/map-links.js';
+import { linkInk, mapLabelHome, mapLabelLeader, placeMapLabels, sameRow } from '../../../../src/board/map-links.js';
 import type { Model } from '../app/model.js';
 import type { Msg } from '../app/msg.js';
 import { mdish } from './text.js';
@@ -110,7 +110,7 @@ function drawLinks(wrap: HTMLElement, cards: HTMLElement, svg: SVGSVGElement, li
   svg.setAttribute('width', String(cards.offsetWidth));
   svg.setAttribute('height', String(cards.offsetHeight));
   let d = '';
-  const tags: { el: HTMLElement, mid: number[], narrow: boolean }[] = [];
+  const tags: { el: HTMLElement, mid: number[], gutter: number | null, link: MapLink }[] = [];
   for (const link of links) {
     const a = box(link.from), b = box(link.to);
     if (!a || !b) continue;
@@ -120,14 +120,14 @@ function drawLinks(wrap: HTMLElement, cards: HTMLElement, svg: SVGSVGElement, li
     const mid = ink.mid;
     const tag = document.createElement('span');
     tag.className = `maplabel${shared ? '' : ' then'}${next ? '' : ' free'}`;
-    let narrow = false;
+    let gutter: number | null = null;
     if (next && sameRow(a, b)) {
       const available = Math.max(24, b.x - a.x - a.w - 4);
-      tag.style.maxWidth = `${Math.min(84, available)}px`;
+      gutter = Math.min(84, available);
+      tag.style.maxWidth = `${gutter}px`;
       tag.style.minWidth = 'min-content';
       tag.style.overflowWrap = 'normal';
-      narrow = available < 60;
-      if (narrow) {
+      if (gutter < 60) {
         // A whole word is worth moving a pill out of the gutter for; breaking
         // "warehouse" into arbitrary fragments makes the name harder to read.
         tag.style.width = 'min-content';
@@ -141,15 +141,18 @@ function drawLinks(wrap: HTMLElement, cards: HTMLElement, svg: SVGSVGElement, li
     tag.style.left = `${mid[0]}px`;
     tag.style.top = `${mid[1]}px`;
     wrap.appendChild(tag);
-    tags.push({ el: tag, mid, narrow });
+    tags.push({ el: tag, mid, gutter, link });
   }
-  svg.innerHTML = d;
   const cardBoxes = [...cards.querySelectorAll<HTMLElement>('.mapcard')].map(el =>
     ({ x: el.offsetLeft, y: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight }));
-  const positions = placeMapLabels(tags.map(({ el, mid, narrow }) => ({
-    mid: narrow ? [mid[0], mid[1] - el.offsetHeight / 2 - 5] : mid,
+  const positions = placeMapLabels(tags.map(({ el, mid, gutter }) => ({
+    mid: mapLabelHome(mid, el.offsetWidth, el.offsetHeight, gutter),
     w: el.offsetWidth, h: el.offsetHeight,
   })), cardBoxes);
+  tags.forEach(({ mid, link }, i) => {
+    d += mapLabelLeader(mid, positions[i], [...cardBoxes, ...positions.filter((_, j) => i !== j)], link);
+  });
+  svg.innerHTML = d;
   tags.forEach(({ el }, i) => {
     const r = positions[i];
     el.style.left = `${r.x + r.w / 2}px`;

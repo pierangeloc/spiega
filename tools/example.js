@@ -18,7 +18,7 @@ import { emptyBoard, applyOps } from '../src/board/state.js';
 import { specToOps, measure } from '../src/spec.js';
 import { renderSVG } from '../src/render/render.js';
 import { boardMap, linkLabel } from '../src/board/map.js';
-import { linkInk, placeMapLabels, sameRow } from '../src/board/map-links.js';
+import { linkInk, mapLabelHome, mapLabelLeader, placeMapLabels, sameRow } from '../src/board/map-links.js';
 import { roughRect, stroke, text } from '../src/render/ink.js';
 import { boundaryBox } from '../src/render/layout.js';
 import { PAPER, PANEL, INK, MUTED, RULE, MONO } from '../src/render/theme.js';
@@ -128,10 +128,13 @@ function mapSheet(spec) {
     }
     if (!lines.length) lines.push('');
     const w = Math.max(...lines.map(s => s.length)) * charWidth + padding, h = lines.length * 11.7 + 6;
-    const mid = narrow ? [ink.mid[0], ink.mid[1] - h / 2 - 5] : ink.mid;
-    labels.push({ mid, w, h, lines, narrow, shared: link.shared.length > 0 });
+    const mid = mapLabelHome(ink.mid, w, h, next && sameRow(a, b) ? limit : null);
+    labels.push({ mid, linkMid: ink.mid, link, w, h, lines, narrow, shared: link.shared.length > 0 });
   }
   const positions = placeMapLabels(labels, rect);
+  labels.forEach((label, i) => {
+    body += mapLabelLeader(label.linkMid, positions[i], [...rect, ...positions.filter((_, j) => i !== j)], label.link);
+  });
   labels.forEach((label, i) => {
     const r = positions[i], color = label.shared ? INK : MUTED;
     body += `<rect class="maplabel" x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="9" ` +

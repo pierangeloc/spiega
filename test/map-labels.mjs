@@ -29,6 +29,14 @@ assert.ok(labels.every(r => tallCards.every(card => !overlap(r, card))), 'bowed 
 assert.ok(!overlap(labels[0], labels[1]), 'decluttering does not put labels on each other');
 const free = mapLinks.placeMapLabels([{ mid: [100, 100], w: 40, h: 20 }], []);
 assert.deepEqual(free, [{ x: 80, y: 90, w: 40, h: 20 }], 'an unobstructed pill stays on its line');
+const equalCards = [{ x: 0, y: 100, w: 200, h: 100 }, { x: 244, y: 100, w: 200, h: 100 }];
+const home = mapLinks.mapLabelHome([222, 150], 55, 18, 40);
+const [widePill] = mapLinks.placeMapLabels([{ mid: home, w: 55, h: 18 }], equalCards);
+assert.ok(widePill.y >= 200, 'an oversized pill prefers below the row over the wrapped link above it');
+const link = { from: 1, to: 2, shared: ['name'] };
+assert.equal(mapLinks.mapLabelLeader([100, 100], free[0], [], link), '', 'a pill on its line needs no leader');
+const around = mapLinks.mapLabelLeader([10, 10], { x: 100, y: 0, w: 20, h: 30 }, [{ x: 40, y: 8, w: 10, h: 4 }], link);
+assert.match(around, /class="mapleader"/, 'a blocked nearest edge uses a clear part of the pill edge');
 
 // The regression picture must paint opaque pills after the lines, like the page.
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -47,6 +55,16 @@ try {
   const warehouseBox = { x: attr('x'), y: attr('y'), w: attr('width'), h: attr('height') };
   assert.ok(warehouseBox.w >= 'warehouse'.length * 5.4, 'the pill has room for the whole word');
   assert.ok(cards.every(card => !overlap(warehouseBox, card)), 'the whole word clears every card');
+  const leader = svg.match(/<line class="mapleader" data-link="4-5" x1="([^"]+)" y1="([^"]+)" x2="([^"]+)" y2="([^"]+)"/);
+  assert.ok(leader, 'the displaced warehouse pill has a leader back to its own link');
+  const [x1, y1, x2, y2] = leader.slice(1).map(Number);
+  const warehouseInk = mapLinks.linkInk(cards[3], cards[4], { from: 4, to: 5, shared: ['warehouse'] });
+  assert.deepEqual([x1, y1], warehouseInk.mid, 'the leader starts on the warehouse arrow');
+  assert.ok(x2 >= warehouseBox.x && x2 <= warehouseBox.x + warehouseBox.w &&
+    (y2 === warehouseBox.y || y2 === warehouseBox.y + warehouseBox.h), 'the leader reaches the pill edge');
+  assert.equal(x1, x2, 'the leader stays in the gutter between the cards');
+  assert.ok(cards.every(card => !(x1 > card.x && x1 < card.x + card.w &&
+    Math.min(y1, y2) < card.y + card.h && Math.max(y1, y2) > card.y)), 'the leader does not cross a card');
 
   // The normal 92px page gutter can also be narrower than a single long name.
   const spec = JSON.parse(fs.readFileSync(path.join(root, 'test/boards/issue-211-map-labels.json'), 'utf8'));

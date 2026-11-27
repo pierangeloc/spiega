@@ -26,6 +26,13 @@ export type LinkInk = { d: string, mid: number[], angle: number };
    rows of a wrapped strip are a card apart, so nothing near this is ambiguous. */
 export const sameRow = (a: Rect, b: Rect): boolean => Math.abs(a.y - b.y) < 8;
 
+/* When a word cannot fit between cards, bias its clear space below the link.
+   The space above a row often carries a different, wrapped-row link. */
+export function mapLabelHome(mid: number[], w: number, h: number, gutter: number | null): number[] {
+  if (gutter !== null && w > gutter) return [mid[0], mid[1] + 8];
+  return gutter !== null && gutter < 60 ? [mid[0], mid[1] - h / 2 - 5] : mid;
+}
+
 /** Place measured pills close to their links without covering cards or each other. */
 export function placeMapLabels(labels: { mid: number[], w: number, h: number }[], cards: Rect[]): Rect[] {
   const placed: Rect[] = [];
@@ -49,6 +56,35 @@ export function placeMapLabels(labels: { mid: number[], w: number, h: number }[]
     if (best) placed.push({ ...best, w: label.w, h: label.h });
   }
   return placed;
+}
+
+/* A displaced pill needs a visible tie to its own line, not merely the nearest
+   empty patch of paper. The tie is omitted if it would run through a card or
+   another pill; unlike the arrow, it is an annotation rather than a route. */
+export function mapLabelLeader(mid: number[], pill: Rect, obstacles: Rect[], link: MapLink): string {
+  const [x1, y1] = mid;
+  const x = Math.max(pill.x, Math.min(x1, pill.x + pill.w));
+  const y = Math.max(pill.y, Math.min(y1, pill.y + pill.h));
+  if (Math.hypot(x - x1, y - y1) <= 8) return '';
+  const crosses = (r: Rect, x2: number, y2: number): boolean => {
+    const dx = x2 - x1, dy = y2 - y1;
+    let lo = 0, hi = 1;
+    for (const [origin, delta, min, max] of [[x1, dx, r.x, r.x + r.w], [y1, dy, r.y, r.y + r.h]]) {
+      if (delta === 0) { if (origin <= min || origin >= max) return false; continue; }
+      const a = (min - origin) / delta, b = (max - origin) / delta;
+      lo = Math.max(lo, Math.min(a, b)); hi = Math.min(hi, Math.max(a, b));
+      if (lo >= hi) return false;
+    }
+    return true;
+  };
+  const ends = [[x, y], [pill.x, y], [pill.x + pill.w, y], [x, pill.y], [x, pill.y + pill.h],
+    [pill.x, pill.y], [pill.x + pill.w, pill.y], [pill.x, pill.y + pill.h], [pill.x + pill.w, pill.y + pill.h]];
+  ends.sort((a, b) => Math.hypot(a[0] - x1, a[1] - y1) - Math.hypot(b[0] - x1, b[1] - y1));
+  const end = ends.find(([ex, ey]) => !obstacles.some(r => crosses(r, ex, ey)));
+  if (!end) return '';
+  const [x2, y2] = end;
+  return `<line class="mapleader" data-link="${link.from}-${link.to}" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" ` +
+    `stroke="#857d6e" stroke-width="1.2"/><circle cx="${x1}" cy="${y1}" r="2" fill="#857d6e"/>`;
 }
 
 export function linkInk(a: Rect, b: Rect, link: MapLink): LinkInk {
