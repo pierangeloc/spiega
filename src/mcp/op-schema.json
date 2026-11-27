@@ -313,7 +313,39 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "the step this hop is; another edge between the same two boxes with a step of its own draws as a further stop on the one arrow"
+          },
+          "then": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "step": {
+                  "anyOf": [
+                    {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "a number; a numeric string is accepted"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": true
+            },
+            "description": "later hops along this same arrow, in order, after the one label and step describe"
           },
           "via": {
             "type": "array",
@@ -959,7 +991,39 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "the step this hop is; another edge between the same two boxes with a step of its own draws as a further stop on the one arrow"
+          },
+          "then": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "step": {
+                  "anyOf": [
+                    {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "string"
+                        }
+                      ],
+                      "description": "a number; a numeric string is accepted"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": true
+            },
+            "description": "later hops along this same arrow, in order, after the one label and step describe"
           },
           "via": {
             "type": "array",

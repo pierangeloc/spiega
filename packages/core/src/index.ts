@@ -24,5 +24,6 @@ export type {
   Node,
   Placed,
   Placement,
+  Stop,
   TranscriptLine,
 } from './schema/board.js';

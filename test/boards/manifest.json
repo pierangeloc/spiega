@@ -112,5 +112,10 @@
     "issue": 110,
     "broke": "Every numbered hop on the reported board read twice: `3 3 CREATE / 5 listApproved / 7 LINK`, `6 6 createAndStoreInvoices`. The board letters the step badge onto the first line of the tag, and an agent numbering a flow by hand had written the same number into the label it passed. Nothing told the reader which of the two threes was the board’s own.",
     "fixed": "A leading number in the label is dropped when it is the number the badge is already drawing — bare, or written `2.`, `3)` or `step 4:`. A different number stays, because it is not about which step this is: the back edge here is step 5 and still reads `5 2 RETRIES, 4-EYES APPROVAL`."
+  },
+  "issue-113-three-hops-one-pair": {
+    "issue": 113,
+    "broke": "city-hubs-api calls corrections-api three times — create, then list what is approved, then link — at steps 3, 5 and 7. An edge is keyed by its two ends, so the second and third `edge` ops landed on the first and took its label away. The board drew one arrow saying `7 linkCorrectionsToInvoiceRun`, and this picture is it at step 5: the hop being walked is a listing, and the one lit pill on the board is about step 7. Walking 3, 5 and 7 lit the same line with the same words each time.",
+    "fixed": "The arrow is still one arrow, keyed `ch>corr`, and now carries a pill per hop: an `edge` op bringing a new label and a step the arrow does not carry yet is a further stop on it. The pills sit one after another along the line, in the order the hops happen, the gutter between the two columns being as long as the row of them. Walking step 5 lights the line and the middle pill, saying `5 invoice run: listApprovedUpcoming`; the other two are drawn as they are when nothing is lit."
   }
 }
