@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { boardMap, linkLabel, type MapLink } from '../../../../src/board/map.js';
 import { ledeText } from '../../../../src/board/tape.js';
 import { renderSVG } from '../../../../src/render/render.js';
-import { arrowHead, hashSeed, roughLine, stroke } from '../../../../src/render/ink.js';
+import { linkInk, sameRow } from '../../../../src/board/map-links.js';
 import type { Model } from '../app/model.js';
 import type { Msg } from '../app/msg.js';
 import { mdish } from './text.js';
@@ -100,7 +100,7 @@ function drawLinks(wrap: HTMLElement, cards: HTMLElement, svg: SVGSVGElement, li
   };
   const bowed = links.some(link => {
     const a = box(link.from), b = box(link.to);
-    return a && b && Math.abs(a.y - b.y) < 8 && link.to !== link.from + 1;
+    return a && b && sameRow(a, b) && link.to !== link.from + 1;
   });
   if (bowed !== cards.classList.contains('bowed')) {
     cards.classList.toggle('bowed', bowed);
@@ -113,29 +113,10 @@ function drawLinks(wrap: HTMLElement, cards: HTMLElement, svg: SVGSVGElement, li
   for (const link of links) {
     const a = box(link.from), b = box(link.to);
     if (!a || !b) continue;
-    const seed = hashSeed(`${link.from}>${link.to}`);
-    const shared = link.shared.length > 0;
-    const style = { w: shared ? 1.7 : 1.3, dash: shared ? null : '7 6', opacity: shared ? 1 : 0.5 };
-    const row = Math.abs(a.y - b.y) < 8, next = link.to === link.from + 1;
-    let mid: number[];
-    if (row && next) {
-      const p = [a.x + a.w, a.y + a.h / 2], q = [b.x, b.y + b.h / 2];
-      d += stroke(roughLine(p, q, { seed }), style) + arrowHead(q, 0, { seed, w: style.w, size: 10 });
-      mid = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
-    } else if (!row && next) {
-      const p = [a.x + a.w / 2, a.y + a.h], q = [b.x + b.w / 2, b.y];
-      d += stroke(roughLine(p, q, { seed }), style) + arrowHead(q, Math.PI / 2, { seed, w: style.w, size: 10 });
-      mid = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
-    } else {
-      const p = row ? [a.x + a.w / 2, a.y] : [a.x + a.w, a.y + a.h / 2];
-      const q = row ? [b.x + b.w / 2, b.y] : [b.x + b.w, b.y + b.h / 2];
-      const lift = row ? Math.min(84, Math.max(38, Math.abs(q[0] - p[0]) * 0.16)) : Math.min(96, 44 + (link.to - link.from) * 14);
-      const c1 = row ? [p[0], p[1] - lift] : [p[0] + lift, p[1]];
-      const c2 = row ? [q[0], q[1] - lift] : [q[0] + lift, q[1]];
-      d += stroke(`M${p[0]} ${p[1]}C${c1[0]} ${c1[1]} ${c2[0]} ${c2[1]} ${q[0]} ${q[1]}`, style);
-      d += arrowHead(q, Math.atan2(q[1] - c2[1], q[0] - c2[0]), { seed, w: style.w, size: 10 });
-      mid = [(p[0] + 3 * c1[0] + 3 * c2[0] + q[0]) / 8, (p[1] + 3 * c1[1] + 3 * c2[1] + q[1]) / 8];
-    }
+    const shared = link.shared.length > 0, next = link.to === link.from + 1;
+    const ink = linkInk(a, b, link);
+    d += ink.d;
+    const mid = ink.mid;
     const tag = document.createElement('span');
     tag.className = `maplabel${shared ? '' : ' then'}${next ? '' : ' free'}`;
     tag.textContent = linkLabel(link).replace(/([_./\-])/g, '$1\u200b');

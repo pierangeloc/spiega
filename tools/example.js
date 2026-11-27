@@ -17,6 +17,9 @@ import { fileURLToPath } from 'node:url';
 import { emptyBoard, applyOps } from '../src/board/state.js';
 import { specToOps, measure } from '../src/spec.js';
 import { renderSVG } from '../src/render/render.js';
+import { boardMap } from '../src/board/map.js';
+import { linkInk } from '../src/board/map-links.js';
+import { roughRect, stroke, text } from '../src/render/ink.js';
 import { boundaryBox } from '../src/render/layout.js';
 import { PAPER, MONO } from '../src/render/theme.js';
 
@@ -71,6 +74,42 @@ function sheet(spec) {
       `width="${v.w.toFixed(1)}" height="${v.h.toFixed(1)}" fill="${PAPER}" rx="6"/>`);
 }
 
+/* The map is laid out by the page, from the cards' own boxes, so there is no
+   board to render: a spec with a `map` key is a strip of chapters, wrapped at
+   `width` the way the page wraps it, and each link is inked by the same
+   `linkInk` the page calls. A card is drawn as a titled box only; its
+   thumbnail is not what the links are about. */
+function mapSheet(spec) {
+  const { width, card: [cw, ch], gap: [gx, gy], chapters } = spec.map;
+  const board = emptyBoard();
+  const ops = chapters.flatMap(c => [
+    { op: 'chapter', title: c.title },
+    ...c.nodes.map(label => ({ op: 'node', id: label, label })),
+  ]);
+  const { errors } = applyOps(board, ops);
+  if (errors.length) throw new Error(errors.join('; '));
+  const perRow = Math.max(1, Math.floor((width + gx) / (cw + gx)));
+  const rows = Math.ceil(chapters.length / perRow);
+  const rect = chapters.map((c, i) => ({
+    x: (i % perRow) * (cw + gx), y: Math.floor(i / perRow) * (ch + gy) + 60, w: cw, h: c.h ?? ch,
+  }));
+  const pad = 30, height = rows * (ch + gy) + 60;
+  let body = '';
+  rect.forEach((r, i) => {
+    body += stroke(roughRect(r.x, r.y, r.w, r.h, 8, { seed: i + 1 }), { w: 1.4 }) +
+      text(r.x + 12, r.y + 24, `${i + 1}  ${chapters[i].title}`, { size: 13, anchor: 'start' }) +
+      text(r.x + 12, r.y + 46, chapters[i].nodes.join(', '), { size: 11, weight: 400, anchor: 'start' });
+  });
+  for (const link of boardMap(board).links) {
+    const a = rect[link.from - 1], b = rect[link.to - 1];
+    const ink = linkInk(a, b, link);
+    body += ink.d + text(ink.mid[0], ink.mid[1], link.shared.length ? link.shared[0] : 'then', { size: 11, anchor: 'middle' });
+  }
+  const w = width + pad * 2 + 110, h = height + pad * 2;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-pad} ${-pad} ${w} ${h}" width="${w}" height="${h}" ` +
+    `font-family="${MONO.replace(/"/g, "'")}"><rect x="${-pad}" y="${-pad}" width="${w}" height="${h}" fill="${PAPER}" rx="6"/>${body}</svg>`;
+}
+
 const [input, output] = process.argv.slice(2);
 if (!input) {
   console.error('usage: node tools/example.js <spec.json> [out.svg]');
@@ -79,7 +118,7 @@ if (!input) {
 const spec = JSON.parse(fs.readFileSync(input, 'utf8'));
 const out = output || path.join('docs', 'examples', path.basename(input).replace(/\.json$/, '.svg'));
 fs.mkdirSync(path.dirname(out), { recursive: true });
-const svg = sheet(spec);
+const svg = spec.map ? mapSheet(spec) : sheet(spec);
 fs.writeFileSync(out, svg);
 
 /* How wide the picture came out is not a detail: a board is usually read at
