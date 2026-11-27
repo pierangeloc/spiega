@@ -165,6 +165,12 @@ Each step's number appears on its line, so the board and your prose share one
 numbering. Walk a step as you explain it, not all at once — the person can also
 walk them with the arrow keys.
 
+Two boxes that talk more than once are one arrow with a pill per hop. Give each
+hop its own `edge` op **with its `step`** — `{"op":"edge","from":"ch","to":"corr",
+"label":"listApprovedUpcoming","step":5}` — and add a `step` op naming `ch>corr`
+each time. Without the `step`, a second edge between the same two boxes
+replaces the first one's label instead. Do not cram the hops into one label.
+
 ### Steps are also how a dense board is read
 
 Order is not the only reason to number something. Six nutrients mapping onto

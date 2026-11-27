@@ -7,12 +7,13 @@
    ============================================================ */
 
 import { PAPER, INK, MUTED, ACCENT, PANEL, handFilter } from './theme.js';
-import { roughRect, stroke, fill, text, hashSeed } from './ink.js';
+import { roughRect, stroke, fill, text, hashSeed, pillSize, tagLines } from './ink.js';
 import { drawNode, drawBoundary, drawBoundaryCard, inkAt, inkSpan } from './glyphs.js';
 import { drawEdge, planEdges, edgeKey } from './edges.js';
+import type { Hop } from './edges.js';
 import { drawCallout } from './callout.js';
 import { planFloating } from './floating.js';
-import { assign, layout, boundaryShapes, pieceNames } from './layout.js';
+import { assign, layout, boundaryShapes, pieceNames, hopRow, HOP_AIR, HOP_END } from './layout.js';
 
 import type { Board, Edge, FlowStep } from '@spiega/core';
 import type { Placed } from './layout.js';
@@ -35,6 +36,53 @@ export function indexFlow(spec: { flow?: FlowStep[] }): { stepOf: Record<string,
     s._i = i;
   });
   return { stepOf, steps };
+}
+
+/* The tags one arrow carries, and which of them the walk is at (#113).
+
+   An arrow with one hop carries one tag, numbered as it always was, and lights
+   with the line. An arrow with several carries a tag per hop, and each is
+   paired with the flow step it is: by number first, the step whose badge the
+   hop already wears, and then in order, the first unpaired hop with the first
+   unpaired step that names this arrow. A hop takes its badge from its step
+   when it was given none of its own, and is lit only while the board is at
+   that step — so walking 3, 5 and 7 lights three different pills on the one
+   line, each saying its own words. */
+function hopsOf(r: { e: Edge, key: string }, steps: FlowStep[], active: number | null,
+  stepFor: (r: { e: Edge, key: string }) => number | null): Hop[] {
+  const { e, key } = r;
+  if (!e.then?.length) return [{ key, label: e.label, step: stepFor(r), lit: true }];
+  const stops = [{ label: e.label, step: e.step }, ...e.then];
+  const walk = steps.filter(s => s.edge === key);
+  const pair: (FlowStep | undefined)[] = stops.map(() => undefined);
+  const taken = new Set<FlowStep>();
+  stops.forEach((s, i) => {
+    const hit = s.step == null ? undefined : walk.find(f => !taken.has(f) && f._n === s.step);
+    if (hit) { pair[i] = hit; taken.add(hit); }
+  });
+  stops.forEach((_, i) => {
+    if (pair[i]) return;
+    const next = walk.find(f => !taken.has(f));
+    if (next) { pair[i] = next; taken.add(next); }
+  });
+  const hops = stops.map((s, i) => ({
+    key: i ? `${key}#${i + 1}` : key,
+    label: s.label,
+    step: s.step !== undefined ? s.step : (pair[i]?._n ?? null),
+    lit: active != null && pair[i]?._i === active,
+  }));
+  /* Each hop wants the stretch of the route its share of the row of pills
+     covers, so a long label is not squeezed against a short one: the gutter
+     was sized for the row (layout.js), and this is the same row laid along
+     the line. */
+  const ws = hops.map(h => pillSize(tagLines(h.label, h.step)).w);
+  const total = hopRow(ws);
+  let run = HOP_END;
+  return hops.map((h, i) => {
+    const along = (run + ws[i] / 2) / total;
+    run += ws[i] + HOP_AIR;
+    return { ...h, along };
+  });
 }
 
 /* What one step lights: its own hop, both ends of it, and anything it names. */
@@ -165,8 +213,9 @@ export function renderSVG(
     .map(b => ({ ...b, shapes: boundaryShapes(b.members || [], boxes) }))
     .filter(b => b.shapes.length)
     .map(b => ({ ...b, names: pieceNames(b.label, b.shapes) }));
+  const hopsFor = (r: { e: Edge, key: string }) => hopsOf(r, steps, active ?? null, stepFor);
   const { tags, tabs, callouts: calls } = planFloating({
-    planned, boxes, callouts: spec.callouts, boundaries, stepFor });
+    planned, boxes, callouts: spec.callouts, boundaries, stepFor, hopsFor });
   const floats = [...calls.map(p => p.box),
     ...[...tags.values()].map(t => ({ x: t.at[0] - t.w / 2, y: t.at[1] - t.h / 2, w: t.w, h: t.h })),
     ...[...tabs.values()].map(t => ({ x: t.at[0] - t.w / 2, y: t.at[1] - t.h / 2, w: t.w, h: t.h }))];
@@ -202,7 +251,8 @@ export function renderSVG(
     const state = !focus ? 'idle'
       : focus.edges.has(r.key) ? 'lit'
       : focus.context.edges.has(r.key) ? 'idle' : 'dim';
-    body += drawEdge(r, { step: stepFor(r), state, place: tags.get(r.key)?.at || null });
+    const hops = r.e.then?.length ? hopsFor(r).map(h => ({ ...h, at: tags.get(h.key)?.at || null })) : null;
+    body += drawEdge(r, { step: stepFor(r), state, place: tags.get(r.key)?.at || null, hops });
   }
 
   for (const n of nodes) {

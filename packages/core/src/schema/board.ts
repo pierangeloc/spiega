@@ -76,13 +76,23 @@ export const Node = Schema.Struct({
   tint: str,
 });
 
-/* Keyed by its two ends, which is why a second hop between the same boxes
-   lands on the first one (#113) — see `overwrittenLabel` in the reducer. */
+/* A hop an arrow carries after its first: its words and its badge. */
+export const Stop = Schema.Struct({
+  label: str,
+  step: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
+});
+
+/* Keyed by its two ends, and still only by them: a conversation between two
+   boxes over time — request, then poll, then write back — is one arrow
+   carrying several stops (#113). `label` and `step` are the first hop, as
+   they always were, so anything that has never heard of stops still reads
+   the arrow it always read; `then` is every hop after it, in order. */
 export const Edge = Schema.Struct({
   from: Schema.String,
   to: Schema.String,
   label: str,
   step: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
+  then: Schema.optionalKey(Schema.Array(Stop)),
   async: Schema.optionalKey(Schema.Boolean),
   style: str,
   bend: str,
@@ -186,6 +196,7 @@ export const Board = Schema.Struct({
 export type Placed = Mutable<typeof Placed.Type>;
 export type Placement = Mutable<typeof Cell.Type>;
 export type Node = Mutable<typeof Node.Type>;
+export type Stop = Mutable<typeof Stop.Type>;
 export type Edge = Mutable<typeof Edge.Type>;
 export type Boundary = Mutable<typeof Boundary.Type>;
 export type Callout = Mutable<typeof Callout.Type>;

@@ -130,8 +130,20 @@ const EdgeOp = Schema.Struct({
   // The older spelling of `async: true`, and the only value read.
   style: Schema.optionalKey(Schema.String.annotate({ description: 'async' })),
   /* A badge number written on this arrow, overriding the flow's own
-     numbering. Undocumented, and the renderer reads it. */
-  step: StepRef,
+     numbering. It is also what tells a second hop between the same two boxes
+     from a correction to the first (#113): a new label with a step the arrow
+     does not carry yet is a further stop along it, and anything else lands on
+     the hop already there. */
+  step: Schema.optionalKey(Schema.NullOr(Num).annotate({
+    description: 'the step this hop is; another edge between the same two boxes with a step of its own ' +
+      'draws as a further stop on the one arrow',
+  })),
+  /* Every hop after the first, said at once. What a compacted log writes, and
+     what an agent may write instead of one `edge` op per hop. Replaces the
+     stops the arrow had. */
+  then: Schema.optionalKey(Schema.Array(Schema.Struct({ label: str, step: StepRef })).annotate({
+    description: 'later hops along this same arrow, in order, after the one label and step describe',
+  })),
   via: Schema.optionalKey(Waypoints),
   bend: Schema.optionalKey(Schema.String.annotate({ description: 'straight, to route it as drawn' })),
 });

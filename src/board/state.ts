@@ -157,6 +157,49 @@ function swapSurface(board: Board, to: Chapter): Chapter {
 const everyChapter = (board: Board): { title: string, live?: boolean }[] =>
   [...board.chapters.map(c => ({ title: c.title })), { title: board.chapter, live: true }];
 
+/* The strip, written out as the person reading the board sees it. The agent
+   cannot see it, which is the whole reason this exists: it is what an op about
+   the explanation as a whole is answered with, and what an amendment that
+   named a chapter nobody has is told instead. */
+export const chapterStrip = (board: Board): string =>
+  everyChapter(board)
+    .map((c, i) => `${i + 1} ${c.title || 'untitled'}${c.live ? ' (being drawn)' : ''}`)
+    .join(', ');
+
+/* What is already on this board, said to whoever is about to add to it as a
+   whole. Appending to a used board is often exactly right — the next chapter
+   of one explanation is the point of chapters — so this reports rather than
+   complains, and names the one thing the agent might not have meant. */
+const standing = (board: Board): string =>
+  `the strip now reads ${chapterStrip(board)}. ` +
+  `Those are read as one explanation under one title; if the earlier chapters belong to a different ` +
+  `explanation, clear the board and draw this one on a clean surface — a chapter never starts a new one.`;
+
+/* What this board is already carrying, for whoever is about to draw on it, or
+   null for a board with nothing on it yet — which is the usual case and wants
+   no sentence at all.
+
+   Said rather than warned, because by the time this is asked the board has
+   done nothing wrong: a board belongs to its session and outlives one
+   explanation, so an agent beginning a second explanation is handed the first
+   one's surface, title and all. The caller adds what to do about it in its own
+   vocabulary; this only says what is there (#197). */
+export const boardHolds = (board: Board): string | null => {
+  const title = board.title ? `"${board.title}"` : '';
+  if (board.chapters.length) {
+    return `this board already carries an explanation${title ? ` titled ${title}` : ''} — ` +
+      `the strip reads ${chapterStrip(board)}.`;
+  }
+  const boxes = board.nodes.length, said = board.transcript.length;
+  if (!boxes && !said) return null;
+  const parts = [
+    boxes ? `${boxes} box${boxes === 1 ? '' : 'es'}` : '',
+    said ? `${said} line${said === 1 ? '' : 's'} of script` : '',
+  ].filter(Boolean);
+  return `this board already has ${parts.join(' and ')} on it` +
+    `${title ? `, under the title ${title}` : ''}.`;
+};
+
 /* Which chapter an amendment is aimed at: the number on the strip, or the
    name on the tab. Returns an index into `everyChapter`, or a sentence saying
    why not — an agent that has the number wrong is told what the numbers are,
@@ -167,7 +210,7 @@ const everyChapter = (board: Board): { title: string, live?: boolean }[] =>
    the list, not with a throw. */
 function chapterWanted(board: Board, want: number | string | undefined): number | string {
   const all = everyChapter(board);
-  const list = all.map((c, i) => `${i + 1} ${c.title || 'untitled'}${c.live ? ' (being drawn)' : ''}`).join(', ');
+  const list = chapterStrip(board);
   if (typeof want === 'number' || /^\d+$/.test(String(want))) {
     const i = Number(want) - 1;
     if (i >= 0 && i < all.length) return i;
@@ -333,27 +376,55 @@ const upsert = <T extends object>(
 const edgeId = (e: Pick<Edge, 'from' | 'to'>): string => `${e.from}>${e.to}`;
 
 /* An edge is keyed by its ends, so a second hop between the same two boxes
-   does not draw — it lands on the first one and takes its label with it (#113).
+   lands on the arrow already there (#113). A conversation over time, request
+   then poll then write back, is one of the most ordinary shapes there is, so
+   that arrow carries the hop as a further stop — its own words and its own
+   badge, lit on its own when the flow walks to it — rather than taking the
+   first hop's label away.
 
-   A conversation over time, request then poll then write back, is one of the
-   most ordinary shapes there is, and it is the one the board flattens. Until
-   an arrow can carry several labelled stops, the least we owe the agent is to
-   say that the hop it just described is not on the board. Nothing else tells
-   it: the op is accepted, `fresh.edges` comes back empty because the edge was
-   already known, and the drawing quietly says something else.
+   What tells a further hop from a correction is its step. A typo fixed, or a
+   style or `via` added to a line already drawn, is the identical op shape and
+   must land on the hop that is there, so only an op that brings a new label
+   *and* a step the arrow does not carry yet becomes a stop. An op whose step
+   the arrow already carries is about that stop, and one with a known label
+   and a new step renumbers it. Everything about the line itself — `async`,
+   `via`, `bend` — still lands on the line, whichever hop the op was about.
+
+   An explicit `then` is the whole list of later hops at once, which is what a
+   compacted log writes, so it is taken as given. */
+const landOnPair = (was: Edge | undefined, e: Edge): Edge => {
+  if (!was || e.then !== undefined || !was.label) return e;
+  const { label, step, ...line } = e;
+  if (!label || typeof step !== 'number') return e;
+  const more = was.then || [];
+  const stops = [{ label: was.label, step: was.step }, ...more];
+  const byStep = stops.findIndex(s => s.step === step);
+  const byLabel = stops.findIndex(s => s.label === label);
+  const at = byStep >= 0 ? byStep : byLabel;
+  if (at === 0) return e;
+  if (at > 0) return { ...line, then: more.map((s, i) => (i === at - 1 ? { ...s, label, step } : s)) };
+  return { ...line, then: [...more, { label, step }] };
+};
+
+/* Said out loud when a hop's words are lost after all: the op named no step,
+   or named one that a hop with other words already carries. Nothing else
+   tells the agent — the op is accepted, `fresh.edges` comes back empty
+   because the edge was already known, and the drawing quietly says something
+   else.
 
    A warning rather than a refusal, and only when a label is actually losing
-   another label. Correcting a typo, or an `edge` op adding `via` or a style to
-   a line already drawn, is the same op shape and is exactly right; a board
-   cannot afford to be pedantic at an author mid-sentence. */
-const overwrittenLabel = (board: Board, e: Edge, warnings: string[]) => {
-  if (!e.label) return;
-  const was = board.edges.find(x => edgeId(x) === edgeId(e));
-  if (!was?.label || was.label === e.label) return;
+   another label; a board cannot afford to be pedantic at an author
+   mid-sentence. */
+const overwrittenLabel = (was: Edge | undefined, e: Edge, warnings: string[]) => {
+  if (!e.label || !was) return;
+  const aimed = e.then === undefined && typeof e.step === 'number'
+    ? [was, ...(was.then || [])].find(s => s.step === e.step)
+    : was;
+  if (!aimed?.label || aimed.label === e.label) return;
   warnings.push(
-    `edge ${edgeId(e)}: "${e.label}" replaced "${was.label}" on the one arrow between those boxes. ` +
-    'A second hop between the same two does not draw as its own line. Say both in one label, ' +
-    'or give the exchange a box of its own to turn through.');
+    `edge ${edgeId(e)}: "${e.label}" replaced "${aimed.label}" on the arrow between those boxes. ` +
+    'If it is a hop of its own, give it the step it is in the flow: a second hop between the same ' +
+    'two boxes draws as a further stop on that arrow when it carries a step the arrow does not.');
 };
 
 /* The array-valued fields a model writes by hand.
@@ -489,7 +560,15 @@ function applyOne(board: Board, op: Op, sweep: Sweep, warnings: string[] = []): 
        Naming an empty surface rather than setting it aside: `chapter` at the
        start of an explanation is how the first chapter gets its name, and
        pushing a blank one there would put an empty tab in front of everything
-       that follows. */
+       that follows.
+
+       A board is resolved per session and outlives one explanation, so a
+       second explanation in the same conversation starts on the first one's
+       surface and this appends to it — by design, and invisibly, because the
+       strip is the only thing that says so and only the person can see it
+       (#197). So the strip comes back as a warning whenever there is already a
+       chapter behind this one: nothing is wrong with appending, and the agent
+       that meant to start again cannot tell that it has not. */
     case 'chapter': {
       const title = String(op.title || '');
       if (!blankSurface(board)) {
@@ -499,6 +578,7 @@ function applyOne(board: Board, op: Op, sweep: Sweep, warnings: string[] = []): 
         sweep.ids.length = 0;
       }
       board.chapter = title;
+      if (board.chapters.length) warnings.push(standing(board));
       break;
     }
 
@@ -544,8 +624,13 @@ function applyOne(board: Board, op: Op, sweep: Sweep, warnings: string[] = []): 
       return { ok: true, fresh: r.fresh, op: { op: 'amend', chapter: where + 1, ops: r.applied } };
     }
 
+    /* The title is the explanation's, not a chapter's, so retitling a board
+       that already holds chapters renames every one of them — which is how
+       #197 was first noticed: the new explanation's title arrived over the old
+       one, with the old one's chapters still underneath it. */
     case 'title':
       board.title = op.text || '';
+      if (board.chapters.length) warnings.push(standing(board));
       break;
 
     /* A line may name the step it explains, so the rail can light the part of
@@ -626,20 +711,34 @@ function applyOne(board: Board, op: Op, sweep: Sweep, warnings: string[] = []): 
     }
 
     case 'edge': {
-      const { op: _op, step, ...fields } = op;
+      const { op: _op, step, then, ...fields } = op;
       if (!fields.from || !fields.to) break;
       if (fields.via !== undefined && !waypoints(fields.via)) {
         return { ok: false, error: 'edge: via must be an array of finite col and row pairs', fresh };
       }
+      if (then !== undefined && !(Array.isArray(then) && then.every(s =>
+        s && typeof s === 'object' && (s.label === undefined || typeof s.label === 'string')))) {
+        return { ok: false, error: 'edge: then must be an array of hops, each with a label and a step', fresh };
+      }
+      const what = `edge ${fields.from}>${fields.to}`;
       /* `step` is the badge this arrow carries, and `null` is how an arrow is
          told not to carry one — so it passes through where a number is
          converted. */
-      const badge = step === null ? null
-        : oneNumber(step, 'step', `edge ${fields.from}>${fields.to}`, warnings);
+      const badgeOf = (v: number | string | null | undefined) =>
+        (v === null ? null : oneNumber(v, 'step', what, warnings));
+      const badge = badgeOf(step);
       const e: Edge = { ...fields, from: fields.from, to: fields.to,
-        ...(badge === undefined ? {} : { step: badge }) };
-      overwrittenLabel(board, e, warnings);
-      if (upsert(board.edges, e, edgeId, indexesFor(board).edges)) fresh.edges.push(edgeId(e));
+        ...(badge === undefined ? {} : { step: badge }),
+        ...(then === undefined ? {} : { then: then.map(s => {
+          const n = badgeOf(s.step);
+          return { ...(s.label === undefined ? {} : { label: s.label }), ...(n === undefined ? {} : { step: n }) };
+        }) }) };
+      const ix = indexesFor(board).edges;
+      const known = ix.get(edgeId(e));
+      const was = known != null && board.edges[known] && edgeId(board.edges[known]) === edgeId(e)
+        ? board.edges[known] : board.edges.find(x => edgeId(x) === edgeId(e));
+      overwrittenLabel(was, e, warnings);
+      if (upsert(board.edges, landOnPair(was, e), edgeId, ix)) fresh.edges.push(edgeId(e));
       break;
     }
 
