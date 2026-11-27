@@ -56,8 +56,13 @@ export interface BoardStoreShape {
   /* What the drawing came out like, for the agent that cannot see it. Null
      where the board cannot be rendered — the ops landed and an explanation
      does not stop because the measurement of it failed. */
-  readonly audit: (surface: Board | Chapter) => Promise<unknown>;
+  readonly audit: (surface: Board | Chapter) => Promise<Audited | null>;
 }
+
+/* An audit is handed back to the caller as it came, all but its `warnings`:
+   those are what the agent has to be told, and they join the reply's own
+   (#209, #216). */
+export type Audited = { readonly warnings?: ReadonlyArray<string> } & Readonly<Record<string, unknown>>;
 
 /* Every persisted board log on disk, newest first. Deliberately only a
    readdir and a stat each — no board is restored by being listed. */

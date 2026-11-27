@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { emptyBoard, boardOps, type Board, type Chapter } from './state.js';
 import { restoreBoard, openLogFile, boardLogFile } from './log.js';
 import { home } from '../home.js';
-import type { BoardEntry, BoardEvents, OpLog, SavingStatus } from '../../packages/server/src/index.js';
+import type { Audited, BoardEntry, BoardEvents, OpLog, SavingStatus } from '../../packages/server/src/index.js';
 
 /* The Effect server: the routes, the op log's writer and the op Schema that
    screens what an agent posts.
@@ -406,16 +406,16 @@ export function createServer({ board = null, name = DEFAULT_BOARD, persist = fal
    A board that cannot be rendered says nothing here. The ops landed, the
    status says so, and an explanation does not stop because the measurement
    of it failed. */
-async function auditBoard(board: Board | Chapter): Promise<unknown> {
+async function auditBoard(board: Board | Chapter): Promise<Audited | null> {
   try {
     const { renderSVG } = await import('../render/render.js');
-    const { audit, report } = await import('../render/audit.js');
+    const { audit, report, measuredWarnings } = await import('../render/audit.js');
     // The renderer takes a whole board; a chapter is handed over as one,
     // carrying the board-level fields it never reads (as in the board view's
     // drawing.ts).
     const whole: Board = 'log' in board ? board : { ...board, chapter: '', chapters: [], log: [], rev: 0 };
     const found = audit(board, renderSVG(whole, { margin: 16, active: board.active }));
-    return { ...found, lines: report(found) };
+    return { ...found, lines: report(found), warnings: measuredWarnings(found) };
   } catch {
     return null;
   }

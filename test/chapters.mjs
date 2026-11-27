@@ -171,7 +171,8 @@ await test('retitling a board that holds chapters says what the title now rides'
 await test('an explanation that is only getting started is told nothing', async () => {
   const quiet = ops => applyOps(emptyBoard(), ops).warnings;
   assert.deepEqual(quiet([{ op: 'title', text: 'Placing an order' }, { op: 'chapter', title: 'The hop' },
-    { op: 'node', id: 'gw' }, { op: 'node', id: 'orders' }, { op: 'edge', from: 'gw', to: 'orders' }]), []);
+    { op: 'node', id: 'gw', label: 'Gateway' }, { op: 'node', id: 'orders', label: 'Orders' },
+    { op: 'edge', from: 'gw', to: 'orders' }]), []);
   const b = drawn(taught);
   assert.deepEqual(applyOps(b, [{ op: 'clear' }, { op: 'title', text: 'A new one' },
     { op: 'chapter', title: 'Its first part' }]).warnings, [],

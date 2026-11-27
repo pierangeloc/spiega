@@ -192,7 +192,8 @@ test('a second hop between the same two boxes is said out loud, not silently swa
 
 test('an edge op that corrects or styles a line already drawn says nothing', () => {
   const b = emptyBoard();
-  applyOps(b, [{ op: 'edge', from: 'a', to: 'b', label: 'gRPC' }]);
+  applyOps(b, [{ op: 'node', id: 'a', label: 'A' }, { op: 'node', id: 'b', label: 'B' },
+    { op: 'edge', from: 'a', to: 'b', label: 'gRPC' }]);
   const { warnings } = applyOps(b, [
     { op: 'edge', from: 'a', to: 'b', label: 'gRPC', async: true },
     { op: 'edge', from: 'a', to: 'b', via: [{ col: 1, row: 2 }] },
@@ -349,7 +350,7 @@ test('two hops on one arrow still sit along the line, untied', () => {
 
 test('every kind the renderer draws is accepted in silence', () => {
   const b = emptyBoard();
-  const { warnings } = applyOps(b, KINDS.map((kind, i) => ({ op: 'node', id: `n${i}`, kind })));
+  const { warnings } = applyOps(b, KINDS.map((kind, i) => ({ op: 'node', id: `n${i}`, kind, label: kind })));
   assert.deepEqual(warnings, []);
 });
 

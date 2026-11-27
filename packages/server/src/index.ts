@@ -32,6 +32,7 @@ export {
 export {
   BoardStore,
   savedBoardsIn,
+  type Audited,
   type BoardEntry,
   type BoardSnapshot,
   type BoardStoreShape,

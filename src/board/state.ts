@@ -485,6 +485,78 @@ const counted = <K extends string>(
 
 const NODE_NUMBERS = ['col', 'row', 'w', 'h', 'slots', 'depth', 'replicas'] as const;
 
+/* A box with nothing in it (#209). `{"op":"node","id":"gw"}` draws exactly
+   that — every glyph letters its label and nothing else, the id never — and
+   the reply used to say `1 box` and stop. It may be a deliberate spacer, so it
+   is drawn, but it is said. Read off the node as it now stands rather than off
+   the op, so moving a labelled box with `{"op":"node","id":"gw","col":3}` is
+   not taken for drawing an empty one. A note letters its own lines and is the
+   one kind this does not apply to. */
+const unlabelled = (board: Board, id: string, warnings: string[]) => {
+  const n = nodeAt(board, id);
+  if (!n || n.kind === 'note' || String(n.label ?? '').trim()) return;
+  const what = `node "${id}": no label, so `;
+  if (!n.sub) warnings.push(what + 'it is drawn as an empty box.');
+  else if (SUB_ALONE.has(n.kind ?? '')) warnings.push(what + `its sub "${n.sub}" is the only thing lettered on it.`);
+  else warnings.push(what + `it is drawn as an empty box; its sub "${n.sub}" is only lettered under a label, ` +
+    'so that is not drawn either.');
+};
+
+/* The kinds whose glyph letters a sub with no label over it. Every other glyph
+   draws its words as one block that starts from the label. Written down here
+   rather than found by drawing the node, which would put a render on the path
+   of every node op; test/audit.mjs draws every kind to hold this to the
+   glyphs. */
+export const SUB_ALONE = new Set(['queue', 'formula', 'blob']);
+
+/* An edge whose end names no box on the surface it was drawn on (#209). The
+   edge is kept — the box may be on its way — but until then the arrow stubs
+   into empty paper, and nothing else says so: the reducer only refuses an edge
+   with no `from` or `to` at all.
+
+   Ids are per chapter, so the likeliest cause is an edge aimed at a box from
+   an earlier chapter, and that chapter is named when one has it. The fix there
+   is an amendment, not drawing the box again here, which would make a second
+   copy of it on a chapter it does not belong to.
+
+   Checked once the batch is done, so an edge drawn before its boxes in the same
+   batch is not taken for one that ends at nothing. */
+const strayEnds = (board: Board, keys: Set<string>, warnings: string[]) => {
+  for (const key of keys) {
+    const i = indexesFor(board).edges.get(key);
+    const e = i === undefined ? undefined : board.edges[i];
+    // gone again by the end of the batch, swept with a box it ended at
+    if (!e || edgeId(e) !== key) continue;
+    for (const end of new Set([e.from, e.to])) {
+      if (!nodeAt(board, end)) warnings.push(endsAtNothing(board, e, end));
+    }
+  }
+};
+
+/* The node with this id, read the way upsert reads it: through the index,
+   checked against it, and looked for when the index has nothing to say. */
+const nodeAt = (board: Board, id: string): Node | undefined => {
+  const i = indexesFor(board).nodes.get(id);
+  const n = i === undefined ? undefined : board.nodes[i];
+  return n && n.id === id ? n : board.nodes.find(x => x.id === id);
+};
+
+const endsAtNothing = (board: Board, e: Edge, end: string): string => {
+  const where = board.chapters.length ? 'this chapter' : 'the board';
+  const said = `edge ${edgeId(e)}: no box "${end}" on ${where}, so the arrow ` +
+    `${end === e.to ? 'ends' : 'starts'} at nothing.`;
+  if (!board.chapters.length) return said;
+  // the latest first: the chapter just before this one is where it most likely is
+  for (let i = board.chapters.length - 1; i >= 0; i--) {
+    const c = board.chapters[i];
+    if (c.nodes === board.nodes || !c.nodes.some(n => n.id === end)) continue;
+    return said + ` "${end}" is in chapter ${i + 1}${c.title ? ` (${c.title})` : ''}, and ids are per chapter: ` +
+      `an edge to it belongs there, which is what board_amend is for — drawing "${end}" again here ` +
+      `would put a second copy of it on this chapter.`;
+  }
+  return said + ' Ids are per chapter, so a box drawn in another chapter is not on this one.';
+};
+
 /* The group a step says it belongs to, tidied in place.
 
    Unlike `lights`, a group that arrives as something other than a string is
@@ -694,6 +766,7 @@ function applyOne(board: Board, op: Op, sweep: Sweep, warnings: string[] = []): 
       const n: Node = { ...fields, ...numbers, id,
         kind: op.op === 'note' ? 'note' : (fields.kind || 'service') };
       if (upsert(board.nodes, n, x => x.id, indexesFor(board).nodes)) fresh.nodes.push(n.id);
+      if (op.op === 'node') unlabelled(board, id, warnings);
       /* Keep frozen slots current without pinning feedback nodes, or mutating
          the coordinates held by an earlier settle op in the log.
 
@@ -895,6 +968,8 @@ export function applyOps(board: Board, ops: unknown): ApplyOpsResult {
   const applied: Op[] = [];
   const list: unknown[] = Array.isArray(ops) ? ops : [ops];
   const sweep = newSweep();
+  // the edges this batch drew, to be checked for an end at nothing once it is done
+  const edges = new Set<string>();
   for (const op of list) {
     /* Checked before the sweep below, which reads `op.op`: a value that is not
        an op cannot see the lists, so it must not end the run early and flush a
@@ -906,9 +981,11 @@ export function applyOps(board: Board, ops: unknown): ApplyOpsResult {
     const r = applyOne(board, op, sweep, warnings);
     if (!r.ok) errors.push(r.error);
     else applied.push(r.op);
+    if (r.ok && r.op.op === 'edge' && r.op.from && r.op.to) edges.add(edgeId({ from: r.op.from, to: r.op.to }));
     for (const k of ['nodes', 'edges', 'boundaries'] as const) all[k].push(...r.fresh[k]);
   }
   sweepRemoved(board, sweep);
+  strayEnds(board, edges, warnings);
   return { fresh: all, errors, warnings, applied };
 }
 

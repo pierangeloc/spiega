@@ -281,10 +281,17 @@ export const WriteRoutes = HttpRouter.use((router) =>
         /* After the broadcast, so the pane has already moved and the
            millisecond is spent on the caller's own reply rather than on the
            drawing appearing. */
-        const audit = drawn.wantsAudit
-          ? { audit: yield* Effect.promise(() => store.audit(drawn.surface)) }
-          : {};
-        return HttpServerResponse.jsonUnsafe({ ...drawn.reply, ...audit }, { status: drawn.status });
+        if (!drawn.wantsAudit) return HttpServerResponse.jsonUnsafe(drawn.reply, { status: drawn.status });
+        /* What the audit measured that the reader will not be able to make
+           out rides with the warnings, since that is the list an agent is
+           told it was drawn but not drawn right (#209, #216). */
+        const found = yield* Effect.promise(() => store.audit(drawn.surface));
+        const { warnings: measured = [], ...audit } = found ?? {};
+        return HttpServerResponse.jsonUnsafe({
+          ...drawn.reply,
+          warnings: [...drawn.reply.warnings, ...measured],
+          audit: found ? audit : null,
+        }, { status: drawn.status });
       })),
     );
 

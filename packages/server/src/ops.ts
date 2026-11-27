@@ -49,7 +49,7 @@ const surfaceOf = (board: Board, n: unknown): Chapter | null =>
 
 export interface Drawn {
   readonly status: 200 | 207;
-  readonly reply: Readonly<Record<string, unknown>>;
+  readonly reply: Readonly<Record<string, unknown>> & { readonly warnings: ReadonlyArray<string> };
   /** What an audit, if one was asked for, is a measurement of. */
   readonly surface: Board | Chapter;
   readonly wantsAudit: boolean;
