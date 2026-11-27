@@ -26,6 +26,31 @@ export type LinkInk = { d: string, mid: number[], angle: number };
    rows of a wrapped strip are a card apart, so nothing near this is ambiguous. */
 export const sameRow = (a: Rect, b: Rect): boolean => Math.abs(a.y - b.y) < 8;
 
+/** Place measured pills close to their links without covering cards or each other. */
+export function placeMapLabels(labels: { mid: number[], w: number, h: number }[], cards: Rect[]): Rect[] {
+  const placed: Rect[] = [];
+  for (const label of labels) {
+    const home = { x: label.mid[0] - label.w / 2, y: label.mid[1] - label.h / 2, w: label.w, h: label.h };
+    const obstacles = [...cards, ...placed];
+    const clear = ({ x, y }: { x: number, y: number }): boolean => !obstacles.some(r =>
+      x < r.x + r.w + 2 && x + label.w + 2 > r.x &&
+      y < r.y + r.h + 2 && y + label.h + 2 > r.y);
+    if (home.x >= 0 && home.y >= 0 && clear(home)) { placed.push(home); continue; }
+    const xs = [Math.max(0, home.x)], ys = [Math.max(0, home.y)];
+    for (const r of obstacles) {
+      xs.push(r.x - label.w - 2, r.x + r.w + 2);
+      ys.push(r.y - label.h - 2, r.y + r.h + 2);
+    }
+    const candidates = xs.flatMap(x => ys.filter(y => x >= 0 && y >= 0).map(y => ({ x, y })));
+    candidates.sort((a, b) => (a.x - home.x) ** 2 + (a.y - home.y) ** 2 -
+      ((b.x - home.x) ** 2 + (b.y - home.y) ** 2));
+    const best = candidates.find(clear);
+    // The candidates include a point beyond every obstacle, so one always fits.
+    if (best) placed.push({ ...best, w: label.w, h: label.h });
+  }
+  return placed;
+}
+
 export function linkInk(a: Rect, b: Rect, link: MapLink): LinkInk {
   const seed = hashSeed(`${link.from}>${link.to}`);
   const shared = link.shared.length > 0;
