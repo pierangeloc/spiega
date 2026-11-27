@@ -17,6 +17,7 @@ import { KINDS } from '../src/render/glyphs.js';
 import { scriptSteps, linesFor, lineStates, clickStep, clickNode, tagReport } from '../src/board/script.js';
 import { frame, unionBox, litKeys } from '../src/board/camera.js';
 import { boardMap, linkLabel } from '../src/board/map.js';
+import { linkInk } from '../src/board/map-links.js';
 import { registeredAs } from '../src/doctor.js';
 import { lettering, wrapText, NOTE_LINES } from '../src/render/ink.js';
 import { specToOps } from '../src/spec.js';
@@ -541,6 +542,34 @@ test('the map links the chapters that are about the same box', () => {
   // one surface is a board, not an explanation with parts
   assert.equal(boardMap(emptyBoard()).cards.length, 1);
   assert.deepEqual(boardMap(null), { cards: [], links: [] });
+});
+
+/* #196. The head of a map link was written down as straight across or straight
+   down, and a strip that wraps sends the hop from the end of one row to the
+   start of the next, a long diagonal. The head has to face along the line it
+   ends, at every angle the strip can produce. */
+test('a map link’s arrowhead faces along the line it ends', () => {
+  const card = (x, y, h = 100) => ({ x, y, w: 200, h });
+  const then = { from: 1, to: 2, shared: [] };
+  const along = (a, b) => {
+    const row = Math.abs(a.y - b.y) < 8;
+    const p = row ? [a.x + a.w, a.y + a.h / 2] : [a.x + a.w / 2, a.y + a.h];
+    const q = row ? [b.x, b.y + b.h / 2] : [b.x + b.w / 2, b.y];
+    return Math.atan2(q[1] - p[1], q[0] - p[0]);
+  };
+  const cases = {
+    'wrapped: end of one row to the start of the next': [card(480, 0), card(0, 200)],
+    'near-vertical: the next row is almost under it': [card(20, 0), card(0, 200)],
+    'near-horizontal: same row, unequal heights': [card(0, 0, 100), card(300, 0, 140)],
+    'same row, equal heights': [card(0, 0), card(300, 0)],
+    'stacked, centred': [card(0, 0), card(0, 200)],
+  };
+  for (const [name, [a, b]] of Object.entries(cases))
+    assert.ok(Math.abs(linkInk(a, b, then).angle - along(a, b)) < 1e-9, `${name}: the head faces along its line`);
+  assert.equal(linkInk(card(0, 0), card(300, 0), then).angle, 0, 'straight across keeps its angle');
+  assert.equal(linkInk(card(0, 0), card(0, 200), then).angle, Math.PI / 2, 'straight down keeps its angle');
+  assert.ok(Math.abs(linkInk(card(480, 0), card(0, 200), then).angle - Math.PI / 2) > 0.5,
+    'the long diagonal is not drawn as a plain downward chevron');
 });
 
 test('the browser-side modules parse', () => {

@@ -112,5 +112,10 @@
     "issue": 110,
     "broke": "Every numbered hop on the reported board read twice: `3 3 CREATE / 5 listApproved / 7 LINK`, `6 6 createAndStoreInvoices`. The board letters the step badge onto the first line of the tag, and an agent numbering a flow by hand had written the same number into the label it passed. Nothing told the reader which of the two threes was the board’s own.",
     "fixed": "A leading number in the label is dropped when it is the number the badge is already drawing — bare, or written `2.`, `3)` or `step 4:`. A different number stays, because it is not about which step this is: the back edge here is step 5 and still reads `5 2 RETRIES, 4-EYES APPROVAL`."
+  },
+  "issue-196-map-arrowheads": {
+    "issue": 196,
+    "broke": "The map's `then` hop into chapter 4 comes down a long diagonal from the end of the first row of a wrapped strip, and its arrowhead is a plain downward chevron: the wings do not meet the line. The same fixed angle sat on the across hop, which is wrong whenever the two cards are not the same height (1→2 and 4→5 here). This board is the map, not a drawing: the spec's `map` key is a strip of six chapters wrapped at 720px, inked by the same `linkInk` the page uses.",
+    "fixed": "Both `next` branches take the head's angle from the line they end, so the diagonal 3→4 hop and the slanted across hops land their heads on their own lines. Straight-across and straight-down hops keep the angles they had, and the bowed links still take theirs off the curve's last control point."
   }
 }
