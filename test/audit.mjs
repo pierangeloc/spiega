@@ -150,7 +150,13 @@ await test('an arrow that runs 2 units over a box it does not touch is named, wi
   const spec = board('test/boards/issue-113-three-hops-one-pair.json');
   const found = auditOf(spec);
   assert.deepEqual(found.grazed, [{ edge: 'ch>db', box: 'corr', gap: 2, side: 'above' }]);
+  /* The board is a long string of three hops on one arrow (#113), and the
+     pill behind `linkCorrectionsToInvoiceRun` was widened to fit its own
+     lettering (#215). The board as a whole now crosses the 1440×900 screen,
+     which the audit also names. */
   assert.deepEqual(measuredWarnings(found), [
+    'at 1440×900 this board fits at 86%, so its labels land at 11.6px, under 12; ' +
+    'a chapter break is where the rest of it goes',
     '1 arrow passes close enough to a box that is not an end of it to read as touching it, most of all when lit: ' +
     'ch>db, 2 units above corr',
   ]);
@@ -225,13 +231,19 @@ await test('a kind of lettering is measured at the size most of it is set in', a
 });
 
 await test('a wide board says how small its lettering lands, and a board that fits says nothing', async () => {
+  /* #215 widened pills so their lettering sits inside its own border. The board
+     grew by a pill's worth of space at every edge that has one; this board is
+     wide and full of pills, so it grew by enough to knock a percentage point
+     off its fit on a 1440×900 screen. */
   assert.deepEqual(measuredWarnings(auditOf(board('test/boards/issue-119-source-columns.json'))), [
-    'at 1440×900 this board fits at 53%, so its labels land at 7.1px, under 12, and its subs at 5.3px, under 10; ' +
+    'at 1440×900 this board fits at 52%, so its labels land at 7.0px, under 12, and its subs at 5.2px, under 10; ' +
     'a chapter break is where the rest of it goes',
   ]);
   // the showcase board whose labels nearly clear: what is wrong with it is its subs
+  /* #215 widened the pills on this board too; the labels' px on a 1440×900
+     screen shrank by the same factor the board grew. */
   assert.deepEqual(auditOf(board('examples/order-flow.json')).small.below.map(b => `${b.of} ${b.px.toFixed(1)}`),
-    ['labels 11.5', 'subs 8.5']);
+    ['labels 11.2', 'subs 8.3']);
   assert.equal(auditOf(board('examples/kalman.json')).small, null);
 });
 
@@ -381,7 +393,11 @@ await test('a graze and a board too wide to read arrive as warnings on the reply
   const s = await listen('measured');
   try {
     const graze = await post(s.U, { ops: specToOps(board('test/boards/issue-113-three-hops-one-pair.json')), audit: true });
+    /* #215 widened the pills on the issue-113 board, which put the board's
+       1440×900 fit across the 12px label floor. Both warnings are said. */
     assert.deepEqual(graze.warnings, [
+      'at 1440×900 this board fits at 86%, so its labels land at 11.6px, under 12; ' +
+      'a chapter break is where the rest of it goes',
       '1 arrow passes close enough to a box that is not an end of it to read as touching it, most of all when lit: ' +
       'ch>db, 2 units above corr',
     ]);
@@ -391,8 +407,8 @@ await test('a graze and a board too wide to read arrive as warnings on the reply
 
     const wide = await post(s.U, { ops: [{ op: 'clear' }, ...specToOps(board('test/boards/issue-119-source-columns.json'))],
       audit: true });
-    assert.deepEqual(wide.warnings, ['at 1440×900 this board fits at 53%, so its labels land at 7.1px, under 12, ' +
-      'and its subs at 5.3px, under 10; a chapter break is where the rest of it goes']);
+    assert.deepEqual(wide.warnings, ['at 1440×900 this board fits at 52%, so its labels land at 7.0px, under 12, ' +
+      'and its subs at 5.2px, under 10; a chapter break is where the rest of it goes']);
     assert.equal(wide.audit.measured, undefined, 'what is kept for the next audit is not handed back');
 
     // not asked for, not rendered, not said
@@ -424,7 +440,10 @@ await test('a board is told it is too wide, or that an arrow grazes, once, when 
 
     // and a graze is the same: said for the arrow that came to graze, then not
     const graze = specToOps(board('test/boards/issue-113-three-hops-one-pair.json'));
-    assert.equal((await post(s.U, { ops: [{ op: 'clear' }, ...graze], audit: true })).warnings.length, 1);
+    /* #215 widened the board's pills enough that it now crosses the 12px label
+       floor on a 1440×900 screen alongside the graze that was the point of the
+       test. Two warnings, both said once. */
+    assert.equal((await post(s.U, { ops: [{ op: 'clear' }, ...graze], audit: true })).warnings.length, 2);
     assert.deepEqual((await post(s.U, { ops: [{ op: 'say', text: 'still there' }], audit: true })).warnings, []);
   } finally { await s.close(); }
 });
