@@ -213,6 +213,7 @@ export function planEdges(edges: Edge[], boxes: Record<string, Box>, lanes: Reco
 
   for (const r of rec) r.pts = route(r);
   clearKnees(rec, boxes);
+  clearDetours(rec, boxes);
   return rec;
 }
 
@@ -247,15 +248,71 @@ function clearKnees(rec: Route[], boxes: Record<string, Box>): void {
       const pts: Pt[] = [a, [x, a[1]], [x, b[1]], b];
       const ds = distances(pts), cost = deficit(ds), move = Math.abs(x - knee);
       if (cost > best || (cost === best && move >= shift)) continue;
-      if (ds.some((d, i) => (d === 0 && old[i] > 0) || (d < CLEARANCE && old[i] >= CLEARANCE))) continue;
-      const candidate = { ...r, pts };
-      if (rec.some(other => other !== r &&
-        (crossings([candidate, other]) > crossings([r, other]) ||
-         (overlapping(pts, other.pts) && !overlapping(r.pts, other.pts))))) continue;
+      if (!safeRoute(r, pts, ds, old, rec)) continue;
       best = cost; shift = move; chosen = pts;
     }
     r.pts = chosen;
   }
+}
+
+/* Sometimes neither single knee works: one horizontal run grazes a box and
+   moving the knee across that box puts the other run through its neighbour.
+   A short intermediate run can pass between them. Only try it for a remaining
+   graze on an automatic, ordinary horizontal route; it is not permission to
+   redraw an authored straight line or a reserved waypoint. The two turns must
+   bracket the grazed box, stay between the endpoints, and remain at least 12
+   units away from them. The intermediate row stays within the existing boxes'
+   vertical extent and adds at most 96 units of travel, so a small graze cannot
+   send a line on a tour of the board. Safety takes precedence over clearance:
+   the audit reports whatever cannot be moved without introducing another box
+   graze, collision, crossing or overlapping line. */
+const DETOUR_TRAVEL = 96;
+const DETOUR_REACH = 80;
+const DETOUR_CHOICES = 4;
+function clearDetours(rec: Route[], boxes: Record<string, Box>): void {
+  const top = Math.min(...Object.values(boxes).map(b => b.y));
+  const bottom = Math.max(...Object.values(boxes).map(bottomOf));
+  for (const r of rec) {
+    if (r.back || r.via?.length || r.e.bend === 'straight' || r.pts.length !== 4 ||
+        (r.sa !== 'left' && r.sa !== 'right')) continue;
+    const grazes = grazingArrows({ boxes, planned: [r] });
+    if (!grazes.length) continue;
+    const obstacles = Object.entries(boxes).filter(([id]) => id !== r.e.from && id !== r.e.to).map(([, b]) => b);
+    const old = obstacles.map(b => routeDistance(r.pts, b));
+    const deficit = (ds: number[]) => ds.reduce((sum, d) => sum + Math.max(0, CLEARANCE - d), 0);
+    const a = r.pts[0], b = r.pts[3], lo = Math.min(a[0], b[0]), hi = Math.max(a[0], b[0]);
+    const xs = [...new Set(obstacles.flatMap(o => [o.x - KNEE_CLEARANCE, o.x + o.w + KNEE_CLEARANCE]))];
+    const oldCost = deficit(old);
+    let best = oldCost, travel = 0, chosen = r.pts;
+    for (const graze of grazes) {
+      const target = boxes[graze.box];
+      const left = xs.filter(x => x >= lo + KNEE_CLEARANCE && x <= target.x - KNEE_CLEARANCE &&
+        x >= target.x - KNEE_CLEARANCE - DETOUR_REACH).sort((x, y) => y - x).slice(0, DETOUR_CHOICES);
+      const right = xs.filter(x => x <= hi - KNEE_CLEARANCE && x >= target.x + target.w + KNEE_CLEARANCE &&
+        x <= target.x + target.w + KNEE_CLEARANCE + DETOUR_REACH).sort((x, y) => x - y).slice(0, DETOUR_CHOICES);
+      for (const l of left) for (const h of right) for (const y of [target.y - KNEE_CLEARANCE, bottomOf(target) + KNEE_CLEARANCE]) {
+        if (y < top || y > bottom) continue;
+        const extra = Math.abs(a[1] - y) + Math.abs(b[1] - y) - Math.abs(a[1] - b[1]);
+        if (extra > DETOUR_TRAVEL) continue;
+        const x1 = a[0] < b[0] ? l : h, x2 = a[0] < b[0] ? h : l;
+        const pts: Pt[] = [a, [x1, a[1]], [x1, y], [x2, y], [x2, b[1]], b];
+        const ds = obstacles.map(o => routeDistance(pts, o)), cost = deficit(ds);
+        if (cost >= oldCost - 1e-9 || cost > best || (cost === best && extra >= travel)) continue;
+        if (!safeRoute(r, pts, ds, old, rec)) continue;
+        best = cost; travel = extra; chosen = pts;
+      }
+    }
+    r.pts = chosen;
+  }
+}
+
+/* Both searches keep the same safety contract against boxes and other lines. */
+function safeRoute(r: Route, pts: Pt[], ds: number[], old: number[], rec: Route[]): boolean {
+  if (ds.some((d, i) => (d === 0 && old[i] > 0) || (d < CLEARANCE && old[i] >= CLEARANCE))) return false;
+  const candidate = { ...r, pts };
+  return !rec.some(other => other !== r &&
+    (crossings([candidate, other]) > crossings([r, other]) ||
+     (overlapping(pts, other.pts) && !overlapping(r.pts, other.pts))));
 }
 
 /* All candidate segments are axis-aligned. Distance to the whole box, not a

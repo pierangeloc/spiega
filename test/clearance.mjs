@@ -38,11 +38,11 @@ const rimRoute = planEdges([{ from: 'a', to: 'b' }], onRim);
 assert.deepEqual(grazingArrows({ boxes: onRim, planned: rimRoute }), []);
 assert.deepEqual(buriedArrows({ boxes: onRim, planned: rimRoute }), []);
 
-// If turning past the graze would bury the line in another box, keep the
-// imperfect old route and let the audit say so; do not trade one bug for two.
+// A single knee past the graze would bury the line in another box. The
+// intermediate row can clear both, but must not trade one bug for two.
 const blocked = { ...boxes, blocker: { x: 300, y: 210, w: 50, h: 40, col: 1 } };
 const stuck = planEdges([{ from: 'a', to: 'b' }], blocked);
-assert.deepEqual(grazingArrows({ boxes: blocked, planned: stuck }).map(g => g.box), ['middle']);
+assert.deepEqual(grazingArrows({ boxes: blocked, planned: stuck }), []);
 assert.deepEqual(buriedArrows({ boxes: blocked, planned: stuck }), []);
 
 // The only clear knee would cross this short vertical line between c and d.
@@ -65,4 +65,33 @@ assert.equal(straight[0].pts.length, 2);
 const clear = { ...boxes, middle: { ...boxes.middle, y: 60 } };
 const unchanged = planEdges([{ from: 'a', to: 'b' }], clear);
 assert.equal(unchanged[0].pts[1][0], 108 + (492 - 108) * 0.42);
+
+// Both ways to turn once are wrong: above the lower box grazes the upper
+// one, while turning before the column sends the final run through the lower
+// box. A short intermediate run between them clears both.
+const channel = {
+  from: { x: 60, y: 105.72, w: 149, h: 60, col: 0 },
+  upper: { x: 400, y: 64, w: 120, h: 63, col: 1 },
+  lower: { x: 400, y: 189, w: 120, h: 60, col: 1 },
+  to: { x: 1033, y: 213.88, w: 130, h: 60, col: 2 },
+};
+const throughChannel = planEdges([{ from: 'from', to: 'to' }], channel);
+assert.deepEqual(grazingArrows({ boxes: channel, planned: throughChannel }), [], 'a two-knee detour clears the upper box');
+assert.deepEqual(buriedArrows({ boxes: channel, planned: throughChannel }), [], 'the detour stays above the lower box');
+assert.ok(throughChannel[0].pts.every(([x]) => x >= throughChannel[0].pts[0][0] && x <= throughChannel[0].pts.at(-1)[0]));
+assert.ok(throughChannel[0].pts.every(([, y]) => y >= 64 && y <= 273.88), 'the detour stays inside the board height');
+
+// Mirror the same channel: the choice must not assume left-to-right routing.
+const mirror = Object.fromEntries(Object.entries(channel).map(([id, box]) => [id,
+  { ...box, x: 1163 - box.x - box.w, col: 2 - box.col }]));
+const mirrored = planEdges([{ from: 'from', to: 'to' }], mirror);
+assert.deepEqual(grazingArrows({ boxes: mirror, planned: mirrored }), []);
+assert.deepEqual(buriedArrows({ boxes: mirror, planned: mirrored }), []);
+
+// A reserved settle row is part of the layout, not an automatic knee to
+// replace even if it happens to run close to the upper box.
+const via = { x: 400, y: 132, w: 120, h: 0, col: 1 };
+const reserved = planEdges([{ from: 'from', to: 'to' }], channel, { 'from>to': [via] });
+assert.ok(reserved[0].pts.some(([, y]) => y === via.y));
+assert.equal(grazingArrows({ boxes: channel, planned: reserved }).some(g => g.box === 'upper'), true);
 console.log('  ok  unrelated boxes have clearance above and below without widening or collisions');
