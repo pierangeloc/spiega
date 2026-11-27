@@ -169,8 +169,9 @@ test('a kind with no glyph is drawn, and said out loud', () => {
    the second and third landed on the first and took its label away. The agent
    was told nothing — op accepted, no fresh edge, a drawing saying the last
    thing it was told. It gave up and crammed all three into one label, which is
-   where #110's doubled step pill came from. The picture is still one arrow;
-   this is only the board saying so. */
+   where #110's doubled step pill came from. These hops carry no step, which is
+   what would make each a stop of its own (below), so they still land on the
+   first — and the board says so. */
 test('a second hop between the same two boxes is said out loud, not silently swallowed', () => {
   const b = emptyBoard();
   const { errors, warnings } = applyOps(b, [
@@ -181,7 +182,7 @@ test('a second hop between the same two boxes is said out loud, not silently swa
     { op: 'edge', from: 'ch', to: 'corr', label: 'linkCorrectionsToInvoiceRun' },
   ]);
   assert.deepEqual(errors, []);
-  assert.equal(b.edges.length, 1, 'still the one arrow — this reports the flattening, it does not fix it');
+  assert.equal(b.edges.length, 1, 'one arrow, and with no steps nothing tells these hops from corrections');
   assert.equal(warnings.length, 2, 'one per hop that was lost');
   assert.match(warnings[0], /ch>corr/);
   assert.match(warnings[0], /createCorrection/, 'names the label that was taken away');
