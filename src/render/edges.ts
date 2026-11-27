@@ -9,7 +9,7 @@
    ============================================================ */
 
 import { INK, MUTED, ACCENT, PANEL, PAPER } from './theme.js';
-import { roughLine, roughPoly, roughRect, roughEllipse, stroke, fill, text, arrowHead, hashSeed, lettering, tagLines, pillSize } from './ink.js';
+import { roughLine, roughPoly, roughRect, roughEllipse, stroke, fill, text, arrowHead, hashSeed, lettering, tagLines, pillSize, PILL_SPACING } from './ink.js';
 import type { Pt } from './ink.js';
 import type { Edge } from '@spiega/core';
 import { backEdges, KNEE, EDGE_GAP } from './layout.js';
@@ -356,15 +356,15 @@ function tagSpot(pts: Pt[]): { at: Pt, vertical: boolean, len: number } {
    because the gutter it has to sit in is only so wide. */
 export function pill(cx: number, cy: number, label: string | string[], {
   size = 10.5, bg = PANEL, fg = INK, border = INK, seed = 1, padX = 9, h = 19,
-  weight = 700, spacing = 0.09,
-}: { size?: number, bg?: string, fg?: string, border?: string, seed?: number, padX?: number, h?: number, weight?: number, spacing?: number } = {}): string {
+  weight = 700,
+}: { size?: number, bg?: string, fg?: string, border?: string, seed?: number, padX?: number, h?: number, weight?: number } = {}): string {
   const lines = (Array.isArray(label) ? label : [lettering(label)]);
   const box = pillSize(lines, { size, padX, h });
   const lh = size * 1.2;
   const d = roughRect(cx - box.w / 2, cy - box.h / 2, box.w, box.h, h / 2, { seed, amp: 0.6, step: 16 });
   const first = cy - (lines.length - 1) * lh / 2 + size * 0.36;
   return fill(d, bg) + stroke(d, { w: 1.2, color: border }) +
-    lines.map((s, i) => text(cx, first + i * lh, s, { size, color: fg, weight, spacing })).join('');
+    lines.map((s, i) => text(cx, first + i * lh, s, { size, color: fg, weight, spacing: PILL_SPACING })).join('');
 }
 
 /* The step number and the label travel together as one tag, so they can never

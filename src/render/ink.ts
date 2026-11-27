@@ -307,17 +307,17 @@ export function tagLines(label?: string, step: number | null = null): string[] {
 
 /* How wide a pill is, and how tall, for these lines.
 
-   A pill is sized to back the words lettered on it, so the width has to agree
-   with how the lettering is measured: monospace advance (0.6em in the board's
-   faces) plus letter-spacing per character. `tagLines` flows into the same
-   `text()` that draws the pill's words, so the two numbers are computed by the
-   same arithmetic and cannot drift — audit.ts uses the same advance. A long
-   unbroken identifier that ran past its own border before this change used a
-   coefficient that ignored letter-spacing (#215); this is its correction. */
+   The pill backs the words lettered on it, so its per-character coefficient
+   has to agree with what `text()` writes — monospace advance plus
+   letter-spacing, the same arithmetic `audit.ts` measures. A long unbroken
+   identifier used to spill past its own border, because this ignored
+   letter-spacing (#215). */
+
 const PILL_ADVANCE = 0.6;
-export function pillSize(lines: string[], { size = TAG_SIZE, padX = TAG_PAD_X, h = TAG_H, spacing = 0.09 }: { size?: number, padX?: number, h?: number, spacing?: number } = {}): { w: number, h: number } {
+export const PILL_SPACING = 0.09;
+export function pillSize(lines: string[], { size = TAG_SIZE, padX = TAG_PAD_X, h = TAG_H }: { size?: number, padX?: number, h?: number } = {}): { w: number, h: number } {
   const longest = Math.max(0, ...lines.map(l => l.length));
-  return { w: longest * size * (PILL_ADVANCE + spacing) + padX * 2, h: h + Math.max(0, lines.length - 1) * size * 1.2 };
+  return { w: longest * size * (PILL_ADVANCE + PILL_SPACING) + padX * 2, h: h + Math.max(0, lines.length - 1) * size * 1.2 };
 }
 
 /* A boundary's name rides a little card on the enclosure's wall. It is

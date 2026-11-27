@@ -19,7 +19,7 @@ import { frame, unionBox, litKeys } from '../src/board/camera.js';
 import { boardMap, linkLabel } from '../src/board/map.js';
 import { linkInk } from '../src/board/map-links.js';
 import { registeredAs } from '../src/doctor.js';
-import { lettering, wrapText, NOTE_LINES } from '../src/render/ink.js';
+import { lettering, wrapText, NOTE_LINES, pillSize } from '../src/render/ink.js';
 import { specToOps } from '../src/spec.js';
 import { upsertBlock, removeBlock, START, END, BLOCK } from '../src/agents-block.js';
 
@@ -2024,6 +2024,72 @@ test('edge tags from the same box do not land on top of each other', async () =>
 
   // and the resolver has to be stable: same spec, same answer
   assert.equal(renderSVG(fan).svg, renderSVG(fan).svg, 'layout does not drift between renders');
+});
+
+/* A pill backs the words drawn on it, so its per-character coefficient has to
+   match what `text()` writes — monospace advance plus letter-spacing, the
+   same arithmetic `audit.ts` measures. A coefficient that disagrees with
+   the audit's lets a long unbroken identifier spill past its own border
+   (#215): the pill's width above the text's width is the padding on each
+   side, and a coefficient that is too small makes the padding negative. */
+test('a pill is sized to back the lettering on it, agreeing with the audit\'s text width', () => {
+  /* The first half asks the unit: `pillSize` agrees with `text()`. The audit's
+     text width is `n * size * (advance + spacing)`, and `pillSize.w` must be
+     exactly that plus the padding on both sides — never less. */
+  const advance = 0.6;
+  const samples = [
+    { label: 'linkCorrectionsToInvoiceRun', size: 10.5, padX: 10, spacing: 0.09 },
+    { label: 'hello', size: 10.5, padX: 10, spacing: 0.09 },
+    { label: 'A', size: 10.5, padX: 10, spacing: 0.09 },
+    { label: 'VALIDATE', size: 10.5, padX: 10, spacing: 0.09 },
+  ];
+  for (const { label, size, padX, spacing } of samples) {
+    const { w } = pillSize([label], { size, padX });
+    const textW = label.length * (advance + spacing) * size;
+    assert.equal(w - textW, 2 * padX,
+      `pillSize for ${JSON.stringify(label)}: width above the lettering must equal the padding on both sides ` +
+      `(got ${(w - textW).toFixed(2)}px, want ${2 * padX}px)`);
+  }
+
+  /* The second half asks the *rendered* pill against the *rendered* text.
+     A wrapped label still has each line as its own `<text>` element, and the
+     pill is sized against the widest. */
+  const draw = label => renderSVG({
+    nodes: [{ id: 'a', label: 'A', kind: 'service' },
+            { id: 'b', label: 'B', kind: 'service' }],
+    edges: [{ from: 'a', to: 'b', label }],
+  }).svg;
+
+  const rendered = (label) => {
+    const tagInner = draw(label).match(/<g class="tag">([\s\S]*?)<\/g>/)[1];
+    const pathD = tagInner.match(/<path class="s" d="([^"]+)"/)[1];
+    const lines = [...tagInner.matchAll(/<text[^>]*>([^<]+)<\/text>/g)].map(m => m[1]);
+    const text = tagInner.match(/<text[^>]*>/)[0];
+    return {
+      size: Number(text.match(/font-size="([\d.]+)"/)[1]),
+      spacing: Number(text.match(/letter-spacing="([\d.]+)em"/)[1]),
+      longest: Math.max(...lines.map(l => l.length)),
+      pathD,
+    };
+  };
+
+  /* Path bbox from the `d` attribute's x-coordinates. Waver amplitude is 0.6,
+     so the path can extend up to ~1.2px past the requested rectangle. */
+  const pillWidth = (d) => {
+    const nums = d.match(/-?\d+\.?\d*/g).map(Number);
+    const xs = nums.filter((_, i) => i % 2 === 0);
+    return Math.max(...xs) - Math.min(...xs);
+  };
+
+  for (const { label, padX } of samples) {
+    const r = rendered(label);
+    const textW = r.longest * (advance + r.spacing) * r.size;
+    const pillW = pillWidth(r.pathD);
+    assert.ok(pillW - textW >= 2 * padX - 1.5,
+      `rendered pill for ${JSON.stringify(label)}: margin ${((pillW - textW) / 2).toFixed(2)}px each side ` +
+      `must be at least padX (${padX}px) minus a small waver tolerance, ` +
+      `or the lettering is touching its own border`);
+  }
 });
 
 test('the herdr plugin declares the actions it ships, and its scripts are runnable', () => {
