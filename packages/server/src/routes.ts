@@ -14,7 +14,7 @@ import path from 'node:path';
 import { Effect, Layer } from 'effect';
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/http';
 import { SpiegaConfig, type SpiegaConfigShape } from './config.js';
-import { pictures, type ExportOptions } from './board.js';
+import { pictures, type Board, type ExportOptions, type Measured } from './board.js';
 import {
   ApplyFailed, BoardNotFound, InvalidJson, NoSuchChapter, NotJson, RenderFailed, messageOf, reply,
 } from './errors.js';
@@ -225,6 +225,20 @@ export const ReadRoutes = HttpRouter.use((router) =>
 /* The most a body may be before it is refused as unreadable. */
 const MAX_BODY = 4e6;
 
+/* What the last audit of each chapter of a board found, by the chapter's
+   number, so the next audit says only what has changed since (#209). Keyed by
+   the board, which is the one object a held board keeps for as long as it is
+   held: a chapter is a fresh object every time it is amended. Memory only —
+   after a restart a board is told once more what is true of it, which is the
+   cheap way for this to be wrong. A clear starts the count again, since the
+   chapters it measured are gone. */
+const measured = new WeakMap<Board, Map<number, Measured>>();
+const measuredOn = (board: Board, cleared: boolean): Map<number, Measured> => {
+  let seen = measured.get(board);
+  if (!seen || cleared) measured.set(board, seen = new Map());
+  return seen;
+};
+
 const entryOf = (store: BoardStore['Service'], name: string): Effect.Effect<BoardEntry, BoardNotFound> => {
   const entry = store.get(name);
   return entry ? Effect.succeed(entry) : Effect.fail(new BoardNotFound({ name }));
@@ -281,10 +295,19 @@ export const WriteRoutes = HttpRouter.use((router) =>
         /* After the broadcast, so the pane has already moved and the
            millisecond is spent on the caller's own reply rather than on the
            drawing appearing. */
-        const audit = drawn.wantsAudit
-          ? { audit: yield* Effect.promise(() => store.audit(drawn.surface)) }
-          : {};
-        return HttpServerResponse.jsonUnsafe({ ...drawn.reply, ...audit }, { status: drawn.status });
+        if (!drawn.wantsAudit) return HttpServerResponse.jsonUnsafe(drawn.reply, { status: drawn.status });
+        /* What the audit measured that the reader will not be able to make
+           out rides with the warnings, since that is the list an agent is
+           told it was drawn but not drawn right (#209, #216). */
+        const seen = measuredOn(entry.board, drawn.cleared);
+        const found = yield* Effect.promise(() => store.audit(drawn.surface, seen.get(drawn.chapter) ?? null));
+        const { warnings: measured = [], measured: now, ...audit } = found ?? {};
+        if (now) seen.set(drawn.chapter, now);
+        return HttpServerResponse.jsonUnsafe({
+          ...drawn.reply,
+          warnings: [...drawn.reply.warnings, ...measured],
+          audit: found ? audit : null,
+        }, { status: drawn.status });
       })),
     );
 

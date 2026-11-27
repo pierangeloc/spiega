@@ -32,6 +32,7 @@ export {
 export {
   BoardStore,
   savedBoardsIn,
+  type Audited,
   type BoardEntry,
   type BoardSnapshot,
   type BoardStoreShape,
@@ -39,6 +40,7 @@ export {
   type SavingStatus,
 } from './store.js';
 
+export type { Measured } from './board.js';
 export { BoardApp, MIME, ReadApp, ReadRoutes, RenderRoutes, WriteRoutes } from './routes.js';
 export {
   ApplyFailed,
