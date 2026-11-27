@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Context, Effect, Layer } from 'effect';
 import { SpiegaConfig, SpiegaHome } from './config.js';
-import type { Board, Chapter } from './board.js';
+import type { Board, Chapter, Measured } from './board.js';
 import { createBoardEvents, type BoardEvents } from './events.js';
 import type { OpLog } from './oplog.js';
 
@@ -55,14 +55,19 @@ export interface BoardStoreShape {
   readonly close: (name: string) => Promise<number>;
   /* What the drawing came out like, for the agent that cannot see it. Null
      where the board cannot be rendered — the ops landed and an explanation
-     does not stop because the measurement of it failed. */
-  readonly audit: (surface: Board | Chapter) => Promise<Audited | null>;
+     does not stop because the measurement of it failed. `before` is what the
+     last audit of the same surface found, so its warnings say only what is
+     new. */
+  readonly audit: (surface: Board | Chapter, before: Measured | null) => Promise<Audited | null>;
 }
 
 /* An audit is handed back to the caller as it came, all but its `warnings`:
    those are what the agent has to be told, and they join the reply's own
-   (#209, #216). */
-export type Audited = { readonly warnings?: ReadonlyArray<string> } & Readonly<Record<string, unknown>>;
+   (#209, #216) — and its `measured`, which is kept for the next audit of the
+   same surface rather than said. */
+export type Audited = {
+  readonly warnings?: ReadonlyArray<string>, readonly measured?: Measured,
+} & Readonly<Record<string, unknown>>;
 
 /* Every persisted board log on disk, newest first. Deliberately only a
    readdir and a stat each — no board is restored by being listed. */

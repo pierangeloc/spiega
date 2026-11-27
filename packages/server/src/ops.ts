@@ -52,6 +52,11 @@ export interface Drawn {
   readonly reply: Readonly<Record<string, unknown>> & { readonly warnings: ReadonlyArray<string> };
   /** What an audit, if one was asked for, is a measurement of. */
   readonly surface: Board | Chapter;
+  /** That surface's number on the strip, counting from one. */
+  readonly chapter: number;
+  /** Whether the batch cleared the board, so nothing measured before it is
+      a measurement of what is on it now. */
+  readonly cleared: boolean;
   readonly wantsAudit: boolean;
 }
 
@@ -108,6 +113,8 @@ export const draw = (entry: BoardEntry, body: unknown): Drawn => {
       } : {}),
     },
     surface: aimed || board,
+    chapter: aimed ? Number(last) : board.chapters.length + 1,
+    cleared: applied.some((o) => o.op === 'clear'),
     wantsAudit: !!(body && field(body, 'audit')),
   };
 };

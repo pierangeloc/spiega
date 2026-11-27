@@ -40,6 +40,7 @@
    ============================================================ */
 
 import type { Pt } from './ink.js';
+import { MUTED } from './theme.js';
 
 type Rect = { x: number, y: number, w: number, h: number };
 type Route = { key: string, pts: Pt[] };
@@ -52,7 +53,15 @@ type Drawn = {
 type Astray = { kind: 'tag' | 'callout' | 'tab', text: string, on: string };
 type Buried = { edge: string, box: string };
 type Grazed = { edge: string, box: string, gap: number, side: 'above' | 'below' | 'left of' | 'right of' | 'along the rim of' };
-type Small = { fit: number, px: number };
+/* A box's lettering comes in two kinds, read at different sizes: its label,
+   and the sub under it. */
+type Lettering = 'labels' | 'subs';
+type Small = { fit: number, below: { of: Lettering, px: number, floor: number }[] };
+/* What one audit of a surface found that the next is measured against, so a
+   warning about the board is said on the batch that caused it and not on
+   every batch after (#209): which kinds of lettering were under their floors,
+   and which arrow grazed which box, as `from>to~box`. */
+export type Measured = { small: string[], grazed: string[] };
 /* A drawn pill or card, with the words found on it. */
 type Words = Rect & { text: string };
 
@@ -88,11 +97,18 @@ const NAMED = 4;
    and the real size is worse than the one named. Either way the board is
    drawn exactly as before — this only decides when the agent hears about it. */
 export const REFERENCE_VIEW = { w: 1440, h: 900 };
-/* Lettering on a screen below this is deciphered rather than read. Measured
-   against the largest lettering on any box, which is a box's name, so when
-   that is under it everything else on the board — the line labels at 10.5,
-   the subs at 10 — is further under it still. */
+/* Lettering on a screen below these is deciphered rather than read: you can
+   tell it is there and not what it says. Each kind of lettering has its own,
+   because they are not read the same way. A label is the box's name, set in
+   capitals and in ink, and is the thing a reader looks for; a sub is a detail
+   under it, smaller and greyed, and greyed lettering goes before ink does. So
+   a board whose labels clear 12 can still have subs no one can make out, and
+   that board has to hear about it.
+
+   12 is the floor #207 asserts on rendered text, and the two must not drift
+   apart. */
 export const TEXT_FLOOR = 12;
+export const SUB_FLOOR = 10;
 /* How close a line may run past a box that is neither of its ends before it
    reads as touching it (#216). A lit line is 3px of ink and a box's outline
    wavers by a pixel or two, so at 2 units apart the two strokes meet; at 10
@@ -133,7 +149,7 @@ function pathBox(d: string, dx: number, dy: number): Rect {
 export function measureDrawing(svg: string) {
   type Group = { attrs: string, dx: number, dy: number, fills: Words[] };
   const stack: Group[] = [];
-  const nodeText: (Rect & { id: string, text: string, size: number })[] = [];
+  const nodeText: (Rect & { id: string, text: string, size: number, sub: boolean })[] = [];
   /* Keyed by the tag's own group, like a callout: an arrow carrying several
      hops (#113) has a pill per hop, all under the one `data-edge`, and keyed
      by the edge they would be measured as one pill holding all their words. */
@@ -173,7 +189,11 @@ export function measureDrawing(svg: string) {
     });
     if (tag === 'text') {
       const b = textBox(attrs, body, dx, dy);
-      if (nodeId !== undefined) nodeText.push({ id: nodeId, text: unescape(body), size: Number(attr(attrs, 'font-size')), ...b });
+      if (nodeId !== undefined) {
+        // a sub is the one line on a box lettered in the muted grey
+        const sub = attr(attrs, 'fill') === MUTED;
+        nodeText.push({ id: nodeId, text: unescape(body), size: Number(attr(attrs, 'font-size')), sub, ...b });
+      }
       else if (call) {
         // keyed by the group itself: two callouts may share an id, or have none
         const prev = callouts.get(call);
@@ -329,18 +349,36 @@ export function grazingArrows({ boxes, planned }: { boxes: Record<string, Rect>,
   return found;
 }
 
-/* How large the board's lettering lands on the reference screen, when that is
-   under the floor. The page fits the whole board into its pane and never zooms
-   in to do it, so the scale is capped at 1 — and a board shown at full size is
-   not one the fit shrank, whatever sizes it was lettered in, so it is not one a
-   chapter break would help. */
+/* How large each kind of the board's lettering lands on the reference screen,
+   for the kinds that land under their floor. The page fits the whole board
+   into its pane and never zooms in to do it, so the scale is capped at 1 — and
+   a board shown at full size is not one the fit shrank, whatever sizes it was
+   lettered in, so it is not one a chapter break would help.
+
+   A kind is measured at the size most of its lines are set in, not at its
+   largest or its smallest. The largest is what let one formula hold a board
+   over the floor while every label on it sat under; the smallest would make
+   one blob that shrank its own long word speak for a board of boxes. */
 export function smallText(r: Drawn): Small | null {
   if (!(r.width > 0) || !(r.height > 0)) return null;
   const fit = Math.min(1, REFERENCE_VIEW.w / r.width, REFERENCE_VIEW.h / r.height);
-  const sizes = measureDrawing(r.svg).nodeText.map(t => t.size).filter(Number.isFinite);
-  if (fit >= 1 || !sizes.length) return null;
-  const px = Math.max(...sizes) * fit;
-  return px < TEXT_FLOOR ? { fit, px } : null;
+  if (fit >= 1) return null;
+  const text = measureDrawing(r.svg).nodeText.filter(t => Number.isFinite(t.size));
+  const below: Small['below'] = [];
+  for (const [of, floor, sub] of [['labels', TEXT_FLOOR, false], ['subs', SUB_FLOOR, true]] as const) {
+    const size = usualSize(text.filter(t => t.sub === sub).map(t => t.size));
+    if (size !== null && size * fit < floor) below.push({ of, px: size * fit, floor });
+  }
+  return below.length ? { fit, below } : null;
+}
+
+/* The size most of a list is set in; on a tie, the smaller. */
+function usualSize(sizes: number[]): number | null {
+  const count = new Map<number, number>();
+  for (const s of sizes) count.set(s, (count.get(s) ?? 0) + 1);
+  let best: number | null = null, most = 0;
+  for (const [s, n] of count) if (n > most || (n === most && best !== null && s < best)) { best = s; most = n; }
+  return best;
 }
 
 /* Do two segments meet anywhere but at their ends? Routes share their ends by
@@ -385,24 +423,45 @@ export function audit(spec: { nodes?: { id: string, kind?: string }[] }, r: Draw
 /* The half of the measurement that rides back as warnings: what the reader
    will not be able to make out, said as a fact about the board, with what it
    costs. Like the report, it never refuses and is empty for a board that came
-   out fine. */
-export function measuredWarnings({ grazed = [], small = null }: { grazed?: Grazed[], small?: Small | null }): string[] {
+   out fine.
+
+   Said once, on the batch that caused it. These are facts about the whole
+   board, true on every batch after the one that made them true, and a line an
+   agent is told on every reply is a line it learns to skip. So `before` is
+   what the last audit of the same surface found, and only what has happened
+   since is said: lettering that has just crossed under its floor, an arrow
+   that has just come to graze a box. A board that comes back over the floor
+   and goes under it again has crossed again, and is told again. */
+export function measuredWarnings(
+  { grazed = [], small = null }: { grazed?: Grazed[], small?: Small | null },
+  before: Measured | null = null,
+): string[] {
   const lines: string[] = [];
-  if (small) {
+  if (small && small.below.some(b => !before?.small.includes(b.of))) {
+    const land = small.below.map((b, i) =>
+      `${b.of}${i ? '' : ' land'} at ${b.px.toFixed(1)}px, under ${b.floor}`).join(', and its ');
     lines.push(`at ${REFERENCE_VIEW.w}×${REFERENCE_VIEW.h} this board fits at ${Math.round(small.fit * 100)}%, ` +
-      `so its labels land at ${small.px.toFixed(1)}px; a chapter break is where the rest of it goes`);
+      `so its ${land}; a chapter break is where the rest of it goes`);
   }
-  if (grazed.length) {
-    const named = grazed.slice(0, NAMED).map(g => (g.gap
+  const fresh = grazed.filter(g => !before?.grazed.includes(grazeKey(g)));
+  if (fresh.length) {
+    const named = fresh.slice(0, NAMED).map(g => (g.gap
       ? `${g.edge}, ${g.gap} unit${g.gap === 1 ? '' : 's'} ${g.side} ${g.box}`
       : `${g.edge}, ${g.side} ${g.box}`)).join('; ');
-    const rest = grazed.length - NAMED;
-    lines.push(`${grazed.length} arrow${grazed.length > 1 ? 's' : ''} ` +
-      `pass${grazed.length > 1 ? '' : 'es'} close enough to a box that is not an end of ` +
-      `${grazed.length > 1 ? 'them' : 'it'} to read as touching it, most of all when lit: ` +
+    const rest = fresh.length - NAMED;
+    lines.push(`${fresh.length} arrow${fresh.length > 1 ? 's' : ''} ` +
+      `pass${fresh.length > 1 ? '' : 'es'} close enough to a box that is not an end of ` +
+      `${fresh.length > 1 ? 'them' : 'it'} to read as touching it, most of all when lit: ` +
       named + (rest > 0 ? `, and ${rest} more` : ''));
   }
   return lines;
+}
+
+const grazeKey = (g: Grazed): string => `${g.edge}~${g.box}`;
+
+/* What this audit found, in the shape the next one is told it as. */
+export function measuredOf({ grazed = [], small = null }: { grazed?: Grazed[], small?: Small | null }): Measured {
+  return { small: small ? small.below.map(b => b.of) : [], grazed: grazed.map(grazeKey) };
 }
 
 /* What of it is worth saying, in the order it costs a reader. Empty when the

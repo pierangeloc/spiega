@@ -25,7 +25,7 @@ const { createServer } = await import('../src/board/server.js');
 const { emptyBoard, applyOps } = await import('../src/board/state.js');
 const { renderSVG } = await import('../src/render/render.js');
 const { specToOps } = await import('../src/spec.js');
-const { audit, report, measuredWarnings, grazingArrows, smallText, CROSSINGS_FLOOR, CLEARANCE, TEXT_FLOOR } =
+const { audit, report, measuredWarnings, measuredOf, grazingArrows, smallText, CROSSINGS_FLOOR, CLEARANCE, TEXT_FLOOR, SUB_FLOOR } =
   await import('../src/render/audit.js');
 
 let n = 0;
@@ -179,27 +179,80 @@ await test('no other committed board or example runs an arrow close by a box', a
 });
 
 /* The arithmetic, on a drawing with nothing else in it: the page fits the
-   board into 1440×900 and never zooms in, and the floor is measured on the
-   largest lettering on a box. */
-await test('text is measured on the reference screen, against the floor', async () => {
-  const one = (width, height, size = 13.5) => ({
-    svg: `<g data-node="a"><text x="0" y="0" font-size="${size}">A</text></g>`,
-    width, height, offset: { x: 0, y: 0 }, boxes: {}, planned: [],
-  });
-  assert.deepEqual(smallText(one(2880, 300)), { fit: 0.5, px: 6.75 }, 'half as wide as the screen fits at half');
-  assert.deepEqual(smallText(one(600, 1800)), { fit: 0.5, px: 6.75 }, 'and so does twice as tall');
-  assert.equal(smallText(one(1440 * 13.5 / TEXT_FLOOR, 300)), null, 'landing exactly on the floor is not below it');
-  assert.equal(smallText(one(400, 300, 10)), null, 'a board shown at full size is never shrunk, whatever its sizes');
-  assert.deepEqual(measuredWarnings({ small: smallText(one(4114, 300)) }), [
-    'at 1440×900 this board fits at 35%, so its labels land at 4.7px; a chapter break is where the rest of it goes',
+   board into 1440×900 and never zooms in, and each kind of lettering on a box
+   is measured against its own floor — a label against 12, the greyed sub
+   under it against 10. */
+const MUTED = '#857d6e';
+const lettered = (width, height, ...texts) => ({
+  svg: texts.map(([size, fill = '#231e16'], i) =>
+    `<g data-node="n${i}"><text x="0" y="0" fill="${fill}" font-size="${size}">A</text></g>`).join(''),
+  width, height, offset: { x: 0, y: 0 }, boxes: {}, planned: [],
+});
+const boxed = (width, height) => lettered(width, height, [13.5], [10, MUTED]);
+
+await test('text is measured on the reference screen, each kind against its own floor', async () => {
+  assert.deepEqual(smallText(boxed(2880, 300)), { fit: 0.5, below: [
+    { of: 'labels', px: 6.75, floor: TEXT_FLOOR }, { of: 'subs', px: 5, floor: SUB_FLOOR },
+  ] }, 'half as wide as the screen fits at half');
+  assert.deepEqual(smallText(boxed(600, 1800)).fit, 0.5, 'and so does twice as tall');
+  assert.equal(smallText(boxed(400, 300)), null, 'a board shown at full size is never shrunk, whatever its sizes');
+  assert.equal(smallText(lettered(400, 300, [9.5], [8, MUTED])), null, 'not even one lettered under both floors');
+});
+
+/* The board the old check got wrong both ways: a label that clears its floor
+   by a hair kept it quiet about subs no one could read. */
+await test('a board whose labels clear the floor is still told its subs do not', async () => {
+  const width = 1440 * 13.5 / TEXT_FLOOR;
+  assert.deepEqual(smallText(boxed(width, 300)).below.map(b => b.of), ['subs'],
+    'a label landing exactly on its floor is not under it; the sub under it is');
+  assert.deepEqual(measuredWarnings({ small: smallText(boxed(width, 300)) }), [
+    'at 1440×900 this board fits at 89%, so its subs land at 8.9px, under 10; a chapter break is where the rest of it goes',
+  ]);
+  assert.deepEqual(measuredWarnings({ small: smallText(boxed(4114, 300)) }), [
+    'at 1440×900 this board fits at 35%, so its labels land at 4.7px, under 12, and its subs at 3.5px, under 10; ' +
+    'a chapter break is where the rest of it goes',
   ]);
 });
 
-await test('a wide board says how small its labels land, and a board that fits says nothing', async () => {
+/* Measured at the largest, one formula held a board of labels over the
+   floor; measured at the smallest, one blob that shrank its own long word
+   would speak for the whole board. */
+await test('a kind of lettering is measured at the size most of it is set in', async () => {
+  const formula = lettered(1800, 300, [17], [13.5], [13.5], [13.5]);
+  assert.deepEqual(smallText(formula).below, [{ of: 'labels', px: 10.8, floor: TEXT_FLOOR }]);
+  const blob = lettered(1500, 300, [9.5], [13.5], [13.5], [13.5]);
+  assert.equal(smallText(blob), null, '13.5 at 96% is 13px, whatever the one blob does');
+});
+
+await test('a wide board says how small its lettering lands, and a board that fits says nothing', async () => {
   assert.deepEqual(measuredWarnings(auditOf(board('test/boards/issue-119-source-columns.json'))), [
-    'at 1440×900 this board fits at 53%, so its labels land at 7.1px; a chapter break is where the rest of it goes',
+    'at 1440×900 this board fits at 53%, so its labels land at 7.1px, under 12, and its subs at 5.3px, under 10; ' +
+    'a chapter break is where the rest of it goes',
   ]);
+  // the showcase board whose labels nearly clear: what is wrong with it is its subs
+  assert.deepEqual(auditOf(board('examples/order-flow.json')).small.below.map(b => `${b.of} ${b.px.toFixed(1)}`),
+    ['labels 11.5', 'subs 8.5']);
   assert.equal(auditOf(board('examples/kalman.json')).small, null);
+});
+
+/* A fact about the whole board is true on every batch after the one that
+   made it true, and a line said on every reply is a line an agent learns to
+   skip. So each is said against what the last audit found. */
+await test('a measured warning is said when it becomes true, not on every batch after', async () => {
+  const wide = measuredOf({ small: smallText(boxed(4114, 300)) });
+  const subsOnly = measuredOf({ small: smallText(boxed(1620, 300)) });
+  assert.deepEqual(wide, { small: ['labels', 'subs'], grazed: [] });
+  assert.deepEqual(measuredWarnings({ small: smallText(boxed(4114, 300)) }, wide), [], 'still under: not said again');
+  assert.equal(measuredWarnings({ small: smallText(boxed(4114, 300)) }, subsOnly).length, 1,
+    'labels crossing under where only the subs were is a crossing');
+  assert.deepEqual(measuredWarnings({ small: smallText(boxed(1620, 300)) }, wide), [],
+    'labels coming back over, subs still under, is nothing new');
+  const g = { edge: 'a>b', box: 'c', gap: 2, side: 'above' }, h = { edge: 'a>d', box: 'c', gap: 3, side: 'below' };
+  assert.deepEqual(measuredWarnings({ grazed: [g, h] }, measuredOf({ grazed: [g] })), [
+    '1 arrow passes close enough to a box that is not an end of it to read as touching it, most of all when lit: ' +
+    'a>d, 3 units below c',
+  ], 'only the graze that is new');
+  assert.deepEqual(measuredWarnings({ grazed: [g] }, measuredOf({ grazed: [g] })), []);
 });
 
 /* ---------- who is told ---------- */
@@ -338,12 +391,41 @@ await test('a graze and a board too wide to read arrive as warnings on the reply
 
     const wide = await post(s.U, { ops: [{ op: 'clear' }, ...specToOps(board('test/boards/issue-119-source-columns.json'))],
       audit: true });
-    assert.deepEqual(wide.warnings,
-      ['at 1440×900 this board fits at 53%, so its labels land at 7.1px; a chapter break is where the rest of it goes']);
+    assert.deepEqual(wide.warnings, ['at 1440×900 this board fits at 53%, so its labels land at 7.1px, under 12, ' +
+      'and its subs at 5.3px, under 10; a chapter break is where the rest of it goes']);
+    assert.equal(wide.audit.measured, undefined, 'what is kept for the next audit is not handed back');
 
     // not asked for, not rendered, not said
     const quiet = await post(s.U, { ops: [{ op: 'say', text: 'and that is the fan' }] });
     assert.deepEqual(quiet.warnings, []);
+  } finally { await s.close(); }
+});
+
+/* An agent drawing a long explanation onto a wide board audits every batch,
+   and has to hear that it is wide once — on the batch that made it so. */
+await test('a board is told it is too wide, or that an arrow grazes, once, when it happens', async () => {
+  const s = await listen('once');
+  try {
+    const wide = specToOps(board('test/boards/issue-119-source-columns.json'));
+    const said = r => r.warnings.filter(w => w.startsWith('at 1440×900'));
+    assert.equal(said(await post(s.U, { ops: wide, audit: true })).length, 1, 'said on the batch that crossed');
+    const next = await post(s.U, { ops: [{ op: 'say', text: 'and on it goes' }], audit: true });
+    assert.deepEqual(next.warnings, [], 'and not on the batch after');
+    assert.ok(next.audit.small, 'though the audit still measures it');
+
+    // a board that comes back over the floor and goes under again has crossed again
+    const ids = board('test/boards/issue-119-source-columns.json').nodes.map(n => n.id);
+    await post(s.U, { ops: ids.slice(1).map(id => ({ op: 'remove', id })), audit: true });
+    assert.equal(said(await post(s.U, { ops: wide, audit: true })).length, 1, 'said again on crossing again');
+
+    // a new chapter is a new surface, and a cleared board a new board
+    assert.equal(said(await post(s.U, { ops: [{ op: 'chapter', title: 'More' }, ...wide], audit: true })).length, 1);
+    assert.equal(said(await post(s.U, { ops: [{ op: 'clear' }, ...wide], audit: true })).length, 1);
+
+    // and a graze is the same: said for the arrow that came to graze, then not
+    const graze = specToOps(board('test/boards/issue-113-three-hops-one-pair.json'));
+    assert.equal((await post(s.U, { ops: [{ op: 'clear' }, ...graze], audit: true })).warnings.length, 1);
+    assert.deepEqual((await post(s.U, { ops: [{ op: 'say', text: 'still there' }], audit: true })).warnings, []);
   } finally { await s.close(); }
 });
 

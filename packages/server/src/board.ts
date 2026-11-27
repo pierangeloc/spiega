@@ -19,6 +19,7 @@ export { applySettlingOps, settleOp } from '../../../src/board/settle.js';
    first time one is asked for rather than with the server, as the old routes
    loaded them: most boards are never exported. */
 export type { ExportOptions } from '../../../src/board/export.js';
+export type { Measured } from '../../../src/render/audit.js';
 export const pictures = () =>
   Promise.all([
     import('../../../src/board/export.js'),
