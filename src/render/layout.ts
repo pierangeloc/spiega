@@ -80,6 +80,28 @@ const HOP_END = 22;   // before the first and after the last, clear of the box a
 export const hopRow = (ws: number[]): number =>
   ws.reduce((t, w) => t + w, 0) + HOP_AIR * Math.max(0, ws.length - 1) + HOP_END * 2;
 
+/* Two pills along an arrow read as two labels on it. Three or more laid end
+   to end read as a chain of boxes (#213): the air between them is a few board
+   units, the board widens to seat the row, the page fits a wider board
+   smaller, and the air shrinks to a few pixels — no line shows between them,
+   and raising the air only widens the board again. So from this many hops on,
+   the pills come off the line: stacked clear of it as a staircase, each tied
+   by a short tick to its own point on the route. */
+export const CASCADE = 3;
+export const TICK_STEP = 34;   // how far along the route each hop's point is from the last
+export const TICK_INSET = 12;  // how far in from its near end a pill's tick meets it, clear of the rounding
+export const TICK_GAP = 14;    // between the line and the nearest pill of the stack, so its tick shows
+export const STACK_PAD = 10;   // between two pills of the stack: rows, not a block
+
+/* How much of the route a staircase of pills this wide takes up, along it.
+   Each hop's tick is TICK_STEP further along than the last, and its pill runs
+   on from there, away from the ticks still to come, so no tick passes under a
+   pill that is not its own. Whichever side of the line the stack goes on, it
+   is the same staircase mirrored, so one number serves both. */
+export const cascadeSpan = (ws: number[]): number =>
+  Math.max(0, ...ws.map((w, k) => k * TICK_STEP + w - TICK_INSET),
+    ...ws.map((w, k) => (ws.length - 1 - k) * TICK_STEP + w - TICK_INSET)) + TICK_INSET;
+
 /* A boundary's wall stands BOUNDARY_PAD outside its members and its name rides
    a tab TAB_RISE above that. A box that is not a member has to clear the wall,
    and above the boundary the tab as well, or it is drawn inside the enclosure
@@ -327,10 +349,12 @@ export function layout(
      is no placing a tag into a gap it cannot fit. A loop's return runs along
      the floor and never enters a gutter, so it asks for nothing. */
   const crossing: number[] = colKeys.map(() => 0);
-  /* An arrow carrying several hops (#113) between neighbouring columns hangs
-     its pills one after another along the gutter, in the order they happen,
-     so that gutter is as long as the row of them. A longer arrow already runs
-     past whole columns and asks only for its widest. */
+  /* An arrow carrying two hops (#113) between neighbouring columns hangs its
+     pills one after another along the gutter, in the order they happen, so
+     that gutter is as long as the row of them. Three or more come off the line
+     as a staircase (#213), which asks for the staircase's length and no more —
+     about one pill, not the row. A longer arrow already runs past whole
+     columns and asks only for its widest. */
   const inLine: number[] = colKeys.map(() => 0);
   for (const e of spec.edges || []) {
     if (back.has(`${e.from}>${e.to}`)) continue;
@@ -345,7 +369,8 @@ export function layout(
     colKeys.forEach((c, i) => {
       if (i + 1 < colKeys.length && lo <= c && hi >= colKeys[i + 1]) {
         crossing[i] = Math.max(crossing[i], w);
-        if (ws.length > 1 && lo === c && hi === colKeys[i + 1]) inLine[i] = Math.max(inLine[i], hopRow(ws));
+        if (ws.length > 1 && lo === c && hi === colKeys[i + 1])
+          inLine[i] = Math.max(inLine[i], ws.length >= CASCADE ? cascadeSpan(ws) + HOP_END * 2 : hopRow(ws));
       }
     });
   }

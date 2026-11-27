@@ -16,6 +16,7 @@ import { backEdges, KNEE, EDGE_GAP } from './layout.js';
 
 const GAP = EDGE_GAP;      // breathing room between a box edge and its line
 const FAN = 0.52;          // how much of a side's length the fan may spread over
+const TICK_DOT = 2.6;      // the dot a stacked hop's tick lands in (#213)
 
 /* The four sides a line leaves from or arrives at. */
 type Side = 'left' | 'right' | 'top' | 'bottom';
@@ -394,7 +395,10 @@ type DrawnRoute = { e: Edge, key: string, a: Box, b: Box, pts: Pt[] };
    the hop the flow is at. Most arrows carry one, keyed as the arrow is. An
    arrow that carries several (#113) has a tag per hop, keyed `from>to#2` on,
    and lights only the one being walked rather than all of them at once. */
-export type Hop = { key: string, label?: string, step: number | null, lit?: boolean, along?: number | null };
+export type Hop = {
+  key: string, label?: string, step: number | null, lit?: boolean, along?: number | null,
+  tick?: { from: Pt, to: Pt } | null,
+};
 
 /* `along` is how far down the route a hop wants to sit, for an arrow that
    carries more than one: spread in the order they happen, so the pills read
@@ -447,6 +451,20 @@ export function drawEdge(r: DrawnRoute, { step = null, state = 'idle', place = n
     /* The line lights with the arrow, and of its pills only the hop being
        walked: three hops lit at once is the flattening #113 was about, just
        drawn three times. */
+    /* A pill stacked off the line (#213) is tied to its own point on it by a
+       tick, with a dot where it lands: the dot is the hop's place on the
+       route, and the tick is what makes the pill that hop's rather than
+       whichever line it happens to be nearest. Drawn before the pills, so a
+       tick starts at its pill's edge rather than on its words. */
+    hops.forEach((h, i) => {
+      if (!h.tick) return;
+      const on = lit && !!h.lit;
+      const [x, y] = h.tick.to;
+      out += stroke(roughLine(h.tick.from, h.tick.to, { seed: seed + 11 + i, amp: 0.5 }),
+        { w: on ? 1.8 : 1.3, color: on ? ACCENT : INK });
+      out += fill(`M${(x - TICK_DOT).toFixed(1)} ${y.toFixed(1)} a${TICK_DOT} ${TICK_DOT} 0 1 0 ${TICK_DOT * 2} 0` +
+        `a${TICK_DOT} ${TICK_DOT} 0 1 0 ${-TICK_DOT * 2} 0z`, on ? ACCENT : INK);
+    });
     hops.forEach((h, i) => {
       const at = h.at || tagBox(r, h.step, h.label, h.along ?? null).at;
       out += `<g class="tag">${edgeTag(at, h.step, h.label, { lit: lit && !!h.lit, seed: seed + 5 + i })}</g>`;
