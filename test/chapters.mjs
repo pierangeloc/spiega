@@ -21,7 +21,7 @@ process.env.HOME = HOME;
 process.env.USERPROFILE = HOME;
 
 const { createServer } = await import('../src/board/server.js');
-const { emptyBoard, applyOps, boardOps } = await import('../src/board/state.js');
+const { emptyBoard, applyOps, boardOps, boardHolds } = await import('../src/board/state.js');
 const { scriptSteps } = await import('../src/board/script.js');
 const { renderSVG } = await import('../src/render/render.js');
 const { audit } = await import('../src/render/audit.js');
@@ -132,6 +132,72 @@ await test('the audit measures the live chapter, so a break clears it', async ()
   assert.equal(b.chapters[0].nodes.length, 14, 'while the crowded chapter is still there to read');
 });
 
+/* ---------- a second explanation on the same board (#197) ---------- */
+
+/* The board is the session's and outlives one explanation, so the second
+   explanation of a conversation lands on the first one's surface. That is
+   deliberate; what was broken is that nothing said so, and the strip — the
+   only thing that does — is visible to the person and not to the agent. */
+await test('a chapter break reads the strip back once there is a chapter behind it', async () => {
+  const b = emptyBoard();
+  const first = applyOps(b, [{ op: 'chapter', title: 'Nutrients' }]);
+  assert.deepEqual(first.warnings, [], 'naming the first surface has nothing behind it to report');
+
+  applyOps(b, [{ op: 'node', id: 'fat', label: 'Fat' }]);
+  const { warnings } = applyOps(b, [{ op: 'chapter', title: 'Enzymes' }]);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /the strip now reads 1 Nutrients, 2 Enzymes \(being drawn\)/);
+  assert.match(warnings[0], /one explanation under one title/);
+  assert.match(warnings[0], /clear the board/, 'and says what to do if they are not');
+});
+
+await test('a chapter left untitled is named on the strip the way the tab shows it', async () => {
+  const b = drawn([{ op: 'node', id: 'a' }]);
+  const { warnings } = applyOps(b, [{ op: 'chapter', title: 'What /op is' }]);
+  assert.match(warnings[0], /1 untitled, 2 What \/op is \(being drawn\)/);
+});
+
+/* The title belongs to the explanation, not to a chapter, so a second
+   explanation's title arrives over the first one's — with the first one's
+   chapters still underneath it. That is the shape #197 was reported in. */
+await test('retitling a board that holds chapters says what the title now rides', async () => {
+  const b = drawn(taught);
+  const { warnings } = applyOps(b, [{ op: 'title', text: 'Something else entirely' }]);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /1 Nutrients, 2 Enzymes \(being drawn\)/);
+  assert.equal(b.title, 'Something else entirely', 'and the op still did what it says');
+});
+
+await test('an explanation that is only getting started is told nothing', async () => {
+  const quiet = ops => applyOps(emptyBoard(), ops).warnings;
+  assert.deepEqual(quiet([{ op: 'title', text: 'Placing an order' }, { op: 'chapter', title: 'The hop' },
+    { op: 'node', id: 'gw' }, { op: 'node', id: 'orders' }, { op: 'edge', from: 'gw', to: 'orders' }]), []);
+  const b = drawn(taught);
+  assert.deepEqual(applyOps(b, [{ op: 'clear' }, { op: 'title', text: 'A new one' },
+    { op: 'chapter', title: 'Its first part' }]).warnings, [],
+  'and a board cleared for a new explanation is a clean surface again');
+});
+
+/* The other half of #197: an agent that calls board_open for its second
+   explanation is told what it is opening, since the reply was a URL whether
+   the board was empty or held three chapters of something else. */
+await test('a board says what it is already carrying, or says nothing at all', async () => {
+  assert.equal(boardHolds(emptyBoard()), null, 'an empty board has nothing to report');
+  assert.equal(boardHolds(drawn([{ op: 'title', text: 'Only a title' }])), null,
+    'and neither has one that has only been named');
+
+  const one = boardHolds(drawn([{ op: 'node', id: 'gw' }, { op: 'say', text: 'The gateway first.' }]));
+  assert.match(one, /already has 1 box and 1 line of script on it/, 'singular, since it is read out loud');
+
+  const some = boardHolds(drawn(taught.slice(0, 8)));
+  assert.match(some, /already has 2 boxes and 1 line of script on it/);
+  assert.match(some, /under the title "De stof van het leven"/);
+
+  const chaptered = boardHolds(drawn(taught));
+  assert.match(chaptered, /already carries an explanation titled "De stof van het leven"/);
+  assert.match(chaptered, /the strip reads 1 Nutrients, 2 Enzymes \(being drawn\)/);
+});
+
 /* ---------- going back to a chapter already taught ---------- */
 
 /* Aimed, never entered. An agent that could *move* to chapter one would have
@@ -221,6 +287,10 @@ await test('a chapter op lands over POST /op and the state carries every chapter
     const r = await post(taught);
     assert.equal(r.ok, true);
     assert.deepEqual(r.errors, []);
+    /* The strip rides back on the reply that the chapter broke, which is the
+       only place the agent could read it (#197). */
+    assert.equal(r.warnings.length, 1);
+    assert.match(r.warnings[0], /the strip now reads 1 Nutrients, 2 Enzymes \(being drawn\)/);
     assert.equal(r.nodes, 2, 'the counts are the live chapter\'s, which is the one being drawn');
     const state = await (await fetch(U + '/state')).json();
     assert.deepEqual(state.chapters.map(c => c.title), ['Nutrients']);

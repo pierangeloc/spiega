@@ -157,6 +157,49 @@ function swapSurface(board: Board, to: Chapter): Chapter {
 const everyChapter = (board: Board): { title: string, live?: boolean }[] =>
   [...board.chapters.map(c => ({ title: c.title })), { title: board.chapter, live: true }];
 
+/* The strip, written out as the person reading the board sees it. The agent
+   cannot see it, which is the whole reason this exists: it is what an op about
+   the explanation as a whole is answered with, and what an amendment that
+   named a chapter nobody has is told instead. */
+export const chapterStrip = (board: Board): string =>
+  everyChapter(board)
+    .map((c, i) => `${i + 1} ${c.title || 'untitled'}${c.live ? ' (being drawn)' : ''}`)
+    .join(', ');
+
+/* What is already on this board, said to whoever is about to add to it as a
+   whole. Appending to a used board is often exactly right — the next chapter
+   of one explanation is the point of chapters — so this reports rather than
+   complains, and names the one thing the agent might not have meant. */
+const standing = (board: Board): string =>
+  `the strip now reads ${chapterStrip(board)}. ` +
+  `Those are read as one explanation under one title; if the earlier chapters belong to a different ` +
+  `explanation, clear the board and draw this one on a clean surface — a chapter never starts a new one.`;
+
+/* What this board is already carrying, for whoever is about to draw on it, or
+   null for a board with nothing on it yet — which is the usual case and wants
+   no sentence at all.
+
+   Said rather than warned, because by the time this is asked the board has
+   done nothing wrong: a board belongs to its session and outlives one
+   explanation, so an agent beginning a second explanation is handed the first
+   one's surface, title and all. The caller adds what to do about it in its own
+   vocabulary; this only says what is there (#197). */
+export const boardHolds = (board: Board): string | null => {
+  const title = board.title ? `"${board.title}"` : '';
+  if (board.chapters.length) {
+    return `this board already carries an explanation${title ? ` titled ${title}` : ''} — ` +
+      `the strip reads ${chapterStrip(board)}.`;
+  }
+  const boxes = board.nodes.length, said = board.transcript.length;
+  if (!boxes && !said) return null;
+  const parts = [
+    boxes ? `${boxes} box${boxes === 1 ? '' : 'es'}` : '',
+    said ? `${said} line${said === 1 ? '' : 's'} of script` : '',
+  ].filter(Boolean);
+  return `this board already has ${parts.join(' and ')} on it` +
+    `${title ? `, under the title ${title}` : ''}.`;
+};
+
 /* Which chapter an amendment is aimed at: the number on the strip, or the
    name on the tab. Returns an index into `everyChapter`, or a sentence saying
    why not — an agent that has the number wrong is told what the numbers are,
@@ -167,7 +210,7 @@ const everyChapter = (board: Board): { title: string, live?: boolean }[] =>
    the list, not with a throw. */
 function chapterWanted(board: Board, want: number | string | undefined): number | string {
   const all = everyChapter(board);
-  const list = all.map((c, i) => `${i + 1} ${c.title || 'untitled'}${c.live ? ' (being drawn)' : ''}`).join(', ');
+  const list = chapterStrip(board);
   if (typeof want === 'number' || /^\d+$/.test(String(want))) {
     const i = Number(want) - 1;
     if (i >= 0 && i < all.length) return i;
@@ -517,7 +560,15 @@ function applyOne(board: Board, op: Op, sweep: Sweep, warnings: string[] = []): 
        Naming an empty surface rather than setting it aside: `chapter` at the
        start of an explanation is how the first chapter gets its name, and
        pushing a blank one there would put an empty tab in front of everything
-       that follows. */
+       that follows.
+
+       A board is resolved per session and outlives one explanation, so a
+       second explanation in the same conversation starts on the first one's
+       surface and this appends to it — by design, and invisibly, because the
+       strip is the only thing that says so and only the person can see it
+       (#197). So the strip comes back as a warning whenever there is already a
+       chapter behind this one: nothing is wrong with appending, and the agent
+       that meant to start again cannot tell that it has not. */
     case 'chapter': {
       const title = String(op.title || '');
       if (!blankSurface(board)) {
@@ -527,6 +578,7 @@ function applyOne(board: Board, op: Op, sweep: Sweep, warnings: string[] = []): 
         sweep.ids.length = 0;
       }
       board.chapter = title;
+      if (board.chapters.length) warnings.push(standing(board));
       break;
     }
 
@@ -572,8 +624,13 @@ function applyOne(board: Board, op: Op, sweep: Sweep, warnings: string[] = []): 
       return { ok: true, fresh: r.fresh, op: { op: 'amend', chapter: where + 1, ops: r.applied } };
     }
 
+    /* The title is the explanation's, not a chapter's, so retitling a board
+       that already holds chapters renames every one of them — which is how
+       #197 was first noticed: the new explanation's title arrived over the old
+       one, with the old one's chapters still underneath it. */
     case 'title':
       board.title = op.text || '';
+      if (board.chapters.length) warnings.push(standing(board));
       break;
 
     /* A line may name the step it explains, so the rail can light the part of

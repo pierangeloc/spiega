@@ -324,6 +324,15 @@ already has several chapters starts there.
 Called before anything is drawn, it names the chapter you are on rather than
 setting an empty one aside.
 
+A board belongs to its session and outlives one explanation, so a second
+explanation in the same conversation begins on the first one's surface and a
+`chapter` there adds to what is already on the strip. That is often what you
+want; when it is not, it is invisible from the outside, so once there is a
+chapter behind it `chapter` — and `title`, which names every chapter at once —
+reads the strip back in the reply's warnings: `the strip now reads 1 Nutrients,
+2 Enzymes (being drawn)`. Check that all of it is the explanation you are
+giving now, and `clear` if it is not. A chapter never starts a new explanation.
+
 Each chapter is its own namespace: `gw` in chapter 3 is a different box from
 `gw` in chapter 1, and drawing it again does not reach back. Ops land in the
 chapter being drawn on now unless they are aimed somewhere else:

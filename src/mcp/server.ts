@@ -60,6 +60,26 @@ async function send(ops: unknown, { audit = false }: { audit?: boolean } = {}): 
   return [summary, ...(b.warnings || []), ...(b.audit?.lines || [])].join('\n');
 }
 
+/* What this board already holds, for the tool whose reply would otherwise read
+   as "here is a fresh board" (#197).
+
+   The board belongs to the session and outlives one explanation, so the second
+   explanation of a conversation opens the first one's board — with its
+   chapters, its drawing and its title still on it. board_open is where that has
+   to be said: it is the call an agent makes before drawing anything, and its
+   reply was a URL either way. Null when the surface is clean, which is the
+   usual case and wants no sentence at all. */
+const alreadyThere = async (u: string): Promise<string | null> => {
+  let held: string | null;
+  try {
+    const b: Board = await (await fetch(u + '/state')).json();
+    const { boardHolds } = await import('../board/state.js');
+    held = boardHolds(b);
+  } catch { return null; }   // a board that could not be read still opened
+  return held && `${held} Anything you draw now is added to it: board_chapter starts the next part of that ` +
+    `explanation, board_clear wipes it and starts a new one.`;
+};
+
 /* ---------- tools ---------- */
 
 /* What one op looks like, as JSON Schema: the op union, generated from
@@ -249,7 +269,10 @@ const TOOLS = [
       'explanation altogether. Also reach for it when a board is getting full: the board tells you when the ' +
       'drawing is crowded, and a chapter is where the rest of it goes.\n' +
       'Call it before drawing the first chapter too, to name it. Ops land in the current chapter; to add to or ' +
-      'correct a chapter you have already left, aim at it with board_amend.',
+      'correct a chapter you have already left, aim at it with board_amend.\n' +
+      'The reply reads back the strip whenever there is a chapter behind this one, since you cannot see it: ' +
+      'check that every chapter on it belongs to the explanation you are giving now. If the earlier ones are ' +
+      'from something you explained before on the same board, board_clear and draw this one on its own surface.',
     inputSchema: {
       type: 'object', required: ['title'],
       properties: { title: { type: 'string', description: 'What this chapter is about. Short — it rides a tab.' } },
@@ -304,7 +327,10 @@ const TOOLS = [
     name: 'board_open',
     description:
       'Give the board a window of its own — chromeless, no tabs — and return its URL. ' +
-      'Call this once, early, so the person can see what you are drawing. Starts a board if none is running.',
+      'Call this once, early, so the person can see what you are drawing. Starts a board if none is running.\n' +
+      'The board belongs to this conversation and outlives one explanation, so it is not necessarily empty: ' +
+      'if you have drawn on it earlier, that is still there and anything you draw now is added to it. ' +
+      'The reply says what it already holds — call board_clear first if this is a new explanation.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -454,7 +480,9 @@ async function call(name: string | undefined, args: Args = {}): Promise<string> 
       // turns this into an isError result — not thrown through an open
       // JSON-RPC connection, which took the whole server down with it.
       if (!r.ok) throw new Error(r.how);
-      return `${u} — ${r.raised ? `already open, ${r.how}` : `opened in ${r.how}`}`;
+      const held = await alreadyThere(u);
+      return `${u} — ${r.raised ? `already open, ${r.how}` : `opened in ${r.how}`}` +
+        (held ? `\n${held}` : '');
     }
 
     case 'board_url':
