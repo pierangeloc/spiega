@@ -142,28 +142,41 @@ await test('a tangle names a few and counts the rest', async () => {
 
 const board = name => JSON.parse(fs.readFileSync(path.join(ROOT, name), 'utf8'));
 
-/* Found by the maintainer looking at the board, because nothing else could:
-   no check knew a line clearing a box by 2 units from one clearing it by 30.
-   Lit at step 2, that line is a bright stroke grazing a dimmed box, and it
-   reads as ending there. */
-await test('an arrow that runs 2 units over a box it does not touch is named, with the gap', async () => {
+/* The router now fixes the reported knee, but authored straight lines cannot
+   be rerouted. The audit must still warn about a graze it cannot move. */
+const grazeSpec = () => {
   const spec = board('test/boards/issue-113-three-hops-one-pair.json');
-  const found = auditOf(spec);
-  assert.deepEqual(found.grazed, [{ edge: 'ch>db', box: 'corr', gap: 2, side: 'above' }]);
-  /* #215 widened the pill behind the long identifier, growing the board
-     enough that the audit now also names its 1440×900 fit. */
+  spec.edges.find(e => e.from === 'ch' && e.to === 'db').bend = 'straight';
+  return spec;
+};
+const twoUnitGraze = () => ({
+  boxes: { corr: { x: 100, y: 102, w: 100, h: 70 } },
+  planned: [{ key: 'ch>db', pts: [[0, 100], [300, 100]] }],
+});
+await test('an arrow that runs 2 units over a box it does not touch is named, with the gap', async () => {
+  const grazed = grazingArrows(twoUnitGraze());
+  assert.deepEqual(grazed, [{ edge: 'ch>db', box: 'corr', gap: 2, side: 'above' }]);
+  assert.deepEqual(measuredWarnings({ grazed }), [
+    '1 arrow passes close enough to a box that is not an end of it to read as touching it, most of all when lit: ' +
+    'ch>db, 2 units above corr',
+  ]);
+});
+
+/* The corrected ordinary route no longer grazes, but the wider pills from
+   #215 still make this board's labels land under the reference-screen floor. */
+await test('the corrected reported board still warns about its fit', async () => {
+  const found = auditOf(board('test/boards/issue-113-three-hops-one-pair.json'));
+  assert.deepEqual(found.grazed, []);
   assert.deepEqual(measuredWarnings(found), [
     'at 1440×900 this board fits at 86%, so its labels land at 11.6px, under 12; ' +
     'a chapter break is where the rest of it goes',
-    '1 arrow passes close enough to a box that is not an end of it to read as touching it, most of all when lit: ' +
-    'ch>db, 2 units above corr',
   ]);
 });
 
 /* The same line, the same box, with paper between them: silence. And the
    threshold is the threshold — a gap of exactly CLEARANCE is clear. */
 await test('the same arrow clearing the same box comfortably says nothing', async () => {
-  const r = renderSVG(drawn(board('test/boards/issue-113-three-hops-one-pair.json')), { margin: 16 });
+  const r = twoUnitGraze();
   const lowered = by => ({ ...r, boxes: { ...r.boxes, corr: { ...r.boxes.corr, y: r.boxes.corr.y + by } } });
   assert.deepEqual(grazingArrows(lowered(30)), [], '32 units of paper between them');
   assert.deepEqual(grazingArrows(lowered(CLEARANCE - 2)), [], 'exactly at the threshold is clear');
@@ -171,12 +184,9 @@ await test('the same arrow clearing the same box comfortably says nothing', asyn
   assert.deepEqual(measuredWarnings({ grazed: grazingArrows(lowered(30)) }), []);
 });
 
-/* Every other committed board clears every box it passes by 22 units or
-   more, which is what makes 2 worth saying. */
-await test('no other committed board or example runs an arrow close by a box', async () => {
+await test('no committed board or example runs an arrow close by a box', async () => {
   const close = [];
   for (const [name, spec] of [...specs('test/boards'), ...specs('examples')]) {
-    if (/issue-(113-three-hops-one-pair|213-two-hops-along)/.test(name)) continue;   // the reported lane
     for (const g of auditOf(spec).grazed) close.push(`${name}: ${g.edge} ${g.gap} ${g.side} ${g.box}`);
   }
   assert.deepEqual(close, []);
@@ -386,16 +396,15 @@ await test('an edge that ends at nothing names the end, and the chapter it is in
 await test('a graze and a board too wide to read arrive as warnings on the reply that drew them', async () => {
   const s = await listen('measured');
   try {
-    const graze = await post(s.U, { ops: specToOps(board('test/boards/issue-113-three-hops-one-pair.json')), audit: true });
-    /* #215 widened this board's pills, putting it across the 12px label floor too. */
+    const graze = await post(s.U, { ops: specToOps(grazeSpec()), audit: true });
     assert.deepEqual(graze.warnings, [
       'at 1440×900 this board fits at 86%, so its labels land at 11.6px, under 12; ' +
       'a chapter break is where the rest of it goes',
       '1 arrow passes close enough to a box that is not an end of it to read as touching it, most of all when lit: ' +
-      'ch>db, 2 units above corr',
+      'ch>db, 9.6 units above corr',
     ]);
     assert.equal(graze.audit.warnings, undefined, 'said once, where warnings are said');
-    assert.deepEqual(graze.audit.grazed, [{ edge: 'ch>db', box: 'corr', gap: 2, side: 'above' }],
+    assert.deepEqual(graze.audit.grazed, [{ edge: 'ch>db', box: 'corr', gap: 9.6, side: 'above' }],
       'and the measurement comes back too, for a caller that wants it');
 
     const wide = await post(s.U, { ops: [{ op: 'clear' }, ...specToOps(board('test/boards/issue-119-source-columns.json'))],
@@ -432,9 +441,7 @@ await test('a board is told it is too wide, or that an arrow grazes, once, when 
     assert.equal(said(await post(s.U, { ops: [{ op: 'clear' }, ...wide], audit: true })).length, 1);
 
     // and a graze is the same: said for the arrow that came to graze, then not
-    const graze = specToOps(board('test/boards/issue-113-three-hops-one-pair.json'));
-    /* #215 widened this board's pills enough that the audit also names the
-       board's 1440×900 fit, so two warnings land on the same batch. */
+    const graze = specToOps(grazeSpec());
     assert.equal((await post(s.U, { ops: [{ op: 'clear' }, ...graze], audit: true })).warnings.length, 2);
     assert.deepEqual((await post(s.U, { ops: [{ op: 'say', text: 'still there' }], audit: true })).warnings, []);
   } finally { await s.close(); }

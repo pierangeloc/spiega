@@ -1,0 +1,29 @@
+{
+  "title": "one pair of boxes, three hops",
+  "nodes": [
+    { "id": "user", "kind": "client",    "label": "Frontend" },
+    { "id": "ch",   "kind": "service",   "label": "city-hubs-api" },
+    { "id": "db",   "kind": "datastore", "label": "city-hubs DB" },
+    { "id": "corr", "kind": "service",   "label": "corrections-api" },
+    { "id": "inv",  "kind": "service",   "label": "invoices-api" }
+  ],
+  "edges": [
+    { "from": "user", "to": "ch",   "label": "upload CSV", "step": 1 },
+    { "from": "ch",   "to": "db",   "label": "validate supplierId", "step": 2 },
+    { "from": "ch",   "to": "corr", "label": "createCorrection", "step": 3 },
+    { "from": "ch",   "to": "inv",  "label": "createAndStoreInvoices", "step": 4 },
+    { "from": "ch",   "to": "corr", "label": "invoice run: listApprovedUpcoming", "step": 5 },
+    { "from": "inv",  "to": "db",   "label": "store invoices", "step": 6 },
+    { "from": "ch",   "to": "corr", "label": "linkCorrectionsToInvoiceRun", "step": 7 }
+  ],
+  "flow": [
+    { "edge": "user>ch",  "step": "Upload" },
+    { "edge": "ch>db",    "step": "Validate" },
+    { "edge": "ch>corr",  "step": "Create the correction" },
+    { "edge": "ch>inv",   "step": "Invoice" },
+    { "edge": "ch>corr",  "step": "List what is approved" },
+    { "edge": "inv>db",   "step": "Store" },
+    { "edge": "ch>corr",  "step": "Link them to the run" }
+  ],
+  "focus": 5
+}
